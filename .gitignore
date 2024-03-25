@@ -4,6 +4,12 @@ package-lock.json
 .idea/*
 .env
 .DS_Store
+.auth/
 
 src/node_modules
 src/package-lock.json
+firestore-debug.log
+ui-debug.log
+functions/firestore-debug.log
+functions/ui-debug.log
+
