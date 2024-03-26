@@ -1,3 +1,4 @@
+/* eslint-disable require-jsdoc */
 /* eslint-disable max-len */
 
 const fs = require("fs");
@@ -25,9 +26,29 @@ const admin = require("firebase-admin");
 
 admin.initializeApp();
 
-let URL = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${CREDENTIALS.web.client_id}&redirect_uri=${CREDENTIALS.web.redirect_uris[1]}&scope=https://www.googleapis.com/auth/calendar+https://www.googleapis.com/auth/userinfo.email+https://www.googleapis.com/auth/userinfo.profile+openid&access_type=offline&prompt=consent`;
+const URL = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${CREDENTIALS.web.client_id}&redirect_uri=${CREDENTIALS.web.redirect_uris[1]}&scope=https://www.googleapis.com/auth/calendar+https://www.googleapis.com/auth/userinfo.email+https://www.googleapis.com/auth/userinfo.profile+openid&access_type=offline&prompt=consent`;
 logger.log(URL);
 
+async function storeUser(tokens, user) {
+  await getFirestore().collection("Users").doc(user.uid).set({
+    email: user.email,
+    access_token: tokens.access_token,
+    refresh_token: tokens.refresh_token,
+    expiry_date: tokens.expiry_date,
+    token_scope: tokens.scope,
+  });
+}
+
+async function storeUserCalendars(user, oauth2Client) {
+  const calendar = google.calendar({version: "v3", auth: oauth2Client});
+  const calendarList = await calendar.calendarList.list();
+  const calendars = calendarList.data.items.map((calendar) => ({
+    id: calendar.id,
+    summary: calendar.summary,
+    timeZone: calendar.timeZone,
+  }));
+  logger.log("Calendars:", calendars);
+}
 
 exports.oauthCallback = functions.https.onRequest(async (req, res) => {
   logger.log("oauthCallback", req.query);
@@ -53,31 +74,32 @@ exports.oauthCallback = functions.https.onRequest(async (req, res) => {
     const userInfoResponse = await oauth2Client.request({url: "https://www.googleapis.com/oauth2/v1/userinfo?alt=json"});
     const userEmail = userInfoResponse.data.email;
     logger.log("User Email:", userEmail);
+    let userRecord;
 
-    const calendar = google.calendar({version: "v3", auth: oauth2Client});
-    const calendarList = await calendar.calendarList.list();
-    const calendars = calendarList.data.items.map((calendar) => ({
-      id: calendar.id,
-      summary: calendar.summary,
-      timeZone: calendar.timeZone,
-    }));
-    logger.log("Calendars:", calendars);
-    auth.createUser({
-      email: userEmail,
-      emailVerified: true,
-    }).then((userRecord) => {
-      // See the UserRecord reference doc for the contents of userRecord.
-      logger.log("Successfully created new user:", userRecord.uid);
-      res.json({message: "Authentication successful", uid: userRecord.uid});
-    })
-    .catch((error) => {
-        logger.error("Error creating new user:", error);
+    try {
+      userRecord = await auth.getUserByEmail(userEmail);
+    } catch (error) {
+      if (error.code === 'auth/user-not-found') {
+        try {
+          userRecord = await auth.createUser({
+            email: userEmail,
+            emailVerified: true,
+          });
+          logger.log("Successfully created new user:", userRecord.uid);
+        } catch (error) {
+          logger.error("Error creating new user:", error);
+          res.status(500).send("Authentication failed");
+          return;
+        }
+      } else {
+        logger.error("Error fetching user:", error);
         res.status(500).send("Authentication failed");
-    });
+        return;
+      }
+    }
 
-    // const decodedToken = await auth().verifyIdToken(tokens.id_token);
-    // logger.log("decodedToken", decodedToken);
-    
+    await storeUser(tokens, userRecord);
+    res.json({message: "Authentication successful", uid: userRecord.uid});
   } catch (error) {
     console.error("Error exchanging code for tokens", error);
     res.status(500).send("Authentication failed");
@@ -174,8 +196,7 @@ exports.signin = functions.https.onRequest((req, res) => {
 
 exports.newUserCreated = functions.auth.user().onCreate(async (user) => {
   logger.log(user);
-  return await getFirestore().collection("Users").add({
-    uid: user.uid,
+  return await getFirestore().collection("Users").doc(user.uid).set({
     email: user.email,
   });
 });
