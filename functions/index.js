@@ -1,9 +1,88 @@
 /* eslint-disable max-len */
+
+const fs = require("fs");
+const path = require("path");
+const CREDENTIALS_PATH = path.join(
+    "../",
+    ".auth",
+    "google-auth-credentials.json",
+);
+
+const CREDENTIALS = JSON.parse(
+    fs.readFileSync(CREDENTIALS_PATH, {encoding: "utf-8"}),
+);
+const {
+  getAuth,
+  signInWithCredential,
+  GoogleAuthProvider,
+} = require("firebase-admin/auth");
+
+const {google} = require("googleapis");
 const {logger} = require("firebase-functions");
 const functions = require("firebase-functions");
 const {getFirestore} = require("firebase-admin/firestore");
 const admin = require("firebase-admin");
+
 admin.initializeApp();
+
+let URL = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${CREDENTIALS.web.client_id}&redirect_uri=${CREDENTIALS.web.redirect_uris[1]}&scope=https://www.googleapis.com/auth/calendar+https://www.googleapis.com/auth/userinfo.email+https://www.googleapis.com/auth/userinfo.profile+openid&access_type=offline&prompt=consent`;
+logger.log(URL);
+
+
+exports.oauthCallback = functions.https.onRequest(async (req, res) => {
+  logger.log("oauthCallback", req.query);
+  const oauth2Client = new google.auth.OAuth2(
+      CREDENTIALS.web.client_id,
+      CREDENTIALS.web.client_secret,
+      CREDENTIALS.web.redirect_uris[1],
+  );
+  const code = req.query.code;
+  try {
+    const {tokens} = await oauth2Client.getToken(req.query);
+    logger.log("tokens", tokens);
+    // Assuming you've got the tokens, specifically the id_token
+    if (!tokens.id_token) {
+      res.status(400).send("Google ID token not found in the response");
+      return;
+    }
+    const id_token = tokens.id_token;
+    logger.log("id_token", id_token);
+
+    const auth = getAuth();
+    oauth2Client.setCredentials(tokens);
+    const userInfoResponse = await oauth2Client.request({url: "https://www.googleapis.com/oauth2/v1/userinfo?alt=json"});
+    const userEmail = userInfoResponse.data.email;
+    logger.log("User Email:", userEmail);
+
+    const calendar = google.calendar({version: "v3", auth: oauth2Client});
+    const calendarList = await calendar.calendarList.list();
+    const calendars = calendarList.data.items.map((calendar) => ({
+      id: calendar.id,
+      summary: calendar.summary,
+      timeZone: calendar.timeZone,
+    }));
+    logger.log("Calendars:", calendars);
+    auth.createUser({
+      email: userEmail,
+      emailVerified: true,
+    }).then((userRecord) => {
+      // See the UserRecord reference doc for the contents of userRecord.
+      logger.log("Successfully created new user:", userRecord.uid);
+      res.json({message: "Authentication successful", uid: userRecord.uid});
+    })
+    .catch((error) => {
+        logger.error("Error creating new user:", error);
+        res.status(500).send("Authentication failed");
+    });
+
+    // const decodedToken = await auth().verifyIdToken(tokens.id_token);
+    // logger.log("decodedToken", decodedToken);
+    
+  } catch (error) {
+    console.error("Error exchanging code for tokens", error);
+    res.status(500).send("Authentication failed");
+  }
+});
 
 exports.signin = functions.https.onRequest((req, res) => {
   const html = `
@@ -112,10 +191,10 @@ exports.storeUserTokens = functions.https.onCall(async (data, context) => {
 
   // Validate accessToken and refreshToken if necessary
 
-//   await admin.firestore().collection("Users").doc(uid).set({
-//     accessToken,
-//     refreshToken,
-//   }, {merge: true});
+  //   await admin.firestore().collection("Users").doc(uid).set({
+  //     accessToken,
+  //     refreshToken,
+  //   }, {merge: true});
 
   return {result: "Tokens stored successfully."};
 });
