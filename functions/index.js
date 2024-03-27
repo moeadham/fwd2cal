@@ -25,6 +25,8 @@ const {getFirestore} = require("firebase-admin/firestore");
 const admin = require("firebase-admin");
 
 admin.initializeApp();
+const db = getFirestore();
+db.settings({ ignoreUndefinedProperties: true });
 
 const URL = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${CREDENTIALS.web.client_id}&redirect_uri=${CREDENTIALS.web.redirect_uris[1]}&scope=https://www.googleapis.com/auth/calendar+https://www.googleapis.com/auth/userinfo.email+https://www.googleapis.com/auth/userinfo.profile+openid&access_type=offline&prompt=consent`;
 logger.log(URL);
@@ -42,12 +44,46 @@ async function storeUser(tokens, user) {
 async function storeUserCalendars(user, oauth2Client) {
   const calendar = google.calendar({version: "v3", auth: oauth2Client});
   const calendarList = await calendar.calendarList.list();
+  logger.log("CALENDAR OBJECT FULL:", calendarList);
   const calendars = calendarList.data.items.map((calendar) => ({
-    id: calendar.id,
+    kind: calendar.kind,
+    etag: calendar.etag,
+    selected: calendar.selected,
+    accessRole: calendar.accessRole,
+    conferenceProperties: calendar.conferenceProperties,
+    calendar_id: calendar.id,
     summary: calendar.summary,
+    summaryOverride: calendar.summaryOverride,
+    description: calendar.description,
+    primary: calendar.primary,
     timeZone: calendar.timeZone,
+    location: calendar.location,
+    hidden: calendar.hidden,
+    deleted: calendar.deleted,
+    uid: user.uid,
   }));
   logger.log("Calendars:", calendars);
+  for (const calendar of calendars) {
+    const firestoreID = `${calendar.uid}${calendar.calendar_id}`;
+    const calendarRef = getFirestore().collection("Calendars").doc(firestoreID);
+    await calendarRef.get().then((doc) => {
+      if (doc.exists) {
+        calendarRef.update(calendar);
+      } else {
+        calendarRef.set(calendar);
+      }
+    });
+  }
+}
+
+async function addUserEmailAddress(user, emails) {
+  emails.forEach(async (item) => {
+    await getFirestore().collection("EmailAddress").doc(item.email).set({
+      uid: user.uid,
+      email: item.email,
+      default: item.default,
+    });
+  });
 }
 
 exports.oauthCallback = functions.https.onRequest(async (req, res) => {
@@ -99,6 +135,8 @@ exports.oauthCallback = functions.https.onRequest(async (req, res) => {
     }
 
     await storeUser(tokens, userRecord);
+    await addUserEmailAddress(userRecord, [{email: userEmail, default: true}]);
+    await storeUserCalendars(userRecord, oauth2Client);
     res.json({message: "Authentication successful", uid: userRecord.uid});
   } catch (error) {
     console.error("Error exchanging code for tokens", error);
