@@ -19,6 +19,7 @@ const {logger} = require("firebase-functions");
 const functions = require("firebase-functions");
 const {getFirestore} = require("firebase-admin/firestore");
 const admin = require("firebase-admin");
+const busboy = require("busboy");
 
 admin.initializeApp();
 const db = getFirestore();
@@ -91,7 +92,7 @@ exports.oauthCallback = functions.https.onRequest(async (req, res) => {
   const oauth2Client = new google.auth.OAuth2(
       CREDENTIALS.web.client_id,
       CREDENTIALS.web.client_secret,
-      CREDENTIALS.web.redirect_uris[1],
+      CREDENTIALS.web.redirect_uris[redirectUriIndex],
   );
   try {
     const {tokens} = await oauth2Client.getToken(req.query);
@@ -144,7 +145,34 @@ exports.oauthCallback = functions.https.onRequest(async (req, res) => {
 });
 
 exports.sendgridCallback = functions.https.onRequest(async (req, res) => {
-  logger.log("sendgridCallback", req);
-  res.json({message: "thanks"});
+  if (req.method !== "POST") {
+    res.status(405).end();
+    return;
+  }
+  const bb = busboy({headers: req.headers});
+  const result = {};
+
+  //   bb.on("file", (fieldname, file, filename, encoding, mimetype) => {
+  //     console.log(`File [${fieldname}]: filename: ${filename}, encoding: ${encoding}, mimetype: ${mimetype}`);
+  //     // You can use file streams here to process the file
+  //     file.on("data", (data) => {
+  //       console.log(`File [${fieldname}] got ${data.length} bytes`);
+  //     }).on("end", () => {
+  //       console.log(`File [${fieldname}] Finished`);
+  //     });
+  //   });
+
+  bb.on("field", (fieldname, val) => {
+    // console.log(`Field [${fieldname}]: value: ${val}`);
+    result[fieldname] = val;
+  });
+
+  bb.on("finish", () => {
+    // console.log("Done parsing form!");
+    // logger.log("sendgridCallback", result);
+    res.json({message: "thanks", data: result});
+  });
+
+  bb.end(req.rawBody);
 });
 
