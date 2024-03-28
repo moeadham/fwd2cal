@@ -20,7 +20,9 @@
     "busboy": "^1.6.0",
     "firebase-admin": "^11.8.0",
     "firebase-functions": "^4.3.1",
-    "googleapis": "^134.0.0"
+    "googleapis": "^134.0.0",
+    "js-tiktoken": "^1.0.10",
+    "openai": "^4.29.2"
   },
   "devDependencies": {
     "chai": "^4.4.1",

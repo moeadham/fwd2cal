@@ -1,3 +1,4 @@
+/* eslint-disable max-len */
 /* eslint-disable no-undef */
 const chai = require("chai");
 const chaiHttp = require("chai-http");
@@ -19,8 +20,7 @@ describe("fwd2cal", () => {
       expect(err).to.be.null;
       expect(res).to.have.status(200);
       expect(res.body).to.be.an("object");
-      expect(res.body.data.text).to.equal(testMessage.text);
-      expect(res.body.data.from).to.equal(testMessage.from);
+      expect(res.body.data.attendees[0]).to.equal(JSON.parse(testMessage.envelope).from);
       done();
     });
   });

@@ -20,7 +20,8 @@ const functions = require("firebase-functions");
 const {getFirestore} = require("firebase-admin/firestore");
 const admin = require("firebase-admin");
 const busboy = require("busboy");
-
+const openai = require("./util/openai");
+const prompts = require("./util/prompts");
 admin.initializeApp();
 const db = getFirestore();
 db.settings({ignoreUndefinedProperties: true});
@@ -152,27 +153,29 @@ exports.sendgridCallback = functions.https.onRequest(async (req, res) => {
   const bb = busboy({headers: req.headers});
   const result = {};
 
-  //   bb.on("file", (fieldname, file, filename, encoding, mimetype) => {
-  //     console.log(`File [${fieldname}]: filename: ${filename}, encoding: ${encoding}, mimetype: ${mimetype}`);
-  //     // You can use file streams here to process the file
-  //     file.on("data", (data) => {
-  //       console.log(`File [${fieldname}] got ${data.length} bytes`);
-  //     }).on("end", () => {
-  //       console.log(`File [${fieldname}] Finished`);
-  //     });
-  //   });
-
   bb.on("field", (fieldname, val) => {
     // console.log(`Field [${fieldname}]: value: ${val}`);
     result[fieldname] = val;
   });
 
-  bb.on("finish", () => {
+  bb.on("finish", async () => {
     // console.log("Done parsing form!");
-    // logger.log("sendgridCallback", result);
-    res.json({message: "thanks", data: result});
+    const event = await processEmail(result);
+    res.json({message: "thanks", data: event});
   });
 
   bb.end(req.rawBody);
 });
+
+async function processEmail(email) {
+  const messages = [
+    {
+      role: "system",
+      content: prompts.getEventData,
+    },
+    {role: "user", content: email.text},
+  ];
+  const response = await openai.defaultCompletion(messages);
+  return response;
+}
 

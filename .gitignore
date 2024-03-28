@@ -13,6 +13,6 @@ ui-debug.log
 functions/firestore-debug.log
 functions/ui-debug.log
 functions/auth/*
+functions/.runtimeconfig.json
 
 test/bindings.js
-
