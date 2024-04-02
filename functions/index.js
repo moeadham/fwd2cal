@@ -1,34 +1,48 @@
+/* eslint-disable new-cap */
+/* eslint-disable no-unused-vars */
+/* eslint-disable camelcase */
 /* eslint-disable require-jsdoc */
 /* eslint-disable max-len */
 
 const fs = require("fs");
 const path = require("path");
 const CREDENTIALS_PATH = path.join(
-    "../",
-    ".auth",
+    "auth",
     "google-auth-credentials.json",
 );
 
 const CREDENTIALS = JSON.parse(
     fs.readFileSync(CREDENTIALS_PATH, {encoding: "utf-8"}),
 );
-const {
-  getAuth,
-  signInWithCredential,
-  GoogleAuthProvider,
-} = require("firebase-admin/auth");
+const {getAuth} = require("firebase-admin/auth");
 
 const {google} = require("googleapis");
 const {logger} = require("firebase-functions");
 const functions = require("firebase-functions");
 const {getFirestore} = require("firebase-admin/firestore");
 const admin = require("firebase-admin");
-
+const busboy = require("busboy");
+const openai = require("./util/openai");
+const prompts = require("./util/prompts");
+const {time} = require("console");
+const moment = require("moment-timezone");
 admin.initializeApp();
 const db = getFirestore();
-db.settings({ ignoreUndefinedProperties: true });
+db.settings({ignoreUndefinedProperties: true});
+const ENVIRONMENT = functions.config().environment.name;
 
-const URL = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${CREDENTIALS.web.client_id}&redirect_uri=${CREDENTIALS.web.redirect_uris[1]}&scope=https://www.googleapis.com/auth/calendar+https://www.googleapis.com/auth/userinfo.email+https://www.googleapis.com/auth/userinfo.profile+openid&access_type=offline&prompt=consent`;
+// For debugging before we start inviting others to our events.
+const ONLY_INVITE_HOST = true;
+const DEFAULT_EVENT_LENGTH = 30;
+// WARNING: Make sure you set a hard to guess endpoint in production.
+// Sendgrid has no real authentication on the callback.
+// Maximum is 62 characters
+const SENDGRID_ENDPOINT = functions.config().environment.sendgrid_endpoint || "sendgridCallback";
+const redirectUriIndex = functions.config() && functions.config().environment && functions.config().environment.name === "production" ? 2 : 1;
+logger.log("redirectUriIndex", redirectUriIndex);
+logger.log("redirectURL", CREDENTIALS.web.redirect_uris[redirectUriIndex]);
+
+const URL = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${CREDENTIALS.web.client_id}&redirect_uri=${CREDENTIALS.web.redirect_uris[redirectUriIndex]}&scope=https://www.googleapis.com/auth/calendar+https://www.googleapis.com/auth/userinfo.email+https://www.googleapis.com/auth/userinfo.profile+openid&access_type=offline&prompt=consent`;
 logger.log(URL);
 
 async function storeUser(tokens, user) {
@@ -91,9 +105,8 @@ exports.oauthCallback = functions.https.onRequest(async (req, res) => {
   const oauth2Client = new google.auth.OAuth2(
       CREDENTIALS.web.client_id,
       CREDENTIALS.web.client_secret,
-      CREDENTIALS.web.redirect_uris[1],
+      CREDENTIALS.web.redirect_uris[redirectUriIndex],
   );
-  const code = req.query.code;
   try {
     const {tokens} = await oauth2Client.getToken(req.query);
     logger.log("tokens", tokens);
@@ -115,7 +128,7 @@ exports.oauthCallback = functions.https.onRequest(async (req, res) => {
     try {
       userRecord = await auth.getUserByEmail(userEmail);
     } catch (error) {
-      if (error.code === 'auth/user-not-found') {
+      if (error.code === "auth/user-not-found") {
         try {
           userRecord = await auth.createUser({
             email: userEmail,
@@ -144,116 +157,178 @@ exports.oauthCallback = functions.https.onRequest(async (req, res) => {
   }
 });
 
-exports.signin = functions.https.onRequest((req, res) => {
-  const html = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Sign In with Google</title>
-        <script type="module">
-        // Import the functions you need from the SDKs you need
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-app.js";
-        import { getAnalytics } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-analytics.js";
-        import { getAuth, signInWithPopup, GoogleAuthProvider, connectAuthEmulator } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-auth.js";
-        import { getFunctions, httpsCallable, connectFunctionsEmulator } from 'https://www.gstatic.com/firebasejs/10.9.0/firebase-functions.js';
-
-        // TODO: Add SDKs for Firebase products that you want to use
-        // https://firebase.google.com/docs/web/setup#available-libraries
-    
-        // Your web app's Firebase configuration
-        // For Firebase JS SDK v7.20.0 and later, measurementId is optional
-        const firebaseConfig = {
-        apiKey: "AIzaSyDMWGsG6_bcETYIGc3PSOVNzQf6QZfjpxQ",
-        authDomain: "fwd2cal.firebaseapp.com",
-        projectId: "fwd2cal",
-        storageBucket: "fwd2cal.appspot.com",
-        messagingSenderId: "535781060024",
-        appId: "1:535781060024:web:3e02a2d4006dcf56a9334d",
-        measurementId: "G-YDR4TFPVYZ"
-        };
-    
-        // Initialize Firebase
-        const app = initializeApp(firebaseConfig);
-        const analytics = getAnalytics(app);
-        const functions = getFunctions(app);
-        const auth = getAuth(app);
-        connectAuthEmulator(auth, "http://127.0.0.1:9099");
-        connectFunctionsEmulator(functions, "localhost", 5001);
-
-
-        function signInWithGoogle() {
-            const provider = new GoogleAuthProvider();
-            provider.addScope('https://www.googleapis.com/auth/contacts.readonly');
-            provider.addScope('https://www.googleapis.com/auth/calendar');
-            signInWithPopup(auth, provider)
-                .then((result) => {
-                    // This gives you a Google Access Token. You can use it to access the Google API.
-                    const credential = GoogleAuthProvider.credentialFromResult(result);
-                    const token = credential.accessToken;
-                    // The signed-in user info.
-                    const user = result.user;
-                    // IdP data available using getAdditionalUserInfo(result)
-                    console.log(result);
-                    console.log(credential);
-                    const storeTokensFunction = httpsCallable(functions, 'storeUserTokens');
-                    storeTokensFunction(credential)
-                        .then((result) => {
-                            console.log(result.data.result); // Tokens stored successfully.
-                        })
-                        .catch((error) => {
-                            console.error("Error storing tokens:", error);
-                        });
-                    // ...
-}).catch((error) => {
-                    // Handle Errors here.
-                    console.log(error);
-                    const errorCode = error.code;
-                    const errorMessage = error.message;
-                    // The email of the user's account used.
-                    // The AuthCredential type that was used.
-                    const credential = GoogleAuthProvider.credentialFromError(error);
-                    console.log(credential);
-                    
-                    // ...
-                });
-        }
-        window.signInWithGoogle = signInWithGoogle;
-        window.signInWithPopup = signInWithPopup;
-        // window.storeTokensFunction = storeTokensFunction;
-    </script>
-    </head>
-    <body>
-        <h2>Sign In with Google</h2>
-        <button onclick="signInWithGoogle()">Sign In/Sign Up</button>
-        
-    </body>
-    </html>
-    `;
-  res.send(html);
-});
-
-exports.newUserCreated = functions.auth.user().onCreate(async (user) => {
-  logger.log(user);
-  return await getFirestore().collection("Users").doc(user.uid).set({
-    email: user.email,
-  });
-});
-
-exports.storeUserTokens = functions.https.onCall(async (data, context) => {
-  // Ensure the user is authenticated
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "The function must be called while authenticated.");
+const sendgridCallback = functions.https.onRequest(async (req, res) => {
+  if (req.method !== "POST") {
+    res.status(405).end();
+    return;
   }
+  const bb = busboy({headers: req.headers});
+  const result = {};
 
-  const uid = context.auth.uid;
-  logger.log(data);
+  bb.on("field", (fieldname, val) => {
+    // console.log(`Field [${fieldname}]: value: ${val}`);
+    result[fieldname] = val;
+  });
 
-  // Validate accessToken and refreshToken if necessary
+  bb.on("finish", async () => {
+    // console.log("Done parsing form!");
+    if (!verifyEmail(result)) {
+      logger.error("Unverified Email");
+      res.status(401).send("Unverified Email");
+      return;
+    }
+    const uid = await getUser(result);
+    if (!uid) {
+      logger.error("No User found.");
+      res.status(401).send("No User!!");
+      return;
+    }
+    logger.log("User ID: ", uid);
+    const oauth2Client = await getOauthClient(uid);
+    const event = await processEmail(result);
+    const eventObject = await addEvent(oauth2Client, event);
+    res.json({message: "thanks", data: eventObject});
+  });
 
-  //   await admin.firestore().collection("Users").doc(uid).set({
-  //     accessToken,
-  //     refreshToken,
-  //   }, {merge: true});
-
-  return {result: "Tokens stored successfully."};
+  bb.end(req.rawBody);
 });
+
+exports[SENDGRID_ENDPOINT] = sendgridCallback;
+
+function verifyEmail(email) {
+  if (email.SPF !== "pass") {
+    return false;
+  }
+  if (email.dkim.indexOf("pass") === -1 ) {
+    return false;
+  }
+  // WARN: This IP might change, disable for now.
+  //   if (email.sender_ip !== "209.85.216.44" && ENVIRONMENT==="production") {
+  //     return false;
+  //   }
+  return true;
+}
+
+async function getUser(email) {
+  let sender;
+  try {
+    sender = JSON.parse(email.envelope).from.toLowerCase();
+  } catch (error) {
+    logger.error("Error parsing envelope", error);
+    return null;
+  }
+  const doc = await getFirestore().collection("EmailAddress").doc(sender).get();
+  if (!doc.exists) {
+    return null;
+  }
+  const userObject = doc.data();
+  return userObject.uid;
+}
+
+async function getOauthClient(uid) {
+  const userDoc = await getFirestore().collection("Users").doc(uid).get();
+  if (!userDoc.exists) {
+    throw new Error("User document does not exist");
+  }
+  const userData = userDoc.data();
+  const oauth2Client = new google.auth.OAuth2(
+      CREDENTIALS.web.client_id,
+      CREDENTIALS.web.client_secret,
+      CREDENTIALS.web.redirect_uris[redirectUriIndex],
+  );
+  oauth2Client.setCredentials({
+    access_token: userData.access_token,
+    refresh_token: userData.refresh_token,
+  });
+  const userInfoResponse = await oauth2Client.request({url: "https://www.googleapis.com/oauth2/v1/userinfo?alt=json"});
+  // logger.log("User Info from oAuth", userInfoResponse);
+  return oauth2Client;
+}
+
+async function processEmail(email) {
+  const messages = [
+    {
+      role: "system",
+      content: prompts.getEventData,
+    },
+    {role: "user", content: email.text},
+  ];
+  const response = await openai.defaultCompletion(messages);
+  Object.keys(response).forEach((key) => {
+    if (response[key] === "undefined") {
+      response[key] = undefined;
+    }
+  });
+  return response;
+}
+
+function generateTimeObject(event, primaryCalendar) {
+  logger.log("event", event);
+  const timezone = primaryCalendar.timeZone;
+  let eventTimeZone = event.timeZone;
+  if (!Intl.DateTimeFormat(undefined, {timeZone: eventTimeZone}).resolvedOptions().timeZone) {
+    console.error("Invalid Time Zone in event object:", eventTimeZone);
+    eventTimeZone = timezone; // Fallback to primary calendar's timezone if event's timezone is invalid
+  }
+  const {date, start_time, end_time} = event;
+  const startTime = `${date} ${start_time}`;
+  const startDate = moment.tz(startTime, "DD MMMM YYYY HH:mm", timezone).toDate();
+  const endTime = `${date} ${end_time}`;
+  let endDate;
+  if (event.end_time) {
+    try {
+      endDate = moment.tz(endTime, "DD MMMM YYYY HH:mm", timezone).toDate();
+      if (isNaN(endDate.getTime())) {
+        throw new Error("Invalid end time");
+      }
+    } catch (error) {
+      endDate = new Date(startDate.getTime() + (DEFAULT_EVENT_LENGTH * 60000)); // Default 30 minutes to start_time
+    }
+  } else {
+    endDate = new Date(startDate.getTime() + (DEFAULT_EVENT_LENGTH * 60000)); // Default 30 minutes to start_time
+  }
+  const timeObject = {
+    start: {
+      dateTime: startDate.toISOString(),
+      timeZone: timezone,
+    },
+    end: {
+      dateTime: endDate.toISOString(),
+      timeZone: timezone,
+    },
+  };
+  return timeObject;
+}
+
+async function addEvent(oauth2Client, event) {
+  const calendar = google.calendar({version: "v3", auth: oauth2Client});
+  const calendarList = await calendar.calendarList.list();
+  const primaryCalendar = calendarList.data.items.find((calendar) => calendar.primary);
+  if (!primaryCalendar) {
+    throw new Error("Primary calendar not found");
+  }
+  const times = generateTimeObject(event, primaryCalendar);
+  event.description = `${event.description} 
+  \n\nThis event was generated by AI with fwd2cal.com.
+  \nDon't waste time creating events, just forward them to calendar@fwd2cal.com.`;
+  const requestBody = {
+    summary: event.summary,
+    description: event.description,
+    attendees: event.attendees.map((attendee) => ({email: attendee})),
+    start: times.start,
+    end: times.end,
+  };
+  if (event.location) {
+    requestBody.location = event.location;
+  }
+  if (ONLY_INVITE_HOST) {
+    requestBody.attendees = [{email: primaryCalendar.id}];
+  }
+  logger.log("Attempting to add event to google:", requestBody);
+  const insertEvent = await calendar.events.insert({
+    calendarId: primaryCalendar.id,
+    resource: requestBody,
+  });
+  logger.log("Event added to google:", insertEvent.data);
+  return insertEvent.data;
+}
