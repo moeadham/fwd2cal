@@ -14,5 +14,6 @@ functions/firestore-debug.log
 functions/ui-debug.log
 functions/auth/*
 functions/.runtimeconfig.json
+functions/firebase-debug.log
 
 test/bindings.js

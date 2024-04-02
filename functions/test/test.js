@@ -19,8 +19,9 @@ describe("fwd2cal", () => {
     req.end((err, res) => {
       expect(err).to.be.null;
       expect(res).to.have.status(200);
+      console.log(res.body);
       expect(res.body).to.be.an("object");
-      expect(res.body.data.attendees[0]).to.equal(JSON.parse(testMessage.envelope).from);
+      expect(res.body.data.kind).to.equal("calendar#event");
       done();
     });
   });

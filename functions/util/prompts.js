@@ -10,11 +10,12 @@ conference_call: true or false, if the event is a conference call or virtual
 date: the date of the event
 start_time: the start time of the event
 end_time: the end time of the event
-timezone: a timezone if one has specifically been given for the event
+timezone: a timezone if one has specifically been given for the event, in IANA Time Zone Database format
 attendees: a list of attendees
 }
 
 If the email is a thread, ensure you use the most recent email in the thread. 
+If no explicit timezone is given, you can determine it based on the location if a location is available.
 To create an event, at minimum, you need a date. If you don't have a date, respond
 with an error that no date has been provided:
 {
@@ -65,7 +66,7 @@ conference_call: false,
 date: "3 April 2024",
 start_time: "10:20",
 end_time: undefined
-timezone: undefined,
+timezone: "Europe/London",
 attendees: ["timmy@gmail.com"]
 }
 
@@ -133,7 +134,7 @@ conference_call: true,
 date: "26 March 2024",
 start_time: "3:00",
 end_time: undefined,
-timezone: "ET",
+timezone: "America/New_York",
 attendees: ["rsoom@toom.com", "jeff@investing.com", "Joe@investing.com"]
 }
 

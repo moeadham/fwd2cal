@@ -1,3 +1,4 @@
+/* eslint-disable new-cap */
 /* eslint-disable no-unused-vars */
 /* eslint-disable camelcase */
 /* eslint-disable require-jsdoc */
@@ -23,10 +24,19 @@ const admin = require("firebase-admin");
 const busboy = require("busboy");
 const openai = require("./util/openai");
 const prompts = require("./util/prompts");
+const {time} = require("console");
+const moment = require("moment-timezone");
 admin.initializeApp();
 const db = getFirestore();
 db.settings({ignoreUndefinedProperties: true});
 const ENVIRONMENT = functions.config().environment.name;
+
+// For debugging before we start inviting others to our events.
+const ONLY_INVITE_HOST = true;
+const DEFAULT_EVENT_LENGTH = 30;
+// WARNING: Make sure you set a hard to guess endpoint in production.
+// Sendgrid has no real authentication on the callback.
+const SENDGRID_ENDPOINT = functions.config().environment.sendgrid_endpoint || "sendgridCallback";
 const redirectUriIndex = functions.config() && functions.config().environment && functions.config().environment.name === "production" ? 2 : 1;
 logger.log("redirectUriIndex", redirectUriIndex);
 logger.log("redirectURL", CREDENTIALS.web.redirect_uris[redirectUriIndex]);
@@ -146,7 +156,7 @@ exports.oauthCallback = functions.https.onRequest(async (req, res) => {
   }
 });
 
-exports.sendgridCallback = functions.https.onRequest(async (req, res) => {
+const sendgridCallback = functions.https.onRequest(async (req, res) => {
   if (req.method !== "POST") {
     res.status(405).end();
     return;
@@ -173,13 +183,16 @@ exports.sendgridCallback = functions.https.onRequest(async (req, res) => {
       return;
     }
     logger.log("User ID: ", uid);
-    let oauth2Client = await getOauthClient(uid);
+    const oauth2Client = await getOauthClient(uid);
     const event = await processEmail(result);
-    res.json({message: "thanks", data: event});
+    const eventObject = await addEvent(oauth2Client, event);
+    res.json({message: "thanks", data: eventObject});
   });
 
   bb.end(req.rawBody);
 });
+
+exports[SENDGRID_ENDPOINT] = sendgridCallback;
 
 function verifyEmail(email) {
   if (email.SPF !== "pass") {
@@ -212,15 +225,22 @@ async function getUser(email) {
 }
 
 async function getOauthClient(uid) {
-  const user = await getFirestore().collection("Users").doc(uid).get();
+  const userDoc = await getFirestore().collection("Users").doc(uid).get();
+  if (!userDoc.exists) {
+    throw new Error("User document does not exist");
+  }
+  const userData = userDoc.data();
   const oauth2Client = new google.auth.OAuth2(
       CREDENTIALS.web.client_id,
       CREDENTIALS.web.client_secret,
       CREDENTIALS.web.redirect_uris[redirectUriIndex],
   );
-  oauth2Client.setCredentials({access_token: user.access_token, refresh_token: user.refresh_token});
+  oauth2Client.setCredentials({
+    access_token: userData.access_token,
+    refresh_token: userData.refresh_token,
+  });
   const userInfoResponse = await oauth2Client.request({url: "https://www.googleapis.com/oauth2/v1/userinfo?alt=json"});
-  logger.log("User Info from oAuth", userInfoResponse);
+  // logger.log("User Info from oAuth", userInfoResponse);
   return oauth2Client;
 }
 
@@ -233,11 +253,72 @@ async function processEmail(email) {
     {role: "user", content: email.text},
   ];
   const response = await openai.defaultCompletion(messages);
+  Object.keys(response).forEach((key) => {
+    if (response[key] === "undefined") {
+      response[key] = undefined;
+    }
+  });
   return response;
 }
 
-async function getUserOauth(email) {
-  const user = await getFirestore().collection("Users").doc(email).get();
-  return user;
+function generateTimeObject(event, primaryCalendar) {
+  logger.log("event", event);
+  const timezone = primaryCalendar.timeZone;
+  let eventTimeZone = event.timeZone;
+  if (!Intl.DateTimeFormat(undefined, {timeZone: eventTimeZone}).resolvedOptions().timeZone) {
+    console.error("Invalid Time Zone in event object:", eventTimeZone);
+    eventTimeZone = timezone; // Fallback to primary calendar's timezone if event's timezone is invalid
+  }
+  const {date, start_time, end_time} = event;
+  const startTime = `${date} ${start_time}`;
+  const startDate = moment.tz(startTime, "DD MMMM YYYY HH:mm", timezone).toDate();
+  const endTime = `${date} ${end_time}`;
+  let endDate;
+  try {
+    endDate = moment.tz(endTime, "DD MMMM YYYY HH:mm", timezone).toDate();
+    if (isNaN(endDate.getTime())) {
+      throw new Error("Invalid end time");
+    }
+  } catch (error) {
+    endDate = new Date(startDate.getTime() + (DEFAULT_EVENT_LENGTH * 60000)); // Default 30 minutes to start_time
+  }
+  const timeObject = {
+    start: {
+      dateTime: startDate.toISOString(),
+      timeZone: timezone,
+    },
+    end: {
+      dateTime: endDate.toISOString(),
+      timeZone: timezone,
+    },
+  };
+  return timeObject;
 }
 
+async function addEvent(oauth2Client, event) {
+  const calendar = google.calendar({version: "v3", auth: oauth2Client});
+  const calendarList = await calendar.calendarList.list();
+  const primaryCalendar = calendarList.data.items.find((calendar) => calendar.primary);
+  if (!primaryCalendar) {
+    throw new Error("Primary calendar not found");
+  }
+  const times = generateTimeObject(event, primaryCalendar);
+  const requestBody = {
+    summary: event.summary,
+    description: event.description,
+    attendees: event.attendees.map((attendee) => ({email: attendee})),
+    start: times.start,
+    end: times.end,
+  };
+  if (event.location) {
+    requestBody.location = event.location;
+  }
+  if (ONLY_INVITE_HOST) {
+    requestBody.attendees = [{email: primaryCalendar.id}];
+  }
+  const insertEvent = await calendar.events.insert({
+    calendarId: primaryCalendar.id,
+    resource: requestBody,
+  });
+  return insertEvent.data;
+}
