@@ -7,9 +7,9 @@ summary: the title of the event
 location: a location of the event if one has been given
 description: a description of the event if one has been given
 conference_call: true or false, if the event is a conference call or virtual
-date: the date of the event
-start_time: the start time of the event
-end_time: the end time of the event
+date: DD MMMM YYYY - the date of the event
+start_time: HH:mm - the start time of the event in 24 hour format
+end_time: HH:mm - the end time of the event in 24 hour format
 timezone: a timezone if one has specifically been given for the event, in IANA Time Zone Database format
 attendees: a list of attendees
 }
@@ -132,7 +132,7 @@ Investing's progress on sourcing deals to date
 potential opportunities to work together",
 conference_call: true,
 date: "26 March 2024",
-start_time: "3:00",
+start_time: "15:00",
 end_time: undefined,
 timezone: "America/New_York",
 attendees: ["rsoom@toom.com", "jeff@investing.com", "Joe@investing.com"]
