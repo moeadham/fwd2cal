@@ -1,9 +1,9 @@
 const sgMail = require("@sendgrid/mail");
-const functions = require("firebase-functions");
 const {logger} = require("firebase-functions");
+const {SENDGRID_API_KEY} = require("./credentials");
 
 // Setting SendGrid API Key
-sgMail.setApiKey(functions.config().sendgrid.api_key);
+sgMail.setApiKey(SENDGRID_API_KEY);
 
 /**
  * Sends an email using SendGrid.

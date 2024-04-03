@@ -1,17 +1,17 @@
 /* eslint-disable require-jsdoc */
 /* eslint-disable max-len */
 const OpenAI = require("openai");
-const functions = require("firebase-functions");
 const {logger} = require("firebase-functions");
 const tokenHelper = require("./tokenHelper");
-const prompts = require("../prompts");
+const prompts = require("./prompts");
+const {OPENAI_API_KEY} = require("./credentials");
 
 const DEFAULT_TEMP = 0.1;
 const DEFAULT_MAX_TOKENS = 4096;
 const DEFAULT_MODEL = "gpt-4-1106-preview";
 
 const openai = new OpenAI({
-  apiKey: functions.config().environment.openai_api_key,
+  apiKey: OPENAI_API_KEY,
 });
 
 async function defaultCompletion(messages, temperature = DEFAULT_TEMP, format = "json_object") {

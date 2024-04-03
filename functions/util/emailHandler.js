@@ -1,11 +1,12 @@
 /* eslint-disable require-jsdoc */
 const {logger} = require("firebase-functions");
-const {getUser} = require("./firestoreHandler");
+const {getUserFromEmail} = require("./firestoreHandler");
 const {getOauthClient} = require("./oauthHandler");
 const {processEmail} = require("./openai");
 const {addEvent} = require("./calendarHelper");
 const {sendEmail} = require("./sendgrid");
 const {MAIN_EMAIL_ADDRESS} = require("./credentials");
+const handleAsync = require("./handleAsync");
 
 const ERROR_TYPES = {
   unverifiedEmail: "unverifiedEmail",
@@ -14,14 +15,7 @@ const ERROR_TYPES = {
   unableToParse: "unableToParse",
 };
 
-// Error handling wrapper
-async function handleAsync(fn) {
-  try {
-    return [null, await fn()];
-  } catch (err) {
-    return [err, null];
-  }
-}
+
 
 
 async function handleEmail(email) {
@@ -33,7 +27,8 @@ async function handleEmail(email) {
   }
 
   // Do we know this user?
-  const uid = await getUser(email);
+  const sender = getSenderFromRawEmail(email);
+  const uid = await getUserFromEmail(sender);
   if (!uid) {
     logger.error("No User found.");
     sendEmailResponse(email, ERROR_TYPES.noUserFound);
@@ -65,7 +60,17 @@ async function handleEmail(email) {
     sendEmailResponse(email, ERROR_TYPES.unableToParse);
     return;
   }
-  return eventObject;
+  return;
+}
+
+function getSenderFromRawEmail(email) {
+  let sender;
+  try {
+    sender = JSON.parse(email.envelope).from.toLowerCase();
+  } catch (error) {
+    logger.error("Error parsing envelope", error);
+  }
+  return sender;
 }
 
 async function sendEmailResponse(originalEmail, errorType, includeThread) {
@@ -79,7 +84,7 @@ async function sendEmailResponse(originalEmail, errorType, includeThread) {
   await sendEmail({
     to: sender,
     from: MAIN_EMAIL_ADDRESS,
-    subject: originalEmail,
+    subject: ERROR_TYPES[errorType],
     text: "",
     html: "",
   });

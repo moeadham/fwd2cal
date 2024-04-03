@@ -86,7 +86,33 @@ async function addEvent(oauth2Client, event) {
   return insertEvent.data;
 }
 
+async function getUserCalendars(oauth2Client) {
+  const calendar = google.calendar({version: "v3", auth: oauth2Client});
+  const calendarList = await calendar.calendarList.list();
+  logger.log("CALENDAR OBJECT FULL:", calendarList);
+  const calendars = calendarList.data.items.map((calendar) => ({
+    kind: calendar.kind,
+    etag: calendar.etag,
+    selected: calendar.selected,
+    accessRole: calendar.accessRole,
+    conferenceProperties: calendar.conferenceProperties,
+    calendar_id: calendar.id,
+    summary: calendar.summary,
+    summaryOverride: calendar.summaryOverride,
+    description: calendar.description,
+    primary: calendar.primary,
+    timeZone: calendar.timeZone,
+    location: calendar.location,
+    hidden: calendar.hidden,
+    deleted: calendar.deleted,
+    uid: user.uid,
+  }));
+  logger.log("Calendars:", calendars);
+  return calendars;
+}
+
 module.exports = {
   addEvent,
+  getUserCalendars,
 };
 
