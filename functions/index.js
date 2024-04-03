@@ -24,6 +24,7 @@ const admin = require("firebase-admin");
 const busboy = require("busboy");
 const openai = require("./util/openai");
 const prompts = require("./util/prompts");
+const {handleEmail} = require("./util/emailHandler");
 const {time} = require("console");
 const moment = require("moment-timezone");
 admin.initializeApp();
@@ -155,6 +156,8 @@ exports.oauthCallback = functions.https.onRequest(async (req, res) => {
   }
 });
 
+
+
 const sendgridCallback = functions.https.onRequest(async (req, res) => {
   if (req.method !== "POST") {
     res.status(405).end();
@@ -170,21 +173,7 @@ const sendgridCallback = functions.https.onRequest(async (req, res) => {
 
   bb.on("finish", async () => {
     // console.log("Done parsing form!");
-    if (!verifyEmail(result)) {
-      logger.error("Unverified Email");
-      res.status(401).send("Unverified Email");
-      return;
-    }
-    const uid = await getUser(result);
-    if (!uid) {
-      logger.error("No User found.");
-      res.status(401).send("No User!!");
-      return;
-    }
-    logger.log("User ID: ", uid);
-    const oauth2Client = await getOauthClient(uid);
-    const event = await processEmail(result);
-    const eventObject = await addEvent(oauth2Client, event);
+    const eventObject = await handleEmail(result);
     res.json({message: "thanks", data: eventObject});
   });
 
@@ -193,35 +182,7 @@ const sendgridCallback = functions.https.onRequest(async (req, res) => {
 
 exports[SENDGRID_ENDPOINT] = sendgridCallback;
 
-function verifyEmail(email) {
-  if (email.SPF !== "pass") {
-    return false;
-  }
-  if (email.dkim.indexOf("pass") === -1 ) {
-    return false;
-  }
-  // WARN: This IP might change, disable for now.
-  //   if (email.sender_ip !== "209.85.216.44" && ENVIRONMENT==="production") {
-  //     return false;
-  //   }
-  return true;
-}
 
-async function getUser(email) {
-  let sender;
-  try {
-    sender = JSON.parse(email.envelope).from.toLowerCase();
-  } catch (error) {
-    logger.error("Error parsing envelope", error);
-    return null;
-  }
-  const doc = await getFirestore().collection("EmailAddress").doc(sender).get();
-  if (!doc.exists) {
-    return null;
-  }
-  const userObject = doc.data();
-  return userObject.uid;
-}
 
 async function getOauthClient(uid) {
   const userDoc = await getFirestore().collection("Users").doc(uid).get();

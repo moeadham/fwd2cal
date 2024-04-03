@@ -35,5 +35,20 @@
     "auth": {
       "port": 9099
     }
+  },
+  "hosting": {
+    "public": "public",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "redirects": [
+      {
+        "source": "/signup",
+        "destination": "https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=535781060024-41t0ff99f30mbnbbsoie80nutujii47q.apps.googleusercontent.com&redirect_uri=https://us-central1-fwd2cal.cloudfunctions.net/oauthCallback&scope=https://www.googleapis.com/auth/calendar+https://www.googleapis.com/auth/userinfo.email+https://www.googleapis.com/auth/userinfo.profile+openid&access_type=offline&prompt=consent",
+        "type": 302
+      }
+    ]
   }
 }

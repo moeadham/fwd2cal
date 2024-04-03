@@ -4,6 +4,7 @@ const OpenAI = require("openai");
 const functions = require("firebase-functions");
 const {logger} = require("firebase-functions");
 const tokenHelper = require("./tokenHelper");
+const prompts = require("../prompts");
 
 const DEFAULT_TEMP = 0.1;
 const DEFAULT_MAX_TOKENS = 4096;
@@ -60,7 +61,25 @@ function parseJsonFromOpenAIResponse(completion, raw) {
   return response;
 }
 
+async function processEmail(email) {
+  const messages = [
+    {
+      role: "system",
+      content: prompts.getEventData,
+    },
+    {role: "user", content: email.text},
+  ];
+  const response = await openai.defaultCompletion(messages);
+  Object.keys(response).forEach((key) => {
+    if (response[key] === "undefined") {
+      response[key] = undefined;
+    }
+  });
+  return response;
+}
+
 module.exports = {
   defaultCompletion,
+  processEmail,
 };
 
