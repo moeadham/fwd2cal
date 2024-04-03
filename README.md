@@ -7,6 +7,8 @@ firebase functions:config:set environment.openai_api_key="sk-YOUR_API_KEY"
 firebase functions:config:set environment.sendgrid_endpoint="very_hard_to_guess_endpoint"
 ```
 
+
+
 For local, edit .runtimeconfig.json
 ```
 {
@@ -15,4 +17,10 @@ For local, edit .runtimeconfig.json
     "openai_api_key": "sk-YOUR_API_KEY"
   }
 }
+```
+
+To test pubsub:
+```
+firebase functions:shell
+refreshTokensScheduled()
 ```

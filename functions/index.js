@@ -39,8 +39,6 @@ const DEFAULT_EVENT_LENGTH = 30;
 // Maximum is 62 characters
 const SENDGRID_ENDPOINT = functions.config().environment.sendgrid_endpoint || "sendgridCallback";
 const redirectUriIndex = functions.config() && functions.config().environment && functions.config().environment.name === "production" ? 2 : 1;
-logger.log("redirectUriIndex", redirectUriIndex);
-logger.log("redirectURL", CREDENTIALS.web.redirect_uris[redirectUriIndex]);
 
 const URL = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${CREDENTIALS.web.client_id}&redirect_uri=${CREDENTIALS.web.redirect_uris[redirectUriIndex]}&scope=https://www.googleapis.com/auth/calendar+https://www.googleapis.com/auth/userinfo.email+https://www.googleapis.com/auth/userinfo.profile+openid&access_type=offline&prompt=consent`;
 logger.log(URL);
@@ -332,3 +330,79 @@ async function addEvent(oauth2Client, event) {
   logger.log("Event added to google:", insertEvent.data);
   return insertEvent.data;
 }
+
+// OAUTH REFRESH
+async function refreshAccessToken(oauth2Client) {
+  return new Promise((resolve, reject) => {
+    oauth2Client.refreshAccessToken((err, tokens) => {
+      if (err) {
+        logger.error("Error refreshing access token", err);
+        reject(err);
+      } else {
+        resolve(tokens);
+      }
+    });
+  });
+}
+
+async function refreshOAuthTokens(uid) {
+  const userDoc = await getFirestore().collection("Users").doc(uid).get();
+  if (!userDoc.exists) {
+    throw new Error("User document does not exist");
+  }
+  const userData = userDoc.data();
+  const oauth2Client = new google.auth.OAuth2(
+      CREDENTIALS.web.client_id,
+      CREDENTIALS.web.client_secret,
+      CREDENTIALS.web.redirect_uris[redirectUriIndex],
+  );
+  oauth2Client.setCredentials({
+    access_token: userData.access_token,
+    refresh_token: userData.refresh_token,
+  });
+  let tokens;
+  try {
+    tokens = await refreshAccessToken(oauth2Client);
+    await getFirestore().collection("Users").doc(uid).update({
+      access_token: tokens.access_token,
+      refresh_token: tokens.refresh_token,
+      expiry_date: tokens.expiry_date,
+    });
+    logger.log(`uid ${uid} access token refreshed to ${tokens.expiry_date}`);
+  } catch (error) {
+    logger.error("Failed to refresh access token:", uid, error);
+    throw error;
+  }
+}
+
+async function findUsersWithExpiringTokens() {
+  const usersRef = getFirestore().collection("Users");
+  const now = new Date();
+  const twoHoursLater = new Date(now.getTime() + (2 * 60 * 60 * 1000));
+  const querySnapshot = await usersRef.where("expiry_date", "<=", twoHoursLater).get();
+  // const querySnapshot = await usersRef.get(); // For Local testing.
+  if (querySnapshot.empty) {
+    console.log("No users with tokens expiring in the next hour found.");
+    return [];
+  }
+  const users = [];
+  querySnapshot.forEach((doc) => {
+    console.log(`User ${doc.id} has a token expiring soon.`);
+    users.push({id: doc.id, ...doc.data()});
+  });
+  return users;
+}
+
+exports.refreshTokensScheduled = functions.pubsub.schedule("0 * * * *")
+    .timeZone("America/New_York") // Users can choose timezone - default is America/Los_Angeles
+    .onRun(async (context) => {
+      try {
+        const users = await findUsersWithExpiringTokens();
+        logger.log("Refreshing tokens for Users with expiring tokens ", users.length);
+        for (const user of users) {
+          await refreshOAuthTokens(user.id);
+        }
+      } catch (error) {
+        logger.error("Error refreshing tokens:", error);
+      }
+    });
