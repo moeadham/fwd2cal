@@ -69,7 +69,7 @@ async function processEmail(email) {
     },
     {role: "user", content: email.text},
   ];
-  const response = await openai.defaultCompletion(messages);
+  const response = await defaultCompletion(messages);
   Object.keys(response).forEach((key) => {
     if (response[key] === "undefined") {
       response[key] = undefined;

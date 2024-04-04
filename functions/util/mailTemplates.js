@@ -1,6 +1,6 @@
 /* eslint-disable max-len */
-const messages = {
-  newUser: {
+const mailTemplates = {
+  noUserFound: {
     text:
 `Welcome!
 
@@ -28,7 +28,15 @@ Note: If you've already signed up for fwd2cal, and you want to add events to you
 `Sorry - but something is wrong with your e-mail configuration and we can't verify you're actually %FROM_EMAIL%
 `,
   },
+  oauthFailed: {
+    text:
+`Sorry - there was an issue authenticating with google. Please go to https://fwd2cal.com/auth/google, and then forward your thread again.`,
+  },
+  unableToParse: {
+    text:
+`Sorry - AI wasn't able to find a date in your email. Forward the thread again and include some instructions to help AI figure it out.`,
+  },
 };
 
-module.exports = {messages};
+module.exports = {mailTemplates};
 

@@ -7,6 +7,8 @@ const {addEvent} = require("./calendarHelper");
 const {sendEmail} = require("./sendgrid");
 const {MAIN_EMAIL_ADDRESS} = require("./credentials");
 const handleAsync = require("./handleAsync");
+const {mailTemplates} = require("./mailTemplates");
+
 
 const ERROR_TYPES = {
   unverifiedEmail: "unverifiedEmail",
@@ -15,14 +17,11 @@ const ERROR_TYPES = {
   unableToParse: "unableToParse",
 };
 
-
-
-
 async function handleEmail(email) {
   // Is the email sender verified?
   if (!verifyEmail(email)) {
     logger.error("Unverified Email");
-    sendEmailResponse(email, ERROR_TYPES.unverifiedEmail);
+    await sendEmailResponse(sender, email, ERROR_TYPES.unverifiedEmail);
     return;
   }
 
@@ -30,8 +29,8 @@ async function handleEmail(email) {
   const sender = getSenderFromRawEmail(email);
   const uid = await getUserFromEmail(sender);
   if (!uid) {
-    logger.error("No User found.");
-    sendEmailResponse(email, ERROR_TYPES.noUserFound);
+    logger.error("No User found");
+    await sendEmailResponse(sender, email, ERROR_TYPES.noUserFound);
     return;
   }
   logger.log("User ID: ", uid);
@@ -40,7 +39,7 @@ async function handleEmail(email) {
   const [oauthErr, oauth2Client] = await handleAsync(() => getOauthClient(uid));
   if (oauthErr) {
     logger.error("Error getting OAuth client: ", oauthErr);
-    sendEmailResponse(email, ERROR_TYPES.oauthFailed);
+    await sendEmailResponse(sender, email, ERROR_TYPES.oauthFailed);
     return;
   }
 
@@ -48,7 +47,7 @@ async function handleEmail(email) {
   const [processEmailErr, event] = await handleAsync(() => processEmail(email));
   if (processEmailErr) {
     logger.error("Error processing email: ", processEmailErr);
-    sendEmailResponse(email, ERROR_TYPES.unableToParse);
+    await sendEmailResponse(sender, email, ERROR_TYPES.unableToParse);
     return;
   }
 
@@ -57,10 +56,10 @@ async function handleEmail(email) {
     await handleAsync(() => addEvent(oauth2Client, event));
   if (addEventErr) {
     logger.error("Error adding event to calendar: ", addEventErr);
-    sendEmailResponse(email, ERROR_TYPES.unableToParse);
+    await sendEmailResponse(sender, email, ERROR_TYPES.unableToParse);
     return;
   }
-  return;
+  return eventObject;
 }
 
 function getSenderFromRawEmail(email) {
@@ -73,20 +72,18 @@ function getSenderFromRawEmail(email) {
   return sender;
 }
 
-async function sendEmailResponse(originalEmail, errorType, includeThread) {
-  let sender;
-  try {
-    sender = JSON.parse(originalEmail.envelope).from.toLowerCase();
-  } catch (error) {
-    logger.error("Error parsing envelope", error);
-    return null;
-  }
+async function sendEmailResponse(sender,
+    originalEmail,
+    errorType,
+    includeThread) {
+  let text = mailTemplates[errorType].text;
+  text = text.replace(/%FROM_EMAIL%/g, sender);
   await sendEmail({
     to: sender,
     from: MAIN_EMAIL_ADDRESS,
     subject: ERROR_TYPES[errorType],
-    text: "",
-    html: "",
+    text: text,
+    // html: "",
   });
 }
 

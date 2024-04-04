@@ -3,7 +3,7 @@
 /* eslint-disable require-jsdoc */
 const {logger} = require("firebase-functions");
 const moment = require("moment-timezone");
-const google = require("googleapis");
+const {google} = require("googleapis");
 
 const DEFAULT_EVENT_LENGTH = 30;
 const ONLY_INVITE_HOST = true;
@@ -86,10 +86,10 @@ async function addEvent(oauth2Client, event) {
   return insertEvent.data;
 }
 
-async function getUserCalendars(oauth2Client) {
+async function getUserCalendars(oauth2Client, uid) {
   const calendar = google.calendar({version: "v3", auth: oauth2Client});
   const calendarList = await calendar.calendarList.list();
-  logger.log("CALENDAR OBJECT FULL:", calendarList);
+  // logger.log("CALENDAR OBJECT FULL:", calendarList);
   const calendars = calendarList.data.items.map((calendar) => ({
     kind: calendar.kind,
     etag: calendar.etag,
@@ -105,9 +105,9 @@ async function getUserCalendars(oauth2Client) {
     location: calendar.location,
     hidden: calendar.hidden,
     deleted: calendar.deleted,
-    uid: user.uid,
+    uid: uid,
   }));
-  logger.log("Calendars:", calendars);
+  // logger.log("Calendars:", calendars);
   return calendars;
 }
 

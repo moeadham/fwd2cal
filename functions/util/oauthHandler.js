@@ -113,7 +113,7 @@ async function signupCallbackHandler(query) {
 
     await storeUser(tokens, userRecord);
     await addUserEmailAddress(userRecord, [{email: userEmail, default: true}]);
-    const calendars = getUserCalendars(oauth2Client);
+    const calendars = await getUserCalendars(oauth2Client, userRecord.uid);
     await storeUserCalendars(userRecord, calendars);
     return userRecord;
   } catch (error) {

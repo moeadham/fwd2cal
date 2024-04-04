@@ -52,7 +52,7 @@ exports.oauthCallback = functions.https.onRequest(async (req, res) => {
     logger.error("Error in oauthCallback", err);
     res.status(err.code).send(err.message);
     return;
-  } 
+  }
   res.json({message: "Authentication successful", uid: userRecord.uid});
 });
 
@@ -71,8 +71,8 @@ const sendgridCallback = functions.https.onRequest(async (req, res) => {
 
   bb.on("finish", async () => {
     // console.log("Done parsing form!");
-    await handleEmail(result);
-    res.json({message: "thanks"});
+    const event = await handleEmail(result);
+    res.json({message: "thanks", data: event});
   });
 
   bb.end(req.rawBody);
