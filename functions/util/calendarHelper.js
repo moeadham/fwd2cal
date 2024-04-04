@@ -74,7 +74,9 @@ async function addEvent(oauth2Client, event) {
     requestBody.location = event.location;
   }
   if (ONLY_INVITE_HOST) {
-    requestBody.attendees = [{email: primaryCalendar.id}];
+    requestBody.attendees = [
+      {email: primaryCalendar.id,
+        responseStatus: "accepted"}];
   }
   logger.log("Attempting to add event to google:", requestBody);
   const insertEvent = await calendar.events.insert({
