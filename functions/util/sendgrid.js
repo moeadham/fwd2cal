@@ -14,15 +14,17 @@ sgMail.setApiKey(SENDGRID_API_KEY);
  * @param {string} html The HTML content of the email (optional).
  * @return {Promise<void>} A promise that resolves when the email is sent.
  */
-async function sendEmail({to, from, subject, text, html = ""}) {
+async function sendEmail({to, from, subject, text, html = "", headers = {}}) {
   const msg = {
     to,
     from,
     subject,
-    text,
-    // html,
+    // text,
+    html,
   };
-  logger.log(msg);
+  if (headers.References) {
+    msg.headers = headers;
+  }
   try {
     await sgMail.send(msg);
     logger.log("Email sent successfully");

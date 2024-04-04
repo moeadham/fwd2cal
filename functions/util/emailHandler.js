@@ -8,30 +8,67 @@ const {sendEmail} = require("./sendgrid");
 const {MAIN_EMAIL_ADDRESS} = require("./credentials");
 const handleAsync = require("./handleAsync");
 const {mailTemplates} = require("./mailTemplates");
+const moment = require("moment-timezone");
 
 
 const EMAIL_RESPONSES = {
-  unverifiedEmail: "unverifiedEmail",
-  noUserFound: "noUserFound",
-  oauthFailed: "oauthFailed",
-  unableToParse: "unableToParse",
-  eventAdded: "eventAdded",
+  unverifiedEmail: {
+    templateName: "unverifiedEmail",
+    replace: {
+      FROM_EMAIL: "",
+    },
+  },
+  noUserFound: {
+    templateName: "noUserFound",
+    replace: {
+      FROM_EMAIL: "",
+    },
+  },
+  oauthFailed: {
+    templateName: "oauthFailed",
+    replace: {},
+  },
+  unableToParse: {
+    templateName: "unableToParse",
+    replace: {},
+  },
+  eventAdded: {
+    templateName: "eventAdded",
+    replace: {
+      EVENT_LINK: "",
+      EVENT_DATE: "",
+      EVENT_ATTENDEES: "",
+    },
+  },
 };
 
 async function handleEmail(email) {
+  // Do we know this user?
+  const sender = getSenderFromRawEmail(email);
   // Is the email sender verified?
   if (!verifyEmail(email)) {
     logger.error("Unverified Email");
-    await sendEmailResponse(sender, email, EMAIL_RESPONSES.unverifiedEmail);
+    const response = {
+      ...EMAIL_RESPONSES.unverifiedEmail,
+      replace: {
+        FROM_EMAIL: sender,
+      },
+    };
+    await sendEmailResponse(sender, email, response, true);
     return;
   }
 
-  // Do we know this user?
-  const sender = getSenderFromRawEmail(email);
+
   const uid = await getUserFromEmail(sender);
   if (!uid) {
     logger.error("No User found");
-    await sendEmailResponse(sender, email, EMAIL_RESPONSES.noUserFound);
+    const response = {
+      ...EMAIL_RESPONSES.noUserFound,
+      replace: {
+        FROM_EMAIL: sender,
+      },
+    };
+    await sendEmailResponse(sender, email, response, true);
     return;
   }
   logger.log("User ID: ", uid);
@@ -40,7 +77,7 @@ async function handleEmail(email) {
   const [oauthErr, oauth2Client] = await handleAsync(() => getOauthClient(uid));
   if (oauthErr) {
     logger.error("Error getting OAuth client: ", oauthErr);
-    await sendEmailResponse(sender, email, EMAIL_RESPONSES.oauthFailed);
+    await sendEmailResponse(sender, email, EMAIL_RESPONSES.oauthFailed, true);
     return;
   }
 
@@ -48,7 +85,7 @@ async function handleEmail(email) {
   const [processEmailErr, event] = await handleAsync(() => processEmail(email));
   if (processEmailErr) {
     logger.error("Error processing email: ", processEmailErr);
-    await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse);
+    await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true);
     return;
   }
 
@@ -57,10 +94,21 @@ async function handleEmail(email) {
     await handleAsync(() => addEvent(oauth2Client, event));
   if (addEventErr) {
     logger.error("Error adding event to calendar: ", addEventErr);
-    await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse);
+    await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true);
     return;
   }
-  await sendEmailResponse(sender, email, EMAIL_RESPONSES.eventAdded);
+  const response = {
+    ...EMAIL_RESPONSES.eventAdded,
+    replace: {
+      EVENT_LINK: eventObject.htmlLink,
+      EVENT_DATE: moment(eventObject.start.dateTime)
+          .tz(eventObject.start.timeZone)
+          .format("dddd, MMMM Do [at] h:mm A"),
+      EVENT_ATTENDEES:
+          eventObject.attendees.map((attendee) => attendee.email).join(", "),
+    },
+  };
+  await sendEmailResponse(sender, email, response, true);
   return eventObject;
 }
 
@@ -74,18 +122,82 @@ function getSenderFromRawEmail(email) {
   return sender;
 }
 
+// eslint-disable-next-line no-unused-vars
+function getDateFromHeader(header) {
+  let date;
+  try {
+    const datePattern = /Date: (.*)/g;
+    const matches = datePattern.exec(header);
+    if (matches && matches[1]) {
+      // Thu, 28 Mar 2024 10:38:21 +0000
+      date = moment(matches[1].trim(), "ddd, DD MMM YYYY HH:mm:ss ZZ").toDate();
+    }
+  } catch (error) {
+    logger.error("Error extracting date with moment from header", error);
+  }
+  return date;
+}
+
+function getEmailThreadHeaders(header) {
+  const headers = {};
+  try {
+    const inreplyPattern = /In-Reply-To: (.*)/g;
+    let matches = inreplyPattern.exec(header);
+    if (matches && matches[1]) {
+      // Thu, 28 Mar 2024 10:38:21 +0000
+      headers["In-Reply-To"] = matches[1].trim();
+    }
+    const referncesPattern = /References: (.*)/g;
+    matches = referncesPattern.exec(header);
+    if (matches && matches[1]) {
+      // Thu, 28 Mar 2024 10:38:21 +0000
+      headers["References"] = matches[1].trim();
+    }
+  } catch (error) {
+    logger.error("Error extracting date with moment from header", error);
+  }
+  return headers;
+}
+
+function threadEmailHtml(original, html) {
+  // const date = getDateFromHeader(original.header);
+  // const formattedDate = moment(date).format("MMM DD, YYYY");
+  // const formattedTime = moment(date).format("h:mm A");
+  // const senderFull = original.from;
+  // const threadLine =
+  //   `On Tue, ${formattedDate} at ${formattedTime} ${senderFull} wrote:`;
+  // return `${html}
+  // <div class="gmail_quote">
+  // <div dir="ltr" class="gmail_attr">
+  // ${threadLine}
+  // ${original.html}
+  // </div>
+  // </div>`;
+  return `${html}${original.html}`;
+}
+
+function getHtml(messageType) {
+  let html = mailTemplates[messageType.templateName].html;
+  Object.keys(messageType.replace).forEach((key) => {
+    html = html.replace(new RegExp(`%${key}%`, "g"), messageType.replace[key]);
+  });
+  return html;
+}
+
 async function sendEmailResponse(sender,
     originalEmail,
-    errorType,
+    messageType,
     includeThread) {
-  let text = mailTemplates[errorType].text;
-  text = text.replace(/%FROM_EMAIL%/g, sender);
+  let html = getHtml(messageType);
+  if (includeThread) {
+    html = threadEmailHtml(originalEmail, html);
+  }
   await sendEmail({
     to: sender,
     from: MAIN_EMAIL_ADDRESS,
-    subject: EMAIL_RESPONSES[errorType],
-    text: text,
-    // html: "",
+    subject: originalEmail.subject,
+    html: html,
+    headers: getEmailThreadHeaders(originalEmail.headers),
   });
 }
 
