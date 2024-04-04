@@ -9,6 +9,7 @@ const {MAIN_EMAIL_ADDRESS} = require("./credentials");
 const handleAsync = require("./handleAsync");
 const {mailTemplates} = require("./mailTemplates");
 const moment = require("moment-timezone");
+const { event } = require("firebase-functions/v1/analytics");
 
 
 const EMAIL_RESPONSES = {
@@ -71,6 +72,50 @@ async function handleEmail(email) {
     await sendEmailResponse(sender, email, response, true);
     return;
   }
+  const subjectAction = understandSubject(email.subject);
+  switch (subjectAction) {
+    case "addUser":
+      // Code to handle addUser action
+      return await addEmailAddressToUser(email, sender, uid);
+    case "addEvent":
+      // Code to handle addEvent action
+      return await eventHandler(email, sender, uid);
+    default:
+      return await eventHandler(email, sender, uid);
+  }
+}
+
+function understandSubject(subject) {
+  subject = subject.toLowerCase();
+  if (subject.startsWith("add")) {
+    return "addUser";
+  } else if (subject.startsWith("fwd")) {
+    return "addEvent";
+  } else {
+    return "addEvent";
+  }
+}
+
+async function addEmailAddressToUser(email, sender, uid) {
+  const subject = email.subject;
+  const emailRegex = /^add\s+([a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6})$/;
+  const match = subject.match(emailRegex);
+  if (!match) {
+    logger.error("Email format incorrect in subject");
+    const response = {
+      ...EMAIL_RESPONSES.unverifiedEmail,
+      replace: {
+        FROM_EMAIL: sender,
+      },
+    };
+    await sendEmailResponse(sender, email, response, true);
+    return;
+  }
+  const emailAddressToAdd = match[1];
+  // Continue with adding email address logic...
+}
+
+async function eventHandler(email, sender, uid) {
   logger.log("User ID: ", uid);
 
   // Can we authenticate with their calendar?

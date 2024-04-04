@@ -2,6 +2,7 @@
 // const {logger} = require("firebase-functions");
 const {getFirestore} = require("firebase-admin/firestore");
 const {ENVIRONMENT} = require("./credentials");
+const {v4: uuidv4} = require("uuid");
 
 async function getUserFromUID(uid) {
   const userDoc = await getFirestore().collection("Users").doc(uid).get();
@@ -71,6 +72,17 @@ async function addUserEmailAddress(user, emails) {
   });
 }
 
+async function addPendingEmailAddress(user, pendingAddress) {
+  const verificationCode = uuidv4();
+  await getFirestore().collection("PendingEmailAddress")
+      .doc(pendingAddress).set({
+        ownerUid: user.uid,
+        ownerEmail: user.email,
+        verificationCode: verificationCode,
+      });
+  return verificationCode;
+}
+
 async function storeUserCalendars(user, calendars) {
   for (const calendar of calendars) {
     const firestoreID = `${calendar.uid}${calendar.calendar_id}`;
@@ -93,5 +105,6 @@ module.exports = {
   addUserEmailAddress,
   storeUserCalendars,
   updateUserTokens,
+  addPendingEmailAddress,
 };
 
