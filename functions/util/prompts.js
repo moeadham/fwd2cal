@@ -1,7 +1,7 @@
 /* eslint-disable max-len */
 const prompts = {
   getEventData: `
-Task: Review the following email and return a event_json with the following fields:
+Task: Review the following email thread and return a event_json with the following fields:
 {
 summary: the title of the event
 location: a location of the event if one has been given
@@ -14,10 +14,9 @@ timezone: a timezone if one has specifically been given for the event, in IANA T
 attendees: a list of attendees
 }
 
-If the email is a thread, ensure you use the most recent email in the thread. 
-If no explicit timezone is given, you can determine it based on the location if a location is available.
-To create an event, at minimum, you need a date. If you don't have a date, respond
-with an error that no date has been provided:
+If the email is a thread,  the most recent email is most relevant, but keep other details from the thread in context.
+If no explicit timezone is given, you can determine it based on the location (if a location is available). If no location or timezone is available, you can leave it undefined.
+To create an event, at minimum, you need a date. If you don't have a date, respond with an error that no date has been provided:
 {
 error: "No date provided"
 }
