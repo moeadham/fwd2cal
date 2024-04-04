@@ -20,9 +20,9 @@ async function sendEmail({to, from, subject, text, html = ""}) {
     from,
     subject,
     text,
-    html,
+    // html,
   };
-
+  logger.log(msg);
   try {
     await sgMail.send(msg);
     logger.log("Email sent successfully");

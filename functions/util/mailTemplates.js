@@ -36,6 +36,10 @@ Note: If you've already signed up for fwd2cal, and you want to add events to you
     text:
 `Sorry - AI wasn't able to find a date in your email. Forward the thread again and include some instructions to help AI figure it out.`,
   },
+  eventAdded: {
+    text:
+`Event added to your calendar. Have a look at it here: `,
+  },
 };
 
 module.exports = {mailTemplates};

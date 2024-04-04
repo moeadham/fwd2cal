@@ -10,18 +10,19 @@ const handleAsync = require("./handleAsync");
 const {mailTemplates} = require("./mailTemplates");
 
 
-const ERROR_TYPES = {
+const EMAIL_RESPONSES = {
   unverifiedEmail: "unverifiedEmail",
   noUserFound: "noUserFound",
   oauthFailed: "oauthFailed",
   unableToParse: "unableToParse",
+  eventAdded: "eventAdded",
 };
 
 async function handleEmail(email) {
   // Is the email sender verified?
   if (!verifyEmail(email)) {
     logger.error("Unverified Email");
-    await sendEmailResponse(sender, email, ERROR_TYPES.unverifiedEmail);
+    await sendEmailResponse(sender, email, EMAIL_RESPONSES.unverifiedEmail);
     return;
   }
 
@@ -30,7 +31,7 @@ async function handleEmail(email) {
   const uid = await getUserFromEmail(sender);
   if (!uid) {
     logger.error("No User found");
-    await sendEmailResponse(sender, email, ERROR_TYPES.noUserFound);
+    await sendEmailResponse(sender, email, EMAIL_RESPONSES.noUserFound);
     return;
   }
   logger.log("User ID: ", uid);
@@ -39,7 +40,7 @@ async function handleEmail(email) {
   const [oauthErr, oauth2Client] = await handleAsync(() => getOauthClient(uid));
   if (oauthErr) {
     logger.error("Error getting OAuth client: ", oauthErr);
-    await sendEmailResponse(sender, email, ERROR_TYPES.oauthFailed);
+    await sendEmailResponse(sender, email, EMAIL_RESPONSES.oauthFailed);
     return;
   }
 
@@ -47,7 +48,7 @@ async function handleEmail(email) {
   const [processEmailErr, event] = await handleAsync(() => processEmail(email));
   if (processEmailErr) {
     logger.error("Error processing email: ", processEmailErr);
-    await sendEmailResponse(sender, email, ERROR_TYPES.unableToParse);
+    await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse);
     return;
   }
 
@@ -56,9 +57,10 @@ async function handleEmail(email) {
     await handleAsync(() => addEvent(oauth2Client, event));
   if (addEventErr) {
     logger.error("Error adding event to calendar: ", addEventErr);
-    await sendEmailResponse(sender, email, ERROR_TYPES.unableToParse);
+    await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse);
     return;
   }
+  await sendEmailResponse(sender, email, EMAIL_RESPONSES.eventAdded);
   return eventObject;
 }
 
@@ -81,7 +83,7 @@ async function sendEmailResponse(sender,
   await sendEmail({
     to: sender,
     from: MAIN_EMAIL_ADDRESS,
-    subject: ERROR_TYPES[errorType],
+    subject: EMAIL_RESPONSES[errorType],
     text: text,
     // html: "",
   });
