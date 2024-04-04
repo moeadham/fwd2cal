@@ -46,7 +46,7 @@ const URL = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&cli
 logger.log(URL);
 
 exports.oauthCallback = functions.https.onRequest(async (req, res) => {
-  logger.log("oauthCallback", req.query);
+  // logger.log("oauthCallback", req.query);
   const [err, userRecord] = await handleAsync(() => signupCallbackHandler(req.query));
   if (err) {
     logger.error("Error in oauthCallback", err);
@@ -71,14 +71,18 @@ const sendgridCallback = functions.https.onRequest(async (req, res) => {
 
   bb.on("finish", async () => {
     // console.log("Done parsing form!");
-    const event = await handleEmail(result);
-    res.json({message: "thanks", data: event});
+    const outcome = await handleEmail(result);
+    res.json({message: "thanks", data: outcome});
   });
 
   bb.end(req.rawBody);
 });
 
 exports[SENDGRID_ENDPOINT] = sendgridCallback;
+
+exports.addEmail = functions.https.onRequest(async (req, res) => {
+
+});
 
 // Refresh Expiring oAuth tokens.
 

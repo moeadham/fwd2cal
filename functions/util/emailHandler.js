@@ -1,6 +1,8 @@
+/* eslint-disable max-len */
 /* eslint-disable require-jsdoc */
 const {logger} = require("firebase-functions");
-const {getUserFromEmail} = require("./firestoreHandler");
+const {getUserFromEmail,
+  addPendingEmailAddress} = require("./firestoreHandler");
 const {getOauthClient} = require("./oauthHandler");
 const {processEmail} = require("./openai");
 const {addEvent} = require("./calendarHelper");
@@ -9,7 +11,7 @@ const {MAIN_EMAIL_ADDRESS} = require("./credentials");
 const handleAsync = require("./handleAsync");
 const {mailTemplates} = require("./mailTemplates");
 const moment = require("moment-timezone");
-const { event } = require("firebase-functions/v1/analytics");
+// const {event} = require("firebase-functions/v1/analytics");
 
 
 const EMAIL_RESPONSES = {
@@ -39,6 +41,20 @@ const EMAIL_RESPONSES = {
       EVENT_LINK: "",
       EVENT_DATE: "",
       EVENT_ATTENDEES: "",
+    },
+  },
+  addAdditionalEmailAddress: {
+    templateName: "addAdditionalEmailAddress",
+    replace: {
+      VERIFICATION_CODE: "",
+      ORIGINATOR_EMAIL: "",
+    },
+    subject: true,
+  },
+  additionalEmailInUse: {
+    templateName: "additionalEmailInUse",
+    replace: {
+      EMAIL_TO_ADD: "",
     },
   },
 };
@@ -101,18 +117,40 @@ async function addEmailAddressToUser(email, sender, uid) {
   const emailRegex = /^add\s+([a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6})$/;
   const match = subject.match(emailRegex);
   if (!match) {
-    logger.error("Email format incorrect in subject");
-    const response = {
-      ...EMAIL_RESPONSES.unverifiedEmail,
-      replace: {
-        FROM_EMAIL: sender,
-      },
-    };
-    await sendEmailResponse(sender, email, response, true);
-    return;
+    logger.log(`Email that starts with 'add' but doesn't 
+      have a valid email address after it.`);
+    return await eventHandler(email, sender, uid);
   }
   const emailAddressToAdd = match[1];
-  // Continue with adding email address logic...
+  // Check if the email address is already added.
+  // If not, add it to the pending email address list.
+  const existingUid = await getUserFromEmail(emailAddressToAdd);
+  if (existingUid) {
+    logger.error(`${uid} attempted to add 
+      ${emailAddressToAdd}, but already registered to ${existingUid}`);
+    const response = {
+      ...EMAIL_RESPONSES.additionalEmailInUse,
+      replace: {
+        EMAIL_TO_ADD: emailAddressToAdd,
+      },
+    };
+    logger.log(`Sending email additionalEmailInUse to ${sender}`);
+    return await sendEmailResponse(sender, email, response, true);
+  }
+  const verificationCode = await addPendingEmailAddress(uid, emailAddressToAdd);
+  // Send email to the user with the verification code.
+  const response = {
+    ...EMAIL_RESPONSES.addAdditionalEmailAddress,
+    replace: {
+      VERIFICATION_CODE: verificationCode,
+      ORIGINATOR_EMAIL: sender,
+    },
+  };
+  logger.log(
+      // eslint-disable-next-line max-len
+      `Sending email addAdditionalEmailAddress ${emailAddressToAdd} to pending list for ${uid}`);
+  await sendEmailResponse(emailAddressToAdd, email, response, false);
+  return;
 }
 
 async function eventHandler(email, sender, uid) {
@@ -222,6 +260,7 @@ function threadEmailHtml(original, html) {
 }
 
 function getHtml(messageType) {
+  logger.log("messageType", messageType.templateName);
   let html = mailTemplates[messageType.templateName].html;
   Object.keys(messageType.replace).forEach((key) => {
     html = html.replace(new RegExp(`%${key}%`, "g"), messageType.replace[key]);
@@ -229,18 +268,30 @@ function getHtml(messageType) {
   return html;
 }
 
+function getSubject(messageType) {
+  let subject = mailTemplates[messageType.templateName].subject;
+  Object.keys(messageType.replace).forEach((key) => {
+    subject = subject.replace(new RegExp(`%${key}%`, "g"), messageType.replace[key]);
+  });
+  return subject;
+}
+
 async function sendEmailResponse(sender,
     originalEmail,
     messageType,
     includeThread) {
   let html = getHtml(messageType);
+  let subject = originalEmail.subject;
+  if (messageType.subject) {
+    subject = getSubject(messageType);
+  }
   if (includeThread) {
     html = threadEmailHtml(originalEmail, html);
   }
   await sendEmail({
     to: sender,
     from: MAIN_EMAIL_ADDRESS,
-    subject: originalEmail.subject,
+    subject: subject,
     html: html,
     headers: getEmailThreadHeaders(originalEmail.headers),
   });

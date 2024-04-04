@@ -72,7 +72,8 @@ async function addUserEmailAddress(user, emails) {
   });
 }
 
-async function addPendingEmailAddress(user, pendingAddress) {
+async function addPendingEmailAddress(uid, pendingAddress) {
+  const user = await getUserFromUID(uid);
   const verificationCode = uuidv4();
   await getFirestore().collection("PendingEmailAddress")
       .doc(pendingAddress).set({
@@ -81,6 +82,15 @@ async function addPendingEmailAddress(user, pendingAddress) {
         verificationCode: verificationCode,
       });
   return verificationCode;
+}
+
+async function getPendingEmailAddressByCode(code) {
+  const doc = await getFirestore().collection("PendingEmailAddress")
+      .where("verificationCode", "==", code).get();
+  if (doc.empty) {
+    return null;
+  }
+  return doc.docs[0].data();
 }
 
 async function storeUserCalendars(user, calendars) {
@@ -106,5 +116,6 @@ module.exports = {
   storeUserCalendars,
   updateUserTokens,
   addPendingEmailAddress,
+  getPendingEmailAddressByCode,
 };
 
