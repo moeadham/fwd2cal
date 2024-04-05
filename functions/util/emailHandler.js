@@ -1,7 +1,9 @@
+/* eslint-disable max-len */
 /* eslint-disable require-jsdoc */
 const {logger} = require("firebase-functions");
-const {getUserFromEmail} = require("./firestoreHandler");
-const {getOauthClient} = require("./oauthHandler");
+const {getUserFromEmail,
+  addPendingEmailAddress} = require("./firestoreHandler");
+const {getOauthClient} = require("./authHandler");
 const {processEmail} = require("./openai");
 const {addEvent} = require("./calendarHelper");
 const {sendEmail} = require("./sendgrid");
@@ -9,6 +11,7 @@ const {MAIN_EMAIL_ADDRESS} = require("./credentials");
 const handleAsync = require("./handleAsync");
 const {mailTemplates} = require("./mailTemplates");
 const moment = require("moment-timezone");
+// const {event} = require("firebase-functions/v1/analytics");
 
 
 const EMAIL_RESPONSES = {
@@ -40,6 +43,20 @@ const EMAIL_RESPONSES = {
       EVENT_ATTENDEES: "",
     },
   },
+  addAdditionalEmailAddress: {
+    templateName: "addAdditionalEmailAddress",
+    replace: {
+      VERIFICATION_CODE: "",
+      ORIGINATOR_EMAIL: "",
+    },
+    subject: true,
+  },
+  additionalEmailInUse: {
+    templateName: "additionalEmailInUse",
+    replace: {
+      EMAIL_TO_ADD: "",
+    },
+  },
 };
 
 async function handleEmail(email) {
@@ -55,13 +72,13 @@ async function handleEmail(email) {
       },
     };
     await sendEmailResponse(sender, email, response, true);
-    return;
+    return {error: "Unverified email address"};
   }
 
 
   const uid = await getUserFromEmail(sender);
   if (!uid) {
-    logger.error("No User found");
+    logger.error(`No User found with ${sender}`);
     const response = {
       ...EMAIL_RESPONSES.noUserFound,
       replace: {
@@ -69,8 +86,74 @@ async function handleEmail(email) {
       },
     };
     await sendEmailResponse(sender, email, response, true);
-    return;
+    return {result: `${sender} has been invited to signup`};
   }
+  const subjectAction = understandSubject(email.subject);
+  switch (subjectAction) {
+    case "addUser":
+      // Code to handle addUser action
+      return await addEmailAddressToUser(email, sender, uid);
+    case "addEvent":
+      // Code to handle addEvent action
+      return await eventHandler(email, sender, uid);
+    default:
+      return await eventHandler(email, sender, uid);
+  }
+}
+
+function understandSubject(subject) {
+  subject = subject.toLowerCase();
+  if (subject.startsWith("add")) {
+    return "addUser";
+  } else if (subject.startsWith("fwd")) {
+    return "addEvent";
+  } else {
+    return "addEvent";
+  }
+}
+
+async function addEmailAddressToUser(email, sender, uid) {
+  const subject = email.subject;
+  const emailRegex = /^add\s+([a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6})$/;
+  const match = subject.match(emailRegex);
+  if (!match) {
+    logger.log(`Email that starts with 'add' but doesn't 
+      have a valid email address after it.`);
+    return await eventHandler(email, sender, uid);
+  }
+  const emailAddressToAdd = match[1];
+  // Check if the email address is already added.
+  // If not, add it to the pending email address list.
+  const existingUid = await getUserFromEmail(emailAddressToAdd);
+  if (existingUid) {
+    logger.error(`${uid} attempted to add 
+      ${emailAddressToAdd}, but already registered to ${existingUid}`);
+    const response = {
+      ...EMAIL_RESPONSES.additionalEmailInUse,
+      replace: {
+        EMAIL_TO_ADD: emailAddressToAdd,
+      },
+    };
+    logger.log(`Sending email additionalEmailInUse to ${sender}`);
+    return await sendEmailResponse(sender, email, response, true);
+  }
+  const verificationCode = await addPendingEmailAddress(uid, emailAddressToAdd);
+  // Send email to the user with the verification code.
+  const response = {
+    ...EMAIL_RESPONSES.addAdditionalEmailAddress,
+    replace: {
+      VERIFICATION_CODE: verificationCode,
+      ORIGINATOR_EMAIL: sender,
+    },
+  };
+  logger.log(
+      // eslint-disable-next-line max-len
+      `Sending email addAdditionalEmailAddress ${emailAddressToAdd} to pending list for ${uid}`);
+  await sendEmailResponse(emailAddressToAdd, email, response, false);
+  return {verificationCode};
+}
+
+async function eventHandler(email, sender, uid) {
   logger.log("User ID: ", uid);
 
   // Can we authenticate with their calendar?
@@ -177,6 +260,7 @@ function threadEmailHtml(original, html) {
 }
 
 function getHtml(messageType) {
+  logger.log("messageType", messageType.templateName);
   let html = mailTemplates[messageType.templateName].html;
   Object.keys(messageType.replace).forEach((key) => {
     html = html.replace(new RegExp(`%${key}%`, "g"), messageType.replace[key]);
@@ -184,18 +268,30 @@ function getHtml(messageType) {
   return html;
 }
 
+function getSubject(messageType) {
+  let subject = mailTemplates[messageType.templateName].subject;
+  Object.keys(messageType.replace).forEach((key) => {
+    subject = subject.replace(new RegExp(`%${key}%`, "g"), messageType.replace[key]);
+  });
+  return subject;
+}
+
 async function sendEmailResponse(sender,
     originalEmail,
     messageType,
     includeThread) {
   let html = getHtml(messageType);
+  let subject = originalEmail.subject;
+  if (messageType.subject) {
+    subject = getSubject(messageType);
+  }
   if (includeThread) {
     html = threadEmailHtml(originalEmail, html);
   }
   await sendEmail({
     to: sender,
     from: MAIN_EMAIL_ADDRESS,
-    subject: originalEmail.subject,
+    subject: subject,
     html: html,
     headers: getEmailThreadHeaders(originalEmail.headers),
   });

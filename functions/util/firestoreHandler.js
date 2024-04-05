@@ -2,13 +2,14 @@
 // const {logger} = require("firebase-functions");
 const {getFirestore} = require("firebase-admin/firestore");
 const {ENVIRONMENT} = require("./credentials");
-
+const {v4: uuidv4} = require("uuid");
+// const {logger} = require("firebase-functions");
 async function getUserFromUID(uid) {
   const userDoc = await getFirestore().collection("Users").doc(uid).get();
   if (!userDoc.exists) {
     throw new Error("User document does not exist");
   }
-  return userDoc.data();
+  return {uid: userDoc.id, ...userDoc.data()};
 }
 
 async function getUserFromEmail(email) {
@@ -71,6 +72,31 @@ async function addUserEmailAddress(user, emails) {
   });
 }
 
+async function addPendingEmailAddress(uid, pendingAddress) {
+  const user = await getUserFromUID(uid);
+  const verificationCode = uuidv4();
+  await getFirestore().collection("PendingEmailAddress")
+      .doc(pendingAddress).set({
+        ownerUid: user.uid,
+        ownerEmail: user.email,
+        verificationCode: verificationCode,
+      });
+  return verificationCode;
+}
+
+async function getPendingEmailAddressByCode(code) {
+  const doc = await getFirestore().collection("PendingEmailAddress")
+      .where("verificationCode", "==", code).get();
+  if (doc.empty) {
+    return null;
+  }
+  const firstDoc = doc.docs[0];
+  return {
+    id: firstDoc.id,
+    ...firstDoc.data(),
+  };
+}
+
 async function storeUserCalendars(user, calendars) {
   for (const calendar of calendars) {
     const firestoreID = `${calendar.uid}${calendar.calendar_id}`;
@@ -93,5 +119,7 @@ module.exports = {
   addUserEmailAddress,
   storeUserCalendars,
   updateUserTokens,
+  addPendingEmailAddress,
+  getPendingEmailAddressByCode,
 };
 

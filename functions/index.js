@@ -31,7 +31,8 @@ db.settings({ignoreUndefinedProperties: true});
 const ENVIRONMENT = functions.config().environment.name;
 
 const {oauthCronJob,
-  signupCallbackHandler} = require("./util/oauthHandler");
+  signupCallbackHandler,
+  verifyAdditionalEmail} = require("./util/authHandler");
 
 // For debugging before we start inviting others to our events.
 const ONLY_INVITE_HOST = true;
@@ -46,7 +47,7 @@ const URL = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&cli
 logger.log(URL);
 
 exports.oauthCallback = functions.https.onRequest(async (req, res) => {
-  logger.log("oauthCallback", req.query);
+  // logger.log("oauthCallback", req.query);
   const [err, userRecord] = await handleAsync(() => signupCallbackHandler(req.query));
   if (err) {
     logger.error("Error in oauthCallback", err);
@@ -65,20 +66,24 @@ const sendgridCallback = functions.https.onRequest(async (req, res) => {
   const result = {};
 
   bb.on("field", (fieldname, val) => {
-    // console.log(`Field [${fieldname}]: value: ${val}`);
     result[fieldname] = val;
   });
 
   bb.on("finish", async () => {
-    // console.log("Done parsing form!");
-    const event = await handleEmail(result);
-    res.json({message: "thanks", data: event});
+    // logger.log("FULL EMAIL BELOW");
+    // logger.log(result); // To capture emails for test bindings.
+    const outcome = await handleEmail(result);
+    res.json({message: "thanks", data: outcome});
   });
 
   bb.end(req.rawBody);
 });
 
 exports[SENDGRID_ENDPOINT] = sendgridCallback;
+
+exports.verifyAdditionalEmail = functions.https.onRequest(async (req, res) => {
+  const [err, addUserRecord] = await handleAsync(() => verifyAdditionalEmail(req, res));
+});
 
 // Refresh Expiring oAuth tokens.
 

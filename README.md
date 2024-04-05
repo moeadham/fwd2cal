@@ -33,6 +33,8 @@ You want to make sure your `redirect_uris` are setup correctly. It is a list, [0
 # Testing
 
 ```
+export TESTER_PRIMARY_GOOGLE_ACCT="your@gmail.com"
+export TESTER_SECONDARY_EMAIL_ACCT="anotherEmailAddressThatYouUse@anything.com"
 cd functions
 npm run test
 ```
