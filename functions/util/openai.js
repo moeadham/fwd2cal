@@ -61,13 +61,20 @@ function parseJsonFromOpenAIResponse(completion, raw) {
   return response;
 }
 
-async function processEmail(email) {
+async function processEmail(email, headers) {
+  const text = `
+  Date: ${headers.Date}
+  Subject: ${headers.Subject}
+  From: ${headers.From}
+  ${email.text}`;
+
+  logger.log(text);
   const messages = [
     {
       role: "system",
       content: prompts.getEventData,
     },
-    {role: "user", content: email.text},
+    {role: "user", content: text},
   ];
   const response = await defaultCompletion(messages);
   Object.keys(response).forEach((key) => {

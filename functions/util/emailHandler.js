@@ -35,6 +35,12 @@ const EMAIL_RESPONSES = {
     templateName: "unableToParse",
     replace: {},
   },
+  aiParseError: {
+    templateName: "aiParseError",
+    replace: {
+      PARSE_ERROR_DESCRIPTION: "",
+    },
+  },
   eventAdded: {
     templateName: "eventAdded",
     replace: {
@@ -165,11 +171,23 @@ async function eventHandler(email, sender, uid) {
   }
 
   // Can we get event details from the thread?
-  const [processEmailErr, event] = await handleAsync(() => processEmail(email));
+  const headers = getEmailHeaders(email.headers, ["Date", "Subject", "From"]);
+  const [processEmailErr, event] = await handleAsync(() => processEmail(email, headers));
   if (processEmailErr) {
-    logger.error("Error processing email: ", processEmailErr);
+    logger.error("OpenAI error: ", processEmailErr);
     await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true);
     return;
+  }
+  if (event.error) {
+    const response = {
+      ...EMAIL_RESPONSES.aiParseError,
+      replace: {
+        PARSE_ERROR_DESCRIPTION: event.description,
+      },
+    };
+    logger.error("Error in email contents: ", event);
+    await sendEmailResponse(sender, email, response, true);
+    return event;
   }
 
   // Can we add the event to their calendar?
@@ -238,6 +256,22 @@ function getEmailThreadHeaders(header) {
     }
   } catch (error) {
     logger.error("Error extracting date with moment from header", error);
+  }
+  return headers;
+}
+
+function getEmailHeaders(header, items) {
+  const headers = {};
+  try {
+    items.forEach((item) => {
+      const pattern = new RegExp(`${item}: (.*)`, "g");
+      const matches = pattern.exec(header);
+      if (matches && matches[1]) {
+        headers[item] = matches[1].trim();
+      }
+    });
+  } catch (error) {
+    logger.error("Error extracting headers", error);
   }
   return headers;
 }

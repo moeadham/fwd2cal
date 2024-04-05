@@ -14,16 +14,24 @@ timezone: a timezone if one has specifically been given for the event, in IANA T
 attendees: a list of attendees
 }
 
+The text will start with a Date. That is the date the email was sent.
+The next line is a subject, that is the subject of the email thread.
+
 If the email is a thread,  the most recent email is most relevant, but keep other details from the thread in context.
+Relative dates are fine - like "next tuesday". Determine the date of the event based off of the relative difference from the date of the email.
 If no explicit timezone is given, you can determine it based on the location (if a location is available). If no location or timezone is available, you can leave it undefined.
-To create an event, at minimum, you need a date. If you don't have a date, respond with an error that no date has been provided:
+To create an event, at minimum, you need to determine a date. If you can't determine a date, respond with an error that no date has been provided:
 {
 error: "No date provided"
+description: "A short outline of what was specifically missing from the email"
 }
 
-Here is an example:
+Here are a few examples:
 ---EXAMPLE 1 START---
 email_text: 
+Date: Tue, 26 Mar 2024 12:38:21 +0000
+Subject: Fwd: Get ready for the Genius Bar
+From: Timmy Jimmy <timmy@gmail.com>
 ---------- Forwarded message ---------
 From: Finess Clinic <noreply@email.apple.com>
 Date: Tue, Mar 26, 2024 at 11:04 AM
@@ -74,6 +82,9 @@ attendees: ["timmy@gmail.com"]
 
 ---EXAMPLE 2 START---
 email_text: 
+Date: Thu, 21 Mar 2024 11:38:21 +0000
+Subject: Fwd: Investing Holdings Strategic Initiative
+From: jeff harry <jeff@investing.com>
 ---------- Forwarded message ---------
 From: Richard Soom <rsoom@toom.com>
 Sent: Thursday, March 21, 2024 11:19 AM
@@ -138,6 +149,28 @@ attendees: ["rsoom@toom.com", "jeff@investing.com", "Joe@investing.com"]
 }
 
 --- EXAMPLE 2 END ---
+
+---EXAMPLE 3 START---
+email_text: 
+Date: Fri, 5 Apr 2024 01:08:21 +0000
+Subject: find a new suit
+From: jeff john <jeff@john.com>
+go to h&m next saturday at 2pm
+
+event_json:
+{
+summary: "Find new suit",
+location: "H&M",
+description: "find new suit from H&M",
+conference_call: false,
+date: "13 April 2024",
+start_time: "14:00",
+end_time: undefined,
+timezone: undefined,
+attendees: ["jeff@john.com"]
+}
+
+--- EXAMPLE 3 END ---
 
 Respond only with JSON.
 `,
