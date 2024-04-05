@@ -3,7 +3,7 @@
 const {logger} = require("firebase-functions");
 const {getUserFromEmail,
   addPendingEmailAddress} = require("./firestoreHandler");
-const {getOauthClient} = require("./oauthHandler");
+const {getOauthClient} = require("./authHandler");
 const {processEmail} = require("./openai");
 const {addEvent} = require("./calendarHelper");
 const {sendEmail} = require("./sendgrid");
@@ -72,13 +72,13 @@ async function handleEmail(email) {
       },
     };
     await sendEmailResponse(sender, email, response, true);
-    return;
+    return {error: "Unverified email address"};
   }
 
 
   const uid = await getUserFromEmail(sender);
   if (!uid) {
-    logger.error("No User found");
+    logger.error(`No User found with ${sender}`);
     const response = {
       ...EMAIL_RESPONSES.noUserFound,
       replace: {
@@ -86,7 +86,7 @@ async function handleEmail(email) {
       },
     };
     await sendEmailResponse(sender, email, response, true);
-    return;
+    return {result: `${sender} has been invited to signup`};
   }
   const subjectAction = understandSubject(email.subject);
   switch (subjectAction) {
@@ -150,7 +150,7 @@ async function addEmailAddressToUser(email, sender, uid) {
       // eslint-disable-next-line max-len
       `Sending email addAdditionalEmailAddress ${emailAddressToAdd} to pending list for ${uid}`);
   await sendEmailResponse(emailAddressToAdd, email, response, false);
-  return;
+  return {verificationCode};
 }
 
 async function eventHandler(email, sender, uid) {

@@ -4,12 +4,14 @@ const {getUserFromUID,
   storeUser,
   addUserEmailAddress,
   storeUserCalendars,
-  updateUserTokens} = require("./firestoreHandler");
+  updateUserTokens,
+  getPendingEmailAddressByCode} = require("./firestoreHandler");
 const {getUserCalendars} = require("./calendarHelper");
 const {google} = require("googleapis");
 const {CREDENTIALS, REDIRECT_URI_INDEX} = require("./credentials");
 const {getAuth} = require("firebase-admin/auth");
 const {logger} = require("firebase-functions");
+const {isUUID} = require("validator");
 
 async function refreshOAuthTokens(uid) {
   const oauth2Client = await getOauthClient(uid);
@@ -124,11 +126,34 @@ async function signupCallbackHandler(query) {
   }
 }
 
+// TODO: other handlers should probably just handle res
+// directly as well.
+async function verifyAdditionalEmail(req, res) {
+  if (!(req?.query?.uuid) && isUUID(req.query.uuid)) {
+    // return a 404.
+    return res.redirect(302, "https://fwd2cal.com/not-found");
+  }
+
+  logger.log("Adding pending email with uuid:", req.query.uuid);
+  const pendingEmail = await getPendingEmailAddressByCode(req.query.uuid);
+  if (!pendingEmail) {
+    return res.redirect(302, "https://fwd2cal.com/not-found");
+  }
+  const mainUser = await getUserFromUID(pendingEmail.ownerUid);
+  await addUserEmailAddress(mainUser, [{
+    email: pendingEmail.id,
+    default: false,
+  }]);
+  logger.log(`added ${pendingEmail.id} to user account ${mainUser.uid}`);
+  return res.send({data: mainUser.email});
+}
+
 module.exports = {
   getOauthClient,
   refreshOAuthTokens,
   oauthCronJob,
   signupCallbackHandler,
+  verifyAdditionalEmail,
 };
 
 

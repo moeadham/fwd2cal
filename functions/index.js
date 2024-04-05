@@ -31,7 +31,8 @@ db.settings({ignoreUndefinedProperties: true});
 const ENVIRONMENT = functions.config().environment.name;
 
 const {oauthCronJob,
-  signupCallbackHandler} = require("./util/oauthHandler");
+  signupCallbackHandler,
+  verifyAdditionalEmail} = require("./util/authHandler");
 
 // For debugging before we start inviting others to our events.
 const ONLY_INVITE_HOST = true;
@@ -65,12 +66,12 @@ const sendgridCallback = functions.https.onRequest(async (req, res) => {
   const result = {};
 
   bb.on("field", (fieldname, val) => {
-    // console.log(`Field [${fieldname}]: value: ${val}`);
     result[fieldname] = val;
   });
 
   bb.on("finish", async () => {
-    // console.log("Done parsing form!");
+    // logger.log("FULL EMAIL BELOW");
+    // logger.log(result); // To capture emails for test bindings.
     const outcome = await handleEmail(result);
     res.json({message: "thanks", data: outcome});
   });
@@ -80,8 +81,8 @@ const sendgridCallback = functions.https.onRequest(async (req, res) => {
 
 exports[SENDGRID_ENDPOINT] = sendgridCallback;
 
-exports.addEmail = functions.https.onRequest(async (req, res) => {
-
+exports.verifyAdditionalEmail = functions.https.onRequest(async (req, res) => {
+  const [err, addUserRecord] = await handleAsync(() => verifyAdditionalEmail(req, res));
 });
 
 // Refresh Expiring oAuth tokens.

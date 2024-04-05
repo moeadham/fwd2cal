@@ -3,13 +3,13 @@
 const {getFirestore} = require("firebase-admin/firestore");
 const {ENVIRONMENT} = require("./credentials");
 const {v4: uuidv4} = require("uuid");
-
+// const {logger} = require("firebase-functions");
 async function getUserFromUID(uid) {
   const userDoc = await getFirestore().collection("Users").doc(uid).get();
   if (!userDoc.exists) {
     throw new Error("User document does not exist");
   }
-  return userDoc.data();
+  return {uid: userDoc.id, ...userDoc.data()};
 }
 
 async function getUserFromEmail(email) {
@@ -90,7 +90,11 @@ async function getPendingEmailAddressByCode(code) {
   if (doc.empty) {
     return null;
   }
-  return doc.docs[0].data();
+  const firstDoc = doc.docs[0];
+  return {
+    id: firstDoc.id,
+    ...firstDoc.data(),
+  };
 }
 
 async function storeUserCalendars(user, calendars) {
