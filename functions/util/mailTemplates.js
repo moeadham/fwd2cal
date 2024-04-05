@@ -17,11 +17,16 @@ Note: If you've already signed up for fwd2cal, and want to fwd events from this 
   },
   oauthFailed: {
     html:
-`Sorry - there was an issue authenticating with google. Please go to https://fwd2cal.com/auth/google, and then forward your thread again.`,
+`Sorry - there was an issue authenticating with Google. Please click <a href="https://fwd2cal.com/signup">to authorize Google again</a>, and then forward your thread another time.`,
   },
   unableToParse: {
     html:
 `Sorry - AI wasn't able to find a date in your email. Forward the thread again and include some instructions to help AI figure it out.`,
+  },
+  aiParseError: {
+    html:
+`Sorry - AI wasn't able to find a date in your email. %PARSE_ERROR_DESCRIPTION%
+Forward the thread again and include some instructions to help AI figure it out.`,
   },
   eventAdded: {
     html:
@@ -33,7 +38,7 @@ Note: If you've already signed up for fwd2cal, and want to fwd events from this 
     subject:
 `%ORIGINATOR_EMAIL% would like you to add events to their calendar`,
     html:
-`To join %ORIGINATOR_EMAIL%'s fwd2cal account, please click <a href="https://fwd2cal.com/%VERIFICATION_CODE%">here</a><br><br>
+`To join %ORIGINATOR_EMAIL%'s fwd2cal account, please click <a href="https://fwd2cal.com/auth/verifyAdditionalEmail?uuid=%VERIFICATION_CODE%">here</a><br><br>
 
 After you approve, you can forward any email to calendar@fwd2cal.com, and it will automatically be turned into an event in %ORIGINATOR_EMAIL%'s calendar using AI.<br><br>
 

@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 /* eslint-disable max-len */
 /* eslint-disable no-undef */
 const chai = require("chai");
@@ -25,6 +26,7 @@ describe("fwd2cal", () => {
       console.log(res.body);
       expect(res.body).to.be.an("object");
       // We should get an event
+      expect(res.body.data).to.not.have.property("error");
       expect(res.body.data.kind).to.equal("calendar#event");
       done();
     });
@@ -87,6 +89,24 @@ describe("fwd2cal", () => {
       console.log(res.body);
       // Should get added to owners calendar.
       expect(res.body).to.be.an("object");
+      done();
+    });
+  });
+  it("UT6 try a basic email with no forward but instructions", (done) => {
+    const testMessage = bindings.basicDetailedEmail;
+    const req = chai.request(apiURL).post("/sendgridCallback").type("form");
+    Object.keys(testMessage).forEach((key) => {
+      req.field(key, testMessage[key]);
+    });
+    req.end((err, res) => {
+      expect(err).to.be.null;
+      expect(res).to.have.status(200);
+      console.log(res.body);
+      // Should get added to owners calendar.
+      expect(res.body).to.be.an("object");
+      expect(res.body.data).to.be.an("object");
+      expect(res.body.data).to.not.have.property("error");
+      expect(res.body.data.kind).to.equal("calendar#event");
       done();
     });
   });
