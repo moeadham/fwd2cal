@@ -1,5 +1,29 @@
 
-# Self hosting setup
+# fwd2cal
+
+forward email => get calendar event
+
+That's it. No buttons, no clicking - just forward an email, and a calendar event gets added to your Google Calendar.
+
+fwd2cal uses an LLM to parse the thread, generate a JSON of the event details, and then adds the event to your google calendar.
+
+[fwd2cal.com](https://fwd2cal.com) - running in production, free until it gets annoying/expensive to run.
+
+You can self host - it runs on firebase functions.
+
+## Features:
+
+- Signup with an email: just email calendar@fwd2cal.com and you'll be sent a google auth link.
+- Send from multiple email addresses: send "add myworkemail@address.com" to calendar@fwd2cal.com, and then you can add events to your google calendar from another email address
+- Completely private: No logging, or storage of any emails. All that is stored is email addresses.
+- That's it. The goal is to just do one thing correctly and stay out of the way of the user.
+
+## Self hosting setup
+
+You will need:
+1. a firebase project
+2. an openAI API key with gpt4 access
+3. a sendgrid account setup with a domain to receive emails
 
 ```
 firebase functions:config:set environment.name="production"
@@ -9,10 +33,8 @@ firebase functions:config:set environment.sendgrid_endpoint="very_hard_to_guess_
 ```
 
 Make sure you then set the secret URL as your parse URL in sendgrid.
-I would also have a look at the redirect URL in firestore.json for `/signup`
 
-
-# Local setup
+## Local setup
 
 For local, edit .runtimeconfig.json
 ```
@@ -30,14 +52,15 @@ Also - you're probably going to want to save your credentials from https://conso
 You want to make sure your `redirect_uris` are setup correctly. It is a list, [0] should be the default from firebase, [1] should be `http://localhost:5001/yourappname/your-region/oauthCallback`, and [2] should be your the prod url.
 
 
-# Testing
+## Testing
 
 ```
 export TESTER_PRIMARY_GOOGLE_ACCT="your@gmail.com"
 export TESTER_SECONDARY_EMAIL_ACCT="anotherEmailAddressThatYouUse@anything.com"
 cd functions
-npm run test
+npm test
 ```
+Make sure you authorize your google account in 30 seconds after starting the test so the tests can run.
 
 To test pubsub cron jobs:
 ```
@@ -45,3 +68,13 @@ firebase functions:shell
 refreshTokensScheduled()
 ```
 If you know how to make a test script properly send a pubsub message on the firebase emulator, a PR would be appreciated.
+
+## Contributing
+
+All contributions are welcome. I will do by best to keep `main` stable.
+
+### Where you can help:
+
+- `functions/util/prompts.js` - Prompt engineers can help here, if you notice fwd2cal fail to add your event correctly, think of adding an example to the prompt that teaches gpt4
+- Timezones - I find the current prompt is bad at understanding timezones; likely worth adding another prompt only to detect the timezone.
+- Multiple calendars: right now all events are added to the default calendar - but GPT4 can likely understand the context of all the users calendar and select an appropriate one.
