@@ -68,7 +68,7 @@ async function processEmail(email, headers) {
   From: ${headers.From}
   ${email.text}`;
 
-  logger.log(text);
+  // logger.log(text);
   const messages = [
     {
       role: "system",

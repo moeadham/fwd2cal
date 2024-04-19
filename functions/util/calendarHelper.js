@@ -9,7 +9,7 @@ const DEFAULT_EVENT_LENGTH = 30;
 const ONLY_INVITE_HOST = true;
 
 function generateTimeObject(event, primaryCalendar) {
-  logger.log("event", event);
+  // logger.log("event", event);
   const timezone = primaryCalendar.timeZone;
   let eventTimeZone = event.timeZone;
   if (!Intl.DateTimeFormat(undefined, {timeZone: eventTimeZone})
@@ -78,13 +78,13 @@ async function addEvent(oauth2Client, event) {
       {email: primaryCalendar.id,
         responseStatus: "accepted"}];
   }
-  logger.log("Attempting to add event to google:", requestBody);
+  logger.log("Attempting to add event to google.");
   const insertEvent = await calendar.events.insert({
     calendarId: primaryCalendar.id,
     resource: requestBody,
     sendUpdates: "all",
   });
-  logger.log("Event added to google:", insertEvent.data);
+  logger.log("Event added to google.", insertEvent.data.htmlLink);
   return insertEvent.data;
 }
 

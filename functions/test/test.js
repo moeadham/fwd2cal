@@ -14,6 +14,25 @@ const TESTER_PRIMARY_GOOGLE_ACCT = process.env.TESTER_PRIMARY_GOOGLE_ACCT;
 const TESTER_SECONDARY_EMAIL_ACCT = process.env.TESTER_SECONDARY_EMAIL_ACCT;
 
 describe("fwd2cal", () => {
+  it("UT0 get login URL and wait for tester to create account", (done) => {
+    chai.request(apiURL)
+        .get("/signup")
+        .redirects(0) // Prevent automatic following of redirects
+        .end((err, res) => {
+          expect(res).to.have.status(302); // Check that the status is 302
+          if (err) {
+            console.error("Error fetching signup URL:", err);
+            done(err);
+          } else {
+            console.log("Redirect URL:", res.headers.location);
+            setTimeout(() => {
+              console.log("If you want to test - you need to complete this Google Authorization in the next 30 seconds!");
+              console.log("-------------------------------------------");
+              done();
+            }, 30000);
+          }
+        });
+  });
   it("UT1 test generating an event", (done) => {
     const testMessage = bindings.emailFromMain;
     const req = chai.request(apiURL).post("/sendgridCallback").type("form");
@@ -107,6 +126,37 @@ describe("fwd2cal", () => {
       expect(res.body.data).to.be.an("object");
       expect(res.body.data).to.not.have.property("error");
       expect(res.body.data.kind).to.equal("calendar#event");
+      done();
+    });
+  });
+  it("UT7 remove secondary email address", (done) => {
+    const testMessage = bindings.removeEmailAddress;
+    const req = chai.request(apiURL).post("/sendgridCallback").type("form");
+    Object.keys(testMessage).forEach((key) => {
+      req.field(key, testMessage[key]);
+    });
+    req.end((err, res) => {
+      expect(err).to.be.null;
+      expect(res).to.have.status(200);
+      console.log(res.body);
+      // Should get added to owners calendar.
+      expect(res.body).to.be.an("object");
+      expect(res.body.data).to.include("removed");
+      done();
+    });
+  });
+  it("UT8 delete account", (done) => {
+    const testMessage = bindings.deleteAccount;
+    const req = chai.request(apiURL).post("/sendgridCallback").type("form");
+    Object.keys(testMessage).forEach((key) => {
+      req.field(key, testMessage[key]);
+    });
+    req.end((err, res) => {
+      expect(err).to.be.null;
+      expect(res).to.have.status(200);
+      console.log(res.body);
+      expect(res.body).to.be.an("object");
+      expect(res.body.data).to.include("deleted");
       done();
     });
   });

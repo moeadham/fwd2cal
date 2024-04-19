@@ -20,3 +20,6 @@ functions/firebase-debug.log
 test/bindings.js
 firebase-debug.log
 pubsub-debug.log
+
+# Local Netlify folder
+.netlify

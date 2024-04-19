@@ -3,10 +3,9 @@ const {getUserFromUID,
   findUsersWithExpiringTokens,
   storeUser,
   addUserEmailAddress,
-  storeUserCalendars,
   updateUserTokens,
-  getPendingEmailAddressByCode} = require("./firestoreHandler");
-const {getUserCalendars} = require("./calendarHelper");
+  getPendingEmailAddressByCode,
+} = require("./firestoreHandler");
 const {google} = require("googleapis");
 const {CREDENTIALS, REDIRECT_URI_INDEX} = require("./credentials");
 const {getAuth} = require("firebase-admin/auth");
@@ -66,6 +65,17 @@ async function oauthCronJob() {
   }
 }
 
+async function deleteAccount(uid) {
+  const auth = getAuth();
+  try {
+    await auth.deleteUser(uid);
+    logger.log(`Successfully deleted user with UID: ${uid}`);
+  } catch (error) {
+    logger.error(`Failed to delete user with UID: ${uid}`, error);
+    throw error;
+  }
+}
+
 async function signupCallbackHandler(query) {
   logger.log("oauthCallback", query);
   const oauth2Client = new google.auth.OAuth2(
@@ -115,8 +125,6 @@ async function signupCallbackHandler(query) {
 
     await storeUser(tokens, userRecord);
     await addUserEmailAddress(userRecord, [{email: userEmail, default: true}]);
-    const calendars = await getUserCalendars(oauth2Client, userRecord.uid);
-    await storeUserCalendars(userRecord, calendars);
     return userRecord;
   } catch (error) {
     console.error("Error exchanging code for tokens", error);
@@ -154,6 +162,7 @@ module.exports = {
   oauthCronJob,
   signupCallbackHandler,
   verifyAdditionalEmail,
+  deleteAccount,
 };
 
 

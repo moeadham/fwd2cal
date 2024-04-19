@@ -57,7 +57,7 @@ exports.oauthCallback = functions.https.onRequest(async (req, res) => {
     res.status(err.code).send(err.message);
     return;
   }
-  res.json({message: "Authentication successful", uid: userRecord.uid});
+  res.redirect(302, "https://fwd2cal.com/thanks");
 });
 
 const sendgridCallback = functions.https.onRequest(async (req, res) => {
@@ -89,6 +89,7 @@ exports.verifyAdditionalEmail = functions.https.onRequest(async (req, res) => {
 });
 
 // Refresh Expiring oAuth tokens.
+
 
 exports.refreshTokensScheduled = functions.pubsub.schedule("0 * * * *")
     .timeZone("America/New_York") // Users can choose timezone - default is America/Los_Angeles
