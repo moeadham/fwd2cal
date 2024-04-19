@@ -1,7 +1,7 @@
 
 # fwd2cal
 
-forward email => get calendar event
+forward an email => get calendar event
 
 That's it. No buttons, no clicking - just forward an email, and a calendar event gets added to your Google Calendar.
 
@@ -9,13 +9,16 @@ fwd2cal uses an LLM to parse the thread, generate a JSON of the event details, a
 
 [fwd2cal.com](https://fwd2cal.com) - running in production, free until it gets annoying/expensive to run.
 
+https://github.com/moeadham/fwd2cal/assets/2141397/bb081bb1-9518-4cb4-8bcb-a1b6559f0eb5
+
+
 You can self host - it runs on firebase functions.
 
 ## Features:
 
 - Signup with an email: just email calendar@fwd2cal.com and you'll be sent a google auth link.
-- Send from multiple email addresses: send "add myworkemail@address.com" to calendar@fwd2cal.com, and then you can add events to your google calendar from another email address
-- Completely private: No logging, or storage of any emails. All that is stored is email addresses.
+- Send from multiple email addresses: send `add myworkemail@address.com` to calendar@fwd2cal.com, and then you can add events to your google calendar from another email address
+- Completely private: No logging, or storage of any emails. All that is stored are your email addresses.
 - That's it. The goal is to just do one thing correctly and stay out of the way of the user.
 
 ## Self hosting setup
@@ -49,7 +52,7 @@ For local, edit .runtimeconfig.json
 
 Also - you're probably going to want to save your credentials from https://console.cloud.google.com/apis/credentials to: `functions/auth/google-auth-credentials.json`.
 
-You want to make sure your `redirect_uris` are setup correctly. It is a list, [0] should be the default from firebase, [1] should be `http://localhost:5001/yourappname/your-region/oauthCallback`, and [2] should be your the prod url.
+You want to make sure your `redirect_uris` are setup correctly. It is a list, [0] should be the default from firebase, [1] should be `http://localhost:5001/yourappname/your-region/oauthCallback`, and [2] should be the prod url.
 
 
 ## Testing
@@ -78,3 +81,10 @@ All contributions are welcome. I will do by best to keep `main` stable.
 - `functions/util/prompts.js` - Prompt engineers can help here, if you notice fwd2cal fail to add your event correctly, think of adding an example to the prompt that teaches gpt4
 - Timezones - I find the current prompt is bad at understanding timezones; likely worth adding another prompt only to detect the timezone.
 - Multiple calendars: right now all events are added to the default calendar - but GPT4 can likely understand the context of all the users calendar and select an appropriate one.
+- Get rid of all the hard coded references to fwd2cal.com so it can be self hosted easier.
+- Find a way to add a test for the oAuth refresh tokens. I didn't bother
+- Upgrade to firebase functions v2
+
+## Author
+
+This was written by [@moeadham](https://twitter.com/moeadham) to get familiar with firebase and webstudio - training for a much larger project I'm working on.
