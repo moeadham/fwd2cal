@@ -3,51 +3,85 @@ const mailTemplates = {
   noUserFound: {
     html:
 `Welcome!<br><br>
-To sign up for fwd2cal, please click the link below. This means you accept our <a href="https://fwd2cal.com/terms">terms of service</a> and <a href="https://fwd2cal.com/privacy">privacy policy</a>.<br>
-<a href="https://fwd2cal.com/signup">Sign up with Google.</a><br><br>
+To sign up for fwd2cal, please click the link below. This means you accept our <a href="https://fwd2cal.com/terms">terms of service</a> and <a href="https://fwd2cal.com/privacy">privacy policy</a>.<br><br>
+<a href="https://app.fwd2cal.com/signup"><img src="https://app.fwd2cal.com/signup-with-google.png" alt="Sign Up with Google" width="182" height="42" style="display: block;"></a><br><br>
 If you forwarded an email to have it added to your calendar - you will need to do that again after signing up.<br><br>
 
-Note: If you've already signed up for fwd2cal, and want to fwd events from this email address, send an email from your main Gmail account to <a href="mailto:calendar@fwd2cal.com">calendar@fwd2cal.com</a> with the subject "add %FROM_EMAIL%".<br>
+Note: If you've already signed up for fwd2cal, and want to fwd events from this email address, send an email from your main Gmail account to <a href="mailto:calendar@fwd2cal.com?subject=add %FROM_EMAIL%">calendar@fwd2cal.com</a> with the subject "add %FROM_EMAIL%".<br>
 `,
   },
   unverifiedEmail: {
     html:
-`Sorry - but something is wrong with your e-mail configuration and we can't verify you're actually %FROM_EMAIL%
+`Sorry - but something is wrong with your e-mail configuration and we can't verify you're actually %FROM_EMAIL%.
+
+<br><br>You can always ask for help: <a href="mailto:support@fwd2cal.com">support@fwd2cal.com</a>
 `,
   },
   oauthFailed: {
     html:
-`Sorry - there was an issue authenticating with Google. Please click <a href="https://fwd2cal.com/signup">to authorize Google again</a>, and then forward your thread another time.`,
+`Sorry - there was an issue authenticating with Google. Please click <a href="https://app.fwd2cal.com/signup">to authorize Google again</a>, and then forward your thread another time.
+
+<br><br>You can always ask for help: <a href="mailto:support@fwd2cal.com">support@fwd2cal.com</a>`,
   },
   unableToParse: {
     html:
-`Sorry - AI wasn't able to find a date in your email. Forward the thread again and include some instructions to help AI figure it out.`,
+`Sorry - AI wasn't able to find a date in your email. Forward the thread again and include some instructions to help AI figure it out.
+
+<br><br>You can always ask for help: <a href="mailto:support@fwd2cal.com">support@fwd2cal.com</a>`,
   },
   aiParseError: {
     html:
 `Sorry - AI wasn't able to find a date in your email. %PARSE_ERROR_DESCRIPTION%
-Forward the thread again and include some instructions to help AI figure it out.`,
+Forward the thread again and include some instructions to help AI figure it out.
+
+<br><br>You can always ask for help: <a href="mailto:support@fwd2cal.com">support@fwd2cal.com</a>`,
   },
   eventAdded: {
     html:
 `Event added to your calendar. Have a look at it <a href="%EVENT_LINK%">here</a>.
 <br>Date: %EVENT_DATE%
-<br>Attendees: %EVENT_ATTENDEES%`,
+<br>Attendees: %EVENT_ATTENDEES%
+
+<br><br>You can always ask for help: <a href="mailto:support@fwd2cal.com">support@fwd2cal.com</a>`,
   },
   addAdditionalEmailAddress: {
     subject:
 `%ORIGINATOR_EMAIL% would like you to add events to their calendar`,
     html:
-`To join %ORIGINATOR_EMAIL%'s fwd2cal account, please click <a href="https://fwd2cal.com/auth/verifyAdditionalEmail?uuid=%VERIFICATION_CODE%">here</a><br><br>
+`To join %ORIGINATOR_EMAIL%'s fwd2cal account, please click <a href="https://app.fwd2cal.com/auth/verifyAdditionalEmail?uuid=%VERIFICATION_CODE%">here</a><br><br>
 
 After you approve, you can forward any email to calendar@fwd2cal.com, and it will automatically be turned into an event in %ORIGINATOR_EMAIL%'s calendar using AI.<br><br>
 
 If not, you can ignore this email 🤷.
+
+<br><br>You can always ask for help: <a href="mailto:support@fwd2cal.com">support@fwd2cal.com</a>
 `,
   },
   additionalEmailInUse: {
     html:
-`Sorry - but %EMAIL_TO_ADD% is already in use by another fwd2cal account. If you want to add it to this account, you'll need the current account holder to send an email to calendar@fwd2cal.com with the subject "remove %EMAIL_TO_ADD%"`,
+`Sorry - but %EMAIL_TO_ADD% is already in use by another fwd2cal account. If you want to add it to this account, you'll need the current account holder to send an email to calendar@fwd2cal.com with the subject "remove %EMAIL_TO_ADD%"
+
+<br><br>You can always ask for help: <a href="mailto:support@fwd2cal.com">support@fwd2cal.com</a>`,
+  },
+  removalEmailInUse: {
+    html:
+`Sorry - but %EMAIL_TO_REMOVE% is in use by another fwd2cal account, not your account."
+
+<br><br>You can always ask for help: <a href="mailto:support@fwd2cal.com">support@fwd2cal.com</a>`,
+  },
+  emailAddressRemoved: {
+    html:
+`%EMAIL_TO_REMOVE% has been removed from your account.
+
+<br><br>You can always ask for help: <a href="mailto:support@fwd2cal.com">support@fwd2cal.com</a>`,
+  },
+  userDeleted: {
+    html:
+`Sorry to see you go! Your account has been completely deleted. You can always sign up again by sending an email to <a href="mailto:calendar@fwd2cal.com?subject=signup">calendar@fwd2cal.com</a>.<br><br>
+
+You may want disconnect fwd2cal from google <a href="https://myaccount.google.com/connections">here</a>.
+
+<br><br>You can always ask for help: <a href="mailto:support@fwd2cal.com">support@fwd2cal.com</a>`,
   },
 };
 

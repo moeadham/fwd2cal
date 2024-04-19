@@ -1,8 +1,8 @@
 #!/bin/bash
 echo "Starting firebase emulator"
-firebase emulators:start --only functions > /dev/stdout &
+firebase emulators:start > /dev/stdout &
 LOGS_PID=$!
-sleep 5
+sleep 10
 
 echo "running tests"
 mocha test/test.js --timeout 99999999999 || TEST_FAILED=true
@@ -14,4 +14,4 @@ kill $LOGS_PID
 if [ "$TEST_FAILED" = true ]; then
     exit 1
 fi
-sleep 2
+sleep 10

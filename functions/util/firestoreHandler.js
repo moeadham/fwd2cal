@@ -72,7 +72,12 @@ async function addUserEmailAddress(user, emails) {
   });
 }
 
+async function removeEmailAddress(email) {
+  await getFirestore().collection("EmailAddress").doc(email).delete();
+}
+
 async function addPendingEmailAddress(uid, pendingAddress) {
+  // TODO: ID should be the verification code, not the address.
   const user = await getUserFromUID(uid);
   const verificationCode = uuidv4();
   await getFirestore().collection("PendingEmailAddress")
@@ -97,18 +102,26 @@ async function getPendingEmailAddressByCode(code) {
   };
 }
 
-async function storeUserCalendars(user, calendars) {
-  for (const calendar of calendars) {
-    const firestoreID = `${calendar.uid}${calendar.calendar_id}`;
-    const calendarRef = getFirestore().collection("Calendars").doc(firestoreID);
-    await calendarRef.get().then((doc) => {
-      if (doc.exists) {
-        calendarRef.update(calendar);
-      } else {
-        calendarRef.set(calendar);
-      }
-    });
-  }
+async function deleteUser(uid) {
+  // Delete all email addresses associated to the uid.
+  const batch = getFirestore().batch();
+  const emailSnapshot = await getFirestore()
+      .collection("EmailAddress").where("uid", "==", uid).get();
+  emailSnapshot.forEach((doc) => {
+    batch.delete(doc.ref);
+  });
+
+  const pendingEmailSnapshot = await getFirestore()
+      .collection("PendingEmailAddress").where("ownerUid", "==", uid).get();
+  pendingEmailSnapshot.forEach((doc) => {
+    batch.delete(doc.ref);
+  });
+
+  await batch.commit();
+  // Delete the account.
+  await getFirestore().collection("Users").doc(uid).delete();
+  // You still need to delete the user from firebase.
+  return;
 }
 
 module.exports = {
@@ -117,9 +130,10 @@ module.exports = {
   findUsersWithExpiringTokens,
   storeUser,
   addUserEmailAddress,
-  storeUserCalendars,
   updateUserTokens,
   addPendingEmailAddress,
   getPendingEmailAddressByCode,
+  removeEmailAddress,
+  deleteUser,
 };
 

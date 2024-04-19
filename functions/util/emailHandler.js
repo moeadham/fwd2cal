@@ -2,8 +2,11 @@
 /* eslint-disable require-jsdoc */
 const {logger} = require("firebase-functions");
 const {getUserFromEmail,
-  addPendingEmailAddress} = require("./firestoreHandler");
-const {getOauthClient} = require("./authHandler");
+  addPendingEmailAddress,
+  removeEmailAddress,
+  deleteUser} = require("./firestoreHandler");
+const {getOauthClient,
+  deleteAccount} = require("./authHandler");
 const {processEmail} = require("./openai");
 const {addEvent} = require("./calendarHelper");
 const {sendEmail} = require("./sendgrid");
@@ -63,6 +66,22 @@ const EMAIL_RESPONSES = {
       EMAIL_TO_ADD: "",
     },
   },
+  removalEmailInUse: {
+    templateName: "removalEmailInUse",
+    replace: {
+      EMAIL_TO_REMOVE: "",
+    },
+  },
+  emailAddressRemoved: {
+    templateName: "emailAddressRemoved",
+    replace: {
+      EMAIL_TO_REMOVE: "",
+    },
+  },
+  userDeleted: {
+    templateName: "userDeleted",
+    replace: {},
+  },
 };
 
 async function handleEmail(email) {
@@ -80,7 +99,19 @@ async function handleEmail(email) {
     await sendEmailResponse(sender, email, response, true);
     return {error: "Unverified email address"};
   }
-
+  // Is this a support email?
+  const to = getRecipientsFromRawEmail(email);
+  if (to.includes("support@fwd2cal.com")) {
+    logger.debug("support email received");
+    const content = `From: ${sender} <br><br> Subject: ${email.subject} <br><br> ${email.html}`;
+    await sendEmail({
+      to: "fwd2cal@googlegroups.com",
+      from: MAIN_EMAIL_ADDRESS,
+      subject: email.subject,
+      html: content,
+    });
+    return {result: `email forwarded to support group.`};
+  }
 
   const uid = await getUserFromEmail(sender);
   if (!uid) {
@@ -95,10 +126,15 @@ async function handleEmail(email) {
     return {result: `${sender} has been invited to signup`};
   }
   const subjectAction = understandSubject(email.subject);
+  logger.log(`Request from ${sender} to ${subjectAction}`);
   switch (subjectAction) {
     case "addUser":
       // Code to handle addUser action
       return await addEmailAddressToUser(email, sender, uid);
+    case "removeEmail":
+      return await removeEmailAddressFromUser(email, sender, uid);
+    case "deleteAccount":
+      return await deleteUserAccount(email, sender, uid);
     case "addEvent":
       // Code to handle addEvent action
       return await eventHandler(email, sender, uid);
@@ -111,6 +147,10 @@ function understandSubject(subject) {
   subject = subject.toLowerCase();
   if (subject.startsWith("add")) {
     return "addUser";
+  } else if (subject.startsWith("remove")) {
+    return "removeEmail";
+  } else if (subject.startsWith("delete account")) {
+    return "deleteAccount";
   } else if (subject.startsWith("fwd")) {
     return "addEvent";
   } else {
@@ -118,7 +158,60 @@ function understandSubject(subject) {
   }
 }
 
+async function deleteUserAccount(email, sender, uid) {
+  await deleteUser(uid);
+  await deleteAccount(uid);
+  const response = {
+    ...EMAIL_RESPONSES.userDeleted,
+    replace: {},
+  };
+  await sendEmailResponse(sender, email, response, true);
+  return `${uid} account deleted.`;
+}
+
+
+async function removeEmailAddressFromUser(email, sender, uid) {
+  // TODO: Make sure sender is the main account? Let's see if this goes wrong.
+  const subject = email.subject;
+  const emailRegex = /^remove\s+([a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6})$/;
+  const match = subject.match(emailRegex);
+  if (!match) {
+    logger.log(`Email that starts with 'remove' but doesn't 
+      have a valid email address after it.`);
+    return await eventHandler(email, sender, uid);
+  }
+  const emailAddressToRemove = match[1];
+  // Check if the email address is already added.
+  // If not, add it to the pending email address list.
+  const existingUid = await getUserFromEmail(emailAddressToRemove);
+  if (existingUid !== uid) {
+    logger.error(`${uid} attempted to remove 
+      ${emailAddressToRemove}, but registered to ${existingUid}`);
+    const response = {
+      ...EMAIL_RESPONSES.removalEmailInUse,
+      replace: {
+        EMAIL_TO_REMOVE: emailAddressToRemove,
+      },
+    };
+    logger.log(`Sending email additionalEmailInUse to ${sender}`);
+    return await sendEmailResponse(sender, email, response, true);
+  } else {
+    await removeEmailAddress(emailAddressToRemove);
+    logger.log(`${uid} to removed
+      ${emailAddressToRemove}, uid ${existingUid}`);
+    const response = {
+      ...EMAIL_RESPONSES.emailAddressRemoved,
+      replace: {
+        EMAIL_TO_REMOVE: emailAddressToRemove,
+      },
+    };
+    await sendEmailResponse(sender, email, response, true);
+    return `${emailAddressToRemove} removed.`;
+  }
+}
+
 async function addEmailAddressToUser(email, sender, uid) {
+  // TODO: Make sure sender is the main account? Let's see if this goes wrong.
   const subject = email.subject;
   const emailRegex = /^add\s+([a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6})$/;
   const match = subject.match(emailRegex);
@@ -160,7 +253,7 @@ async function addEmailAddressToUser(email, sender, uid) {
 }
 
 async function eventHandler(email, sender, uid) {
-  logger.log("User ID: ", uid);
+  // logger.log("User ID: ", uid);
 
   // Can we authenticate with their calendar?
   const [oauthErr, oauth2Client] = await handleAsync(() => getOauthClient(uid));
@@ -216,11 +309,24 @@ async function eventHandler(email, sender, uid) {
 function getSenderFromRawEmail(email) {
   let sender;
   try {
-    sender = JSON.parse(email.envelope).from.toLowerCase();
+    const envelope = JSON.parse(email.envelope);
+    sender = envelope.from.toLowerCase();
   } catch (error) {
     logger.error("Error parsing envelope", error);
   }
   return sender;
+}
+
+function getRecipientsFromRawEmail(email) {
+  let to;
+  try {
+    const envelope = JSON.parse(email.envelope);
+    to = envelope.to;
+    to = to.map((email) => email.toLowerCase());
+  } catch (error) {
+    logger.error("Error parsing envelope", error);
+  }
+  return to;
 }
 
 // eslint-disable-next-line no-unused-vars

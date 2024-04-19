@@ -51,6 +51,10 @@
         "destination": "/404.html"
       },
       {
+        "source": "/signup-with-google.png",
+        "destination": "/signin-with-google.png"
+      },
+      {
         "source": "/auth/verifyAdditionalEmail",
         "function": "verifyAdditionalEmail"
       },
