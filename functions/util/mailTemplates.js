@@ -3,8 +3,8 @@ const mailTemplates = {
   noUserFound: {
     html:
 `Welcome!<br><br>
-To sign up for fwd2cal, please click the link below. This means you accept our <a href="https://fwd2cal.com/terms">terms of service</a> and <a href="https://fwd2cal.com/privacy">privacy policy</a>.<br><br>
-<a href="https://app.fwd2cal.com/signup"><img src="https://app.fwd2cal.com/signup-with-google.png" alt="Sign Up with Google" width="182" height="42" style="display: block;"></a><br><br>
+To sign up for fwd2cal, please click the link below.<br><br>
+<a href="https://fwd2cal.com/signup-consent"><img src="https://app.fwd2cal.com/signup-with-google.png" alt="Sign Up with Google" width="182" height="42" style="display: block;"></a><br><br>
 If you forwarded an email to have it added to your calendar - you will need to do that again after signing up.<br><br>
 
 Note: If you've already signed up for fwd2cal, and want to fwd events from this email address, send an email from your main Gmail account to <a href="mailto:calendar@fwd2cal.com?subject=add %FROM_EMAIL%">calendar@fwd2cal.com</a> with the subject "add %FROM_EMAIL%".<br>
