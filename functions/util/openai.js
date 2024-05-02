@@ -96,8 +96,9 @@ async function processEmail(email, headers) {
       }
     });
   });
+  logger.debug(`Timezone selection: ${timezoneResponse.timezone}, ${timezoneResponse.reason}`);
 
-  eventResponse.timezone = timezoneResponse.timezone;
+  eventResponse.timeZone = timezoneResponse.timezone;
 
   return eventResponse;
 }

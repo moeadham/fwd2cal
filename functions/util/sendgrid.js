@@ -19,7 +19,7 @@ async function sendEmail({to, from, subject, text, html = "", headers = {}}) {
     to,
     from,
     subject,
-    // text,
+    text: html,
     html,
   };
   if (headers.References) {
@@ -33,7 +33,6 @@ async function sendEmail({to, from, subject, text, html = "", headers = {}}) {
     if (error.response) {
       logger.error(error.response.body);
     }
-    throw error; // Rethrow after logging
   }
 }
 
