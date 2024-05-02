@@ -725,7 +725,7 @@ const emailFromMain = {
   "subject": "Fwd: Finess Clinic Appointment Confirmation",
   "text": `---------- Forwarded message ---------
     From: Finess Clinic <noreply@treatwell.co.uk>
-    Date: Tue, Mar 26, 2024 at 11:04 AM
+    Date: Tue, Mar 21, 2024 at 11:04 AM
     Subject: Finess Clinic Appointment Confirmation
     To: <${TESTER_PRIMARY_GOOGLE_ACCT}>
     
@@ -740,8 +740,8 @@ const emailFromMain = {
     <https://treatwell.onelink.me/32083905?pid=wahanda-email&c=Supplier%20Customer%20Appointment%20Confirmation%20Widget&content=Banner&is_retargeting=true&af_dp=treatwell%3A%2F%2Fwww.treatwell.co.uk%2Fmy-bookings&af_web_dp=https%3A%2F%2Fwww.treatwell.co.uk>
     Your booking information
     Order reference: W1503268392
-    Date order placed: 26 March 2025
-    When: 11:15, 26 March 2025
+    Date order placed: 21 March 2024
+    When: 11:15, 26 March 2024
     Booked for: Jon Doe
     Change your booking?
     If you can no longer make it to your appointment, please reschedule. That

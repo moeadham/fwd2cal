@@ -69,20 +69,37 @@ async function processEmail(email, headers) {
   ${email.text}`;
 
   // logger.log(text);
-  const messages = [
+  const eventMessages = [
     {
       role: "system",
       content: prompts.getEventData,
     },
     {role: "user", content: text},
   ];
-  const response = await defaultCompletion(messages);
-  Object.keys(response).forEach((key) => {
-    if (response[key] === "undefined") {
-      response[key] = undefined;
-    }
+  const timezoneMessages = [
+    {
+      role: "system",
+      content: prompts.getEventTimezone,
+    },
+    {role: "user", content: text},
+  ];
+
+  const [eventResponse, timezoneResponse] = await Promise.all([
+    defaultCompletion(eventMessages),
+    defaultCompletion(timezoneMessages),
+  ]);
+
+  [eventResponse, timezoneResponse].forEach((res) => {
+    Object.keys(res).forEach((key) => {
+      if (res[key] === "undefined") {
+        res[key] = undefined;
+      }
+    });
   });
-  return response;
+
+  eventResponse.timezone = timezoneResponse.timezone;
+
+  return eventResponse;
 }
 
 module.exports = {
