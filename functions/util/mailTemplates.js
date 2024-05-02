@@ -21,20 +21,20 @@ Note: If you've already signed up for fwd2cal, and want to fwd events from this 
     html:
 `Sorry - there was an issue authenticating with Google. Please click <a href="https://app.fwd2cal.com/signup">to authorize Google again</a>, and then forward your thread another time.
 
-<br><br>You can always ask for help: <a href="mailto:support@fwd2cal.com">support@fwd2cal.com</a>`,
+<br><br>You can always ask for help: <a href="mailto:support@fwd2cal.com">support@fwd2cal.com</a><br>`,
   },
   unableToParse: {
     html:
 `Sorry - AI wasn't able to find a date in your email. Forward the thread again and include some instructions to help AI figure it out.
 
-<br><br>You can always ask for help: <a href="mailto:support@fwd2cal.com">support@fwd2cal.com</a>`,
+<br><br>You can always ask for help: <a href="mailto:support@fwd2cal.com">support@fwd2cal.com</a><br>`,
   },
   aiParseError: {
     html:
 `Sorry - AI wasn't able to find a date in your email. %PARSE_ERROR_DESCRIPTION%
 Forward the thread again and include some instructions to help AI figure it out.
 
-<br><br>You can always ask for help: <a href="mailto:support@fwd2cal.com">support@fwd2cal.com</a>`,
+<br><br>You can always ask for help: <a href="mailto:support@fwd2cal.com">support@fwd2cal.com</a><br>`,
   },
   eventAdded: {
     html:
@@ -42,7 +42,17 @@ Forward the thread again and include some instructions to help AI figure it out.
 <br>Date: %EVENT_DATE%
 <br>Attendees: %EVENT_ATTENDEES%
 
-<br><br>You can always ask for help: <a href="mailto:support@fwd2cal.com">support@fwd2cal.com</a>`,
+<br><br>You can always ask for help: <a href="mailto:support@fwd2cal.com">support@fwd2cal.com</a><br>`,
+  },
+  eventAddedAttendees: {
+    html:
+`Event added to your calendar. Have a look at it <a href="%EVENT_LINK%">here</a>.
+<br>Date: %EVENT_DATE%
+<br>
+<br><a href="%INVITE_LINK%">Click here to invite your guests:</a>
+<br>- %EVENT_ATTENDEES%
+
+<br><br>You can always ask for help: <a href="mailto:support@fwd2cal.com">support@fwd2cal.com</a><br>`,
   },
   addAdditionalEmailAddress: {
     subject:
@@ -61,19 +71,19 @@ If not, you can ignore this email 🤷.
     html:
 `Sorry - but %EMAIL_TO_ADD% is already in use by another fwd2cal account. If you want to add it to this account, you'll need the current account holder to send an email to calendar@fwd2cal.com with the subject "remove %EMAIL_TO_ADD%"
 
-<br><br>You can always ask for help: <a href="mailto:support@fwd2cal.com">support@fwd2cal.com</a>`,
+<br><br>You can always ask for help: <a href="mailto:support@fwd2cal.com">support@fwd2cal.com</a><br>`,
   },
   removalEmailInUse: {
     html:
 `Sorry - but %EMAIL_TO_REMOVE% is in use by another fwd2cal account, not your account."
 
-<br><br>You can always ask for help: <a href="mailto:support@fwd2cal.com">support@fwd2cal.com</a>`,
+<br><br>You can always ask for help: <a href="mailto:support@fwd2cal.com">support@fwd2cal.com</a><br>`,
   },
   emailAddressRemoved: {
     html:
 `%EMAIL_TO_REMOVE% has been removed from your account.
 
-<br><br>You can always ask for help: <a href="mailto:support@fwd2cal.com">support@fwd2cal.com</a>`,
+<br><br>You can always ask for help: <a href="mailto:support@fwd2cal.com">support@fwd2cal.com</a><br>`,
   },
   userDeleted: {
     html:
@@ -81,7 +91,7 @@ If not, you can ignore this email 🤷.
 
 You may want disconnect fwd2cal from google <a href="https://myaccount.google.com/connections">here</a>.
 
-<br><br>You can always ask for help: <a href="mailto:support@fwd2cal.com">support@fwd2cal.com</a>`,
+<br><br>You can always ask for help: <a href="mailto:support@fwd2cal.com">support@fwd2cal.com</a><br>`,
   },
 };
 

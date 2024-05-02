@@ -5,6 +5,8 @@
 const {logger} = require("firebase-functions");
 const moment = require("moment-timezone");
 const {google} = require("googleapis");
+const handleAsync = require("./handleAsync");
+const {getOauthClient} = require("./authHandler");
 
 const DEFAULT_EVENT_LENGTH = 30;
 const ONLY_INVITE_HOST = true;
@@ -53,7 +55,7 @@ function generateTimeObject(event, primaryCalendar) {
   return timeObject;
 }
 
-async function addEvent(oauth2Client, event) {
+async function addEvent(oauth2Client, event, uid) {
   const calendar = google.calendar({version: "v3", auth: oauth2Client});
   const calendarList = await calendar.calendarList.list();
   const primaryCalendar = calendarList.data.items
@@ -70,6 +72,7 @@ async function addEvent(oauth2Client, event) {
 \nDon't waste time creating events, just forward them to calendar@fwd2cal.com.`;
   const requestBody = {
     summary: event.summary,
+    status: "confirmed",
     description: event.description,
     attendees: event.attendees.map((attendee) => ({email: attendee})),
     start: times.start,
@@ -86,10 +89,14 @@ async function addEvent(oauth2Client, event) {
   logger.log("Attempting to add event to google.");
   const insertEvent = await calendar.events.insert({
     calendarId: primaryCalendar.id,
+    conferenceDataVersion: 1,
     resource: requestBody,
+    sendNotifications: true,
     sendUpdates: "all",
   });
   logger.log("Event added to google.", insertEvent.data.htmlLink);
+  insertEvent.data.calendarId = primaryCalendar.id;
+  insertEvent.data.uid = uid;
   return insertEvent.data;
 }
 
@@ -118,8 +125,45 @@ async function getUserCalendars(oauth2Client, uid) {
   return calendars;
 }
 
+async function inviteAdditionalAttendees(req, res) {
+  let {uid, eventId, attendees, calendarId} = req.query;
+  if (typeof attendees === "string") {
+    try {
+      attendees = JSON.parse(attendees);
+    } catch (error) {
+      console.error("Failed to parse attendees as JSON:", error);
+      return res.status(400).send({error: "Attendees data is not valid JSON."});
+    }
+  }
+  // Can we authenticate with their calendar?
+  const [oauthErr, oauth2Client] = await handleAsync(() => getOauthClient(uid));
+  if (oauthErr) {
+    logger.error("Error getting oauth2Client", oauthErr);
+    return res.redirect(302, "https://fwd2cal.com/404");
+  }
+  const calendar = google.calendar({version: "v3", auth: oauth2Client});
+  const eventToUpdate = await calendar.events.get({
+    calendarId: calendarId,
+    eventId: eventId,
+  });
+  const htmlLink = eventToUpdate.data.htmlLink;
+  attendees = attendees.map((attendee) => ({email: attendee}));
+  eventToUpdate.data.attendees.push(...attendees);
+  const updatedEvent = await calendar.events.update({
+    calendarId: calendarId,
+    eventId: eventId,
+    sendNotifications: true,
+    sendUpdates: "all",
+    conferenceDataVersion: 1,
+    requestBody: eventToUpdate.data,
+  });
+  logger.log(`Event updated with additional guests ${updatedEvent.data.id}`);
+  return res.redirect(302, htmlLink);
+}
+
 module.exports = {
   addEvent,
   getUserCalendars,
+  inviteAdditionalAttendees,
 };
 
