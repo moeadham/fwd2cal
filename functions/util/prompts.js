@@ -15,7 +15,8 @@ attendees: a list of attendees
 
 The text will start with a Date. That is the date the email was sent.
 The next line is a subject, that is the subject of the email thread.
-
+Attendees should be selected based on the contents of the text. Generally everyone in the thread should be invited, but consider the contents of the email and the subject.
+If the email is transactional, such as a receipt or automatically generated, than the only attendee is the sender.
 If the email is a thread,  the most recent email is most relevant, but keep other details from the thread in context.
 Relative dates are fine - like "next tuesday". Determine the date of the event based off of the relative difference from the date of the email.
 To create an event, at minimum, you need to determine a date. If you can't determine a date, respond with an error that no date has been provided:

@@ -24,6 +24,7 @@
     "js-tiktoken": "^1.0.10",
     "moment-timezone": "^0.5.45",
     "openai": "^4.29.2",
+    "qs": "^6.12.1",
     "uuid": "^9.0.1",
     "validator": "^13.11.0"
   },

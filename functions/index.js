@@ -24,6 +24,7 @@ const admin = require("firebase-admin");
 const busboy = require("busboy");
 const prompts = require("./util/prompts");
 const {handleEmail} = require("./util/emailHandler");
+const {inviteAdditionalAttendees} = require("./util/calendarHelper");
 const {time} = require("console");
 admin.initializeApp();
 const db = getFirestore();
@@ -86,6 +87,18 @@ exports[SENDGRID_ENDPOINT] = sendgridCallback;
 
 exports.verifyAdditionalEmail = functions.https.onRequest(async (req, res) => {
   const [err, addUserRecord] = await handleAsync(() => verifyAdditionalEmail(req, res));
+  if (err) {
+    logger.error("Error in addUserRecord", err);
+    return res.redirect(302, "https://fwd2cal.com/404");
+  }
+});
+
+exports.inviteAdditionalAttendees = functions.https.onRequest(async (req, res) => {
+  const [err, addUserRecord] = await handleAsync(() => inviteAdditionalAttendees(req, res));
+  if (err) {
+    logger.error("Error in inviteAdditionalAttendees", err);
+    return res.redirect(302, "https://fwd2cal.com/404");
+  }
 });
 
 // Refresh Expiring oAuth tokens.

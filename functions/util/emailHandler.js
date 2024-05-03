@@ -10,10 +10,12 @@ const {getOauthClient,
 const {processEmail} = require("./openai");
 const {addEvent} = require("./calendarHelper");
 const {sendEmail} = require("./sendgrid");
-const {MAIN_EMAIL_ADDRESS} = require("./credentials");
+const {MAIN_EMAIL_ADDRESS,
+  API_URL} = require("./credentials");
 const handleAsync = require("./handleAsync");
 const {mailTemplates} = require("./mailTemplates");
 const moment = require("moment-timezone");
+const qs = require("qs");
 // const {event} = require("firebase-functions/v1/analytics");
 
 
@@ -49,6 +51,15 @@ const EMAIL_RESPONSES = {
     replace: {
       EVENT_LINK: "",
       EVENT_DATE: "",
+      EVENT_ATTENDEES: "",
+    },
+  },
+  eventAddedAttendees: {
+    templateName: "eventAddedAttendees",
+    replace: {
+      EVENT_LINK: "",
+      EVENT_DATE: "",
+      INVITE_LINK: "",
       EVENT_ATTENDEES: "",
     },
   },
@@ -101,16 +112,11 @@ async function handleEmail(email) {
   }
   // Is this a support email?
   const to = getRecipientsFromRawEmail(email);
-  if (to.includes("support@fwd2cal.com")) {
-    logger.debug("support email received");
-    const content = `From: ${sender} <br><br> Subject: ${email.subject} <br><br> ${email.html}`;
-    await sendEmail({
-      to: "fwd2cal@googlegroups.com",
-      from: MAIN_EMAIL_ADDRESS,
-      subject: email.subject,
-      html: content,
-    });
-    return {result: `email forwarded to support group.`};
+  if (to.includes("support@fwd2cal.com") ||
+      to.includes("admin@fwd2cal.com") ||
+      email.subject.toLowerCase().startsWith("verify your email address")) {
+    // To handle google account creation.
+    return await sendToSupport(sender, email);
   }
 
   const uid = await getUserFromEmail(sender);
@@ -129,18 +135,28 @@ async function handleEmail(email) {
   logger.log(`Request from ${sender} to ${subjectAction}`);
   switch (subjectAction) {
     case "addUser":
-      // Code to handle addUser action
       return await addEmailAddressToUser(email, sender, uid);
     case "removeEmail":
       return await removeEmailAddressFromUser(email, sender, uid);
     case "deleteAccount":
       return await deleteUserAccount(email, sender, uid);
     case "addEvent":
-      // Code to handle addEvent action
       return await eventHandler(email, sender, uid);
     default:
       return await eventHandler(email, sender, uid);
   }
+}
+
+async function sendToSupport(sender, email) {
+  logger.debug("support email received");
+  const content = `From: ${sender} <br><br> Subject: ${email.subject} <br><br> ${email.html}`;
+  await sendEmail({
+    to: "fwd2cal@googlegroups.com",
+    from: MAIN_EMAIL_ADDRESS,
+    subject: email.subject,
+    html: content,
+  });
+  return {result: `email forwarded to support group.`};
 }
 
 function understandSubject(subject) {
@@ -285,23 +301,53 @@ async function eventHandler(email, sender, uid) {
 
   // Can we add the event to their calendar?
   const [addEventErr, eventObject] =
-    await handleAsync(() => addEvent(oauth2Client, event));
+    await handleAsync(() => addEvent(oauth2Client, event, uid));
   if (addEventErr) {
     logger.error("Error adding event to calendar: ", addEventErr);
     await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true);
     return;
   }
-  const response = {
-    ...EMAIL_RESPONSES.eventAdded,
-    replace: {
-      EVENT_LINK: eventObject.htmlLink,
-      EVENT_DATE: moment(eventObject.start.dateTime)
-          .tz(eventObject.start.timeZone)
-          .format("dddd, MMMM Do [at] h:mm A z"),
-      EVENT_ATTENDEES:
-          eventObject.attendees.map((attendee) => attendee.email).join(", "),
-    },
-  };
+  let response;
+
+
+  // Now we check if we need to add a button to the email
+  // so additional attendees can be invited.
+  if (event.attendees.length > 1) {
+    logger.debug(`Multiple attendees - invite link to email.`);
+    const params = {
+      eventId: eventObject.id,
+      calendarId: eventObject.calendarId,
+      uid: uid,
+      attendees: event.attendees,
+    };
+    const inviteLink = `${API_URL}inviteAdditionalAttendees?${qs.stringify(params)}`;
+    eventObject.inviteOthersLink = inviteLink;
+    const inviteesWithoutHost = event.attendees.filter((attendee) => attendee !== eventObject.organizer.email);
+    response = {
+      ...EMAIL_RESPONSES.eventAddedAttendees,
+      replace: {
+        EVENT_LINK: eventObject.htmlLink,
+        EVENT_DATE: moment(eventObject.start.dateTime)
+            .tz(eventObject.start.timeZone)
+            .format("dddd, MMMM Do [at] h:mm A"),
+        INVITE_LINK: inviteLink,
+        EVENT_ATTENDEES: inviteesWithoutHost.join(", "),
+      },
+    };
+  } else {
+    logger.debug(`Only one attendee - not invitation link needed.`);
+    response = {
+      ...EMAIL_RESPONSES.eventAdded,
+      replace: {
+        EVENT_LINK: eventObject.htmlLink,
+        EVENT_DATE: moment(eventObject.start.dateTime)
+            .tz(eventObject.start.timeZone)
+            .format("dddd, MMMM Do [at] h:mm A"),
+        EVENT_ATTENDEES:
+            eventObject.attendees.map((attendee) => attendee.email).join(", "),
+      },
+    };
+  }
   await sendEmailResponse(sender, email, response, true);
   return eventObject;
 }
