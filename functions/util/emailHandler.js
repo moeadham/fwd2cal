@@ -10,7 +10,8 @@ const {getOauthClient,
 const {processEmail} = require("./openai");
 const {addEvent} = require("./calendarHelper");
 const {sendEmail} = require("./sendgrid");
-const {MAIN_EMAIL_ADDRESS} = require("./credentials");
+const {MAIN_EMAIL_ADDRESS,
+  API_URL} = require("./credentials");
 const handleAsync = require("./handleAsync");
 const {mailTemplates} = require("./mailTemplates");
 const moment = require("moment-timezone");
@@ -112,6 +113,7 @@ async function handleEmail(email) {
   // Is this a support email?
   const to = getRecipientsFromRawEmail(email);
   if (to.includes("support@fwd2cal.com") ||
+      to.includes("admin@fwd2cal.com") ||
       email.subject.toLowerCase().startsWith("verify your email address")) {
     // To handle google account creation.
     return await sendToSupport(sender, email);
@@ -296,6 +298,7 @@ async function eventHandler(email, sender, uid) {
     await sendEmailResponse(sender, email, response, true);
     return event;
   }
+
   // Can we add the event to their calendar?
   const [addEventErr, eventObject] =
     await handleAsync(() => addEvent(oauth2Client, event, uid));
@@ -305,23 +308,21 @@ async function eventHandler(email, sender, uid) {
     return;
   }
   let response;
+
+
+  // Now we check if we need to add a button to the email
+  // so additional attendees can be invited.
   if (event.attendees.length > 1) {
-    // Remove host.
-    // event.attendees = event.attendees.filter(
-    //     (attendee) => !eventObject.attendees.some(
-    //         (existingAttendee) => existingAttendee.email === attendee.email,
-    //     ),
-    // );
-    const apiURL= "http://127.0.0.1:5001/fwd2cal/us-central1/";
-    // const apiURL= "https://app.fwd2cal.com/";
+    logger.debug(`Multiple attendees - invite link to email.`);
     const params = {
       eventId: eventObject.id,
       calendarId: eventObject.calendarId,
       uid: uid,
       attendees: event.attendees,
     };
-
-    const inviteLink = `${apiURL}inviteAdditionalAttendees?${qs.stringify(params)}`;
+    const inviteLink = `${API_URL}inviteAdditionalAttendees?${qs.stringify(params)}`;
+    eventObject.inviteOthersLink = inviteLink;
+    const inviteesWithoutHost = event.attendees.filter((attendee) => attendee !== eventObject.organizer.email);
     response = {
       ...EMAIL_RESPONSES.eventAddedAttendees,
       replace: {
@@ -330,11 +331,11 @@ async function eventHandler(email, sender, uid) {
             .tz(eventObject.start.timeZone)
             .format("dddd, MMMM Do [at] h:mm A"),
         INVITE_LINK: inviteLink,
-        EVENT_ATTENDEES:
-          event.attendees.join(", "),
+        EVENT_ATTENDEES: inviteesWithoutHost.join(", "),
       },
     };
   } else {
+    logger.debug(`Only one attendee - not invitation link needed.`);
     response = {
       ...EMAIL_RESPONSES.eventAdded,
       replace: {

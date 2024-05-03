@@ -17,6 +17,9 @@ const MAIN_EMAIL_ADDRESS = "calendar@fwd2cal.com";
 const OPENAI_API_KEY = functions.config().environment.openai_api_key;
 const SENDGRID_API_KEY = functions.config().environment.sendgrid_api_key;
 
+const API_URL = ENVIRONMENT === "production" ? "https://app.fwd2cal.com/" : "http://127.0.0.1:5001/fwd2cal/us-central1/";
+
+
 module.exports = {
   CREDENTIALS,
   MAIN_EMAIL_ADDRESS,
@@ -24,5 +27,6 @@ module.exports = {
   OPENAI_API_KEY,
   SENDGRID_API_KEY,
   ENVIRONMENT,
+  API_URL,
 };
 

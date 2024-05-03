@@ -81,6 +81,8 @@ async function addEvent(oauth2Client, event, uid) {
   if (event.location) {
     requestBody.location = event.location;
   }
+
+  // This is needs a refactor.
   if (ONLY_INVITE_HOST) {
     requestBody.attendees = [
       {email: primaryCalendar.id,
@@ -131,8 +133,13 @@ async function inviteAdditionalAttendees(req, res) {
     try {
       attendees = JSON.parse(attendees);
     } catch (error) {
-      console.error("Failed to parse attendees as JSON:", error);
-      return res.status(400).send({error: "Attendees data is not valid JSON."});
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(attendees)) {
+        console.error("Attendees string is not a valid single email address:", attendees);
+        return res.status(400).send({error: "Attendees string is not a valid single email address."});
+      } else {
+        attendees = [attendees];
+      }
     }
   }
   // Can we authenticate with their calendar?

@@ -4,7 +4,7 @@
 const chai = require("chai");
 const chaiHttp = require("chai-http");
 const bindings = require("./binding");
-
+const {exec} = require("child_process");
 
 chai.use(chaiHttp);
 const expect = chai.expect;
@@ -24,12 +24,19 @@ describe("fwd2cal", () => {
             console.error("Error fetching signup URL:", err);
             done(err);
           } else {
+            console.log("If you want to test - you need to complete this Google Authorization in the next 30 seconds!");
+            console.log("-------------------------------------------");
             console.log("Redirect URL:", res.headers.location);
+            exec(`open -a "Google Chrome" "${res.headers.location}"`, (error, stdout, stderr) => {
+              if (error) {
+                console.error("Error opening Google Chrome, maybe this isn't a mac?", error);
+              }
+              console.log(`stdout: ${stdout}`);
+              console.error(`stderr: ${stderr}`);
+            });
             setTimeout(() => {
-              console.log("If you want to test - you need to complete this Google Authorization in the next 30 seconds!");
-              console.log("-------------------------------------------");
               done();
-            }, 30000);
+            }, 20000);
           }
         });
   });
@@ -129,15 +136,14 @@ describe("fwd2cal", () => {
       done();
     });
   });
-  let eventId;
-  let calendarId;
-  let uid;
+  let inviationLink;
   it("UT07 try a basic email in the future to add invitees later.", (done) => {
     const testMessage = bindings.basicEmailFuture;
 
     const threeDaysFromNow = new Date();
     threeDaysFromNow.setDate(threeDaysFromNow.getDate() + 3);
     const formattedDate = threeDaysFromNow.toLocaleDateString("en-US", {year: "numeric", month: "short", day: "numeric"});
+    testMessage.text = testMessage.text.replace("%DATE_IN_THE_FUTURE%", formattedDate);
     testMessage.text = testMessage.text.replace("%DATE_IN_THE_FUTURE%", formattedDate);
 
     const req = chai.request(apiURL).post("/sendgridCallback").type("form");
@@ -153,20 +159,13 @@ describe("fwd2cal", () => {
       expect(res.body.data).to.be.an("object");
       expect(res.body.data).to.not.have.property("error");
       expect(res.body.data.kind).to.equal("calendar#event");
-      eventId = res.body.data.id;
-      calendarId = res.body.data.calendarId;
-      uid = res.body.data.uid;
+      expect(res.body.data.inviteOthersLink).to.be.an("string");
+      inviationLink = res.body.data.inviteOthersLink;
       done();
     });
   });
   it("UT08 invite additional guests via URL", (done) => {
-    const query = {
-      calendarId: calendarId,
-      uid: uid,
-      eventId: eventId,
-      attendees: [TESTER_SECONDARY_EMAIL_ACCT],
-    };
-    chai.request(apiURL).get("/inviteAdditionalAttendees").query(query).redirects(0).end((err, res) => {
+    chai.request(inviationLink).get("").redirects(0).end((err, res) => {
       expect(err).to.be.null;
       expect(res).to.have.status(302);
       done();

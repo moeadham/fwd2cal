@@ -38,19 +38,21 @@ Forward the thread again and include some instructions to help AI figure it out.
   },
   eventAdded: {
     html:
-`Event added to your calendar. Have a look at it <a href="%EVENT_LINK%">here</a>.
+`Event added to your calendar.
 <br>Date: %EVENT_DATE%
 <br>Attendees: %EVENT_ATTENDEES%
+<br><a href="%EVENT_LINK%" style="display:inline-block; padding:10px 20px; margin:5px 0; background-color:#3498db; color:white; text-align:center; text-decoration:none; font-weight:bold; border-radius:5px; border:none; cursor:pointer;">View Event</a>
 
 <br><br>You can always ask for help: <a href="mailto:support@fwd2cal.com">support@fwd2cal.com</a><br>`,
   },
   eventAddedAttendees: {
     html:
-`Event added to your calendar. Have a look at it <a href="%EVENT_LINK%">here</a>.
+`Event added to your calendar.
 <br>Date: %EVENT_DATE%
-<br>
-<br><a href="%INVITE_LINK%">Click here to invite your guests:</a>
+<br> <a href="%EVENT_LINK%" style="display:inline-block; padding:10px 20px; margin:5px 0; background-color:#3498db; color:white; text-align:center; text-decoration:none; font-weight:bold; border-radius:5px; border:none; cursor:pointer;">View Event</a>
+<br> You may want to invite:
 <br>- %EVENT_ATTENDEES%
+<br><a href="%INVITE_LINK%" style="display:inline-block; padding:10px 20px; margin:5px 0; background-color:#3498db; color:white; text-align:center; text-decoration:none; font-weight:bold; border-radius:5px; border:none; cursor:pointer;">Invite Guests</a>
 
 <br><br>You can always ask for help: <a href="mailto:support@fwd2cal.com">support@fwd2cal.com</a><br>`,
   },
