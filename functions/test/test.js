@@ -3,7 +3,7 @@
 /* eslint-disable no-undef */
 const chai = require("chai");
 const chaiHttp = require("chai-http");
-const bindings = require("./binding");
+const bindings = require("./bindings/binding");
 const {exec} = require("child_process");
 
 chai.use(chaiHttp);
@@ -171,7 +171,25 @@ describe("fwd2cal", () => {
       done();
     });
   });
-  it("UT09 remove secondary email address", (done) => {
+  it("UT09 add an event with an ics attachment.", (done) => {
+    const testMessage = bindings.emailWithICSAttachment;
+    const req = chai.request(apiURL).post("/sendgridCallback").type("form");
+    Object.keys(testMessage).forEach((key) => {
+      req.field(key, testMessage[key]);
+    });
+    req.attach("attachment", "./test/bindings/calendar.ics", "calendar.ics");
+    req.end((err, res) => {
+      expect(err).to.be.null;
+      expect(res).to.have.status(200);
+      console.log(res.body);
+      expect(res.body).to.be.an("object");
+      // We should get an event
+      expect(res.body.data).to.not.have.property("error");
+      expect(res.body.data.kind).to.equal("calendar#event");
+      done();
+    });
+  });
+  it("UT10 remove secondary email address", (done) => {
     const testMessage = bindings.removeEmailAddress;
     const req = chai.request(apiURL).post("/sendgridCallback").type("form");
     Object.keys(testMessage).forEach((key) => {
@@ -187,7 +205,7 @@ describe("fwd2cal", () => {
       done();
     });
   });
-  it("UT10 delete account", (done) => {
+  it("UT11 delete account", (done) => {
     const testMessage = bindings.deleteAccount;
     const req = chai.request(apiURL).post("/sendgridCallback").type("form");
     Object.keys(testMessage).forEach((key) => {

@@ -1,6 +1,7 @@
 const sgMail = require("@sendgrid/mail");
 const {logger} = require("firebase-functions");
-const {SENDGRID_API_KEY} = require("./credentials");
+const {SENDGRID_API_KEY,
+  ENVIRONMENT} = require("./credentials");
 
 // Setting SendGrid API Key
 sgMail.setApiKey(SENDGRID_API_KEY);
@@ -26,8 +27,12 @@ async function sendEmail({to, from, subject, text, html = "", headers = {}}) {
     msg.headers = headers;
   }
   try {
-    await sgMail.send(msg);
-    logger.log("Email sent successfully");
+    if (ENVIRONMENT === "production") {
+      await sgMail.send(msg);
+      logger.log("Email sent successfully");
+    } else {
+      logger.log("Email not sent. ENVIRONMENT is not production.");
+    }
   } catch (error) {
     logger.error("Error sending email:", error);
     if (error.response) {

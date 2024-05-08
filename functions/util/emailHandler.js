@@ -8,7 +8,7 @@ const {getUserFromEmail,
 const {getOauthClient,
   deleteAccount} = require("./authHandler");
 const {processEmail} = require("./openai");
-const {addEvent} = require("./calendarHelper");
+const {addEvent, eventFromICS} = require("./calendarHelper");
 const {sendEmail} = require("./sendgrid");
 const {MAIN_EMAIL_ADDRESS,
   API_URL} = require("./credentials");
@@ -95,7 +95,7 @@ const EMAIL_RESPONSES = {
   },
 };
 
-async function handleEmail(email) {
+async function handleEmail(email, files) {
   // Do we know this user?
   const sender = getSenderFromRawEmail(email);
   // Is the email sender verified?
@@ -140,9 +140,9 @@ async function handleEmail(email) {
     case "deleteAccount":
       return await deleteUserAccount(email, sender, uid);
     case "addEvent":
-      return await eventHandler(email, sender, uid);
+      return await eventHandler(email, sender, uid, files);
     default:
-      return await eventHandler(email, sender, uid);
+      return await eventHandler(email, sender, uid, files);
   }
 }
 
@@ -269,7 +269,7 @@ async function addEmailAddressToUser(email, sender, uid) {
   return {verificationCode};
 }
 
-async function eventHandler(email, sender, uid) {
+async function eventHandler(email, sender, uid, files) {
   // logger.log("User ID: ", uid);
 
   // Can we authenticate with their calendar?
@@ -280,26 +280,52 @@ async function eventHandler(email, sender, uid) {
     return;
   }
 
-  // Can we get event details from the thread?
-  const headers = getEmailHeaders(email.headers, ["Date", "Subject", "From"]);
-  const [processEmailErr, event] = await handleAsync(() => processEmail(email, headers));
-  if (processEmailErr) {
-    logger.error("OpenAI error: ", processEmailErr);
-    await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true);
-    return;
-  }
-  if (event.error) {
-    const response = {
-      ...EMAIL_RESPONSES.aiParseError,
-      replace: {
-        PARSE_ERROR_DESCRIPTION: event.description,
-      },
-    };
-    logger.error("Error in email contents: ", event);
-    await sendEmailResponse(sender, email, response, true);
-    return event;
+  // Is there an ICS attachment to the email?
+  let event;
+  if (files && files.length > 0) {
+    logger.debug("Checking attachments for an ICS file");
+    console.log(files);
+    const icsFile = files.find((file) => file.filename.filename.endsWith(".ics"));
+    if (icsFile) {
+      logger.debug("ICS file found");
+      const [icsErr, icsEvent] = await handleAsync(() => eventFromICS(icsFile));
+      if (icsErr) {
+        logger.error("ICS error: ", icsErr);
+      } else {
+        event = icsEvent;
+      }
+    } else {
+      logger.debug("No ICS file found, using regular AI.");
+    }
   }
 
+  if (!event) {
+    // Can we get event details from the thread with AI?
+    const headers = getEmailHeaders(email.headers, ["Date", "Subject", "From"]);
+    const [processEmailErr, aiEvent] = await handleAsync(() => processEmail(email, headers));
+    if (processEmailErr) {
+      logger.error("OpenAI error: ", processEmailErr);
+      await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true);
+      return;
+    }
+    if (aiEvent.error) {
+      const response = {
+        ...EMAIL_RESPONSES.aiParseError,
+        replace: {
+          PARSE_ERROR_DESCRIPTION: event.description,
+        },
+      };
+      logger.error("Error in email contents: ", event);
+      await sendEmailResponse(sender, email, response, true);
+      return aiEvent;
+    } else {
+      event = aiEvent;
+    }
+  }
+  return addEventAndSendResponse(oauth2Client, event, uid, sender, email);
+}
+
+async function addEventAndSendResponse(oauth2Client, event, uid, sender, email) {
   // Can we add the event to their calendar?
   const [addEventErr, eventObject] =
     await handleAsync(() => addEvent(oauth2Client, event, uid));
@@ -309,7 +335,6 @@ async function eventHandler(email, sender, uid) {
     return;
   }
   let response;
-
 
   // Now we check if we need to add a button to the email
   // so additional attendees can be invited.

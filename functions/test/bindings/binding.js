@@ -6,13 +6,13 @@ const TESTER_PRIMARY_GOOGLE_ACCT = process.env.TESTER_PRIMARY_GOOGLE_ACCT;
 const TESTER_SECONDARY_EMAIL_ACCT = process.env.TESTER_SECONDARY_EMAIL_ACCT;
 
 const emailFromMain = {
-  "SPF": "pass",
-  "attachments": "0",
-  "charsets": `{"to":"UTF-8","from":"UTF-8","subject":"UTF-8","text":"utf-8","html":"utf-8"}`,
-  "dkim": "{@gmail.com : pass}",
-  "envelope": `{"to":["calendar@fwd2cal.com"],"from":"${TESTER_PRIMARY_GOOGLE_ACCT}"}`,
-  "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
-  "headers": `Content-Type: multipart/alternative; boundary="0000000000000f12e420614b61f6a"
+  SPF: "pass",
+  attachments: "0",
+  charsets: `{"to":"UTF-8","from":"UTF-8","subject":"UTF-8","text":"utf-8","html":"utf-8"}`,
+  dkim: "{@gmail.com : pass}",
+  envelope: `{"to":["calendar@fwd2cal.com"],"from":"${TESTER_PRIMARY_GOOGLE_ACCT}"}`,
+  from: `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
+  headers: `Content-Type: multipart/alternative; boundary="0000000000000f12e420614b61f6a"
     DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;        d=gmail.com; s=20230601; t=1711622313; x=1712227113; darn=fwd2cal.com;        h=to:subject:message-id:date:from:in-reply-to:references:mime-version         :from:to:cc:subject:date:message-id:reply-to;        bh=VcrjtrpPYi9Bt/kfjz9uIRySn0GCXUGae6f3/u6YmhI=;        b=UAjLPWTrzxT/kaJJERTco1Ps5zHK3d3mZX7MOaj7LqdFyjtVFwNOrSGy3e2LE9UvVS         iTESq02/mVB1pTvZqwsaI/K0YSaGjui9619nxi5dwaO/QySHvOSZ3SarmWuTSBs/XVw0         KRuXvEJ5CZ0sQRzfXO9nSVBMvDdobBPybTlgFuKQMHbtLiluAxZCz+wZvyLkMP9NYl8J         YzuaChshk6OHxDAYw2HoW7BdCEVRtqWRPUm1+hCV80lLxnrlWuzjOTgbrqPpiEohabYg         vT5MvWg2zSN4USlQqL80m035Y1Spa8le53KtHHHr/FquQhsp4jlMPUDVZEoovUaPpjWA         TYHA==
     Date: Thu, 21 Mar 2024 10:38:21 +0000
     From: Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>
@@ -29,7 +29,7 @@ const emailFromMain = {
     X-Google-Smtp-Source: AGHT+IEc9vMa5b3wFzeMcFWyXKWFNGIXAsPg7hA/o63o4JEOr4urEW2JNXs9XJ9FH8ZoYR4+zz7SP2VOlotrtd0PZYQ=
     X-Received: by 2002:a17:90a:2f05:b0:29b:2268:3349 with SMTP id s5-20020a17090a2f0500b0029b22683349mr2184697pjd.18.1711622312765; Thu, 28 Mar 2024 03:38:32 -0700 (PDT)
     `,
-  "html": `<div dir="ltr"><br><br><div class="gmail_quote"><div dir="ltr" class="gmail_attr">---------- Forwarded message ---------<br>From: <strong class="gmail_sendername" dir="auto">Finess Clinic</strong> <span dir="auto">&lt;<a href="mailto:noreply@treatwell.co.uk">noreply@treatwell.co.uk</a>&gt;</span><br>Date: Tue, Mar 26, 2024 at 11:04 AM<br>Subject: Finess Clinic Appointment Confirmation<br>To:  &lt;<a href="mailto:${TESTER_PRIMARY_GOOGLE_ACCT}">${TESTER_PRIMARY_GOOGLE_ACCT}</a>&gt;<br></div><br><br><div class="msg-8594583518145648811"><table id="m_-8594583518145648811view-email-on-site" cellpadding="4" width="100%" border="0" color="#888888"><tbody><tr><td color="#000000" style="color:#646464;font-family:Arial,Helvetica,sans-serif;font-size:16px;text-align:center">Email having a bad hair day? <a href="https://www.treatwell.co.uk/email/" style="color:#5a6a9d" target="_blank">Click here to view it in your browser</a></td></tr></tbody></table><u></u>
+  html: `<div dir="ltr"><br><br><div class="gmail_quote"><div dir="ltr" class="gmail_attr">---------- Forwarded message ---------<br>From: <strong class="gmail_sendername" dir="auto">Finess Clinic</strong> <span dir="auto">&lt;<a href="mailto:noreply@treatwell.co.uk">noreply@treatwell.co.uk</a>&gt;</span><br>Date: Tue, Mar 26, 2024 at 11:04 AM<br>Subject: Finess Clinic Appointment Confirmation<br>To:  &lt;<a href="mailto:${TESTER_PRIMARY_GOOGLE_ACCT}">${TESTER_PRIMARY_GOOGLE_ACCT}</a>&gt;<br></div><br><br><div class="msg-8594583518145648811"><table id="m_-8594583518145648811view-email-on-site" cellpadding="4" width="100%" border="0" color="#888888"><tbody><tr><td color="#000000" style="color:#646464;font-family:Arial,Helvetica,sans-serif;font-size:16px;text-align:center">Email having a bad hair day? <a href="https://www.treatwell.co.uk/email/" style="color:#5a6a9d" target="_blank">Click here to view it in your browser</a></td></tr></tbody></table><u></u>
     
       
         
@@ -690,9 +690,9 @@ const emailFromMain = {
       </div>
     </div></div></div>
     `,
-  "message": "sendgridCallback",
-  "sender_ip": "209.85.216.44",
-  "spam_report": `Spam detection software, running on the system "parsley-p1las1-spamassassin-864946f5dc-2dv42",
+  message: "sendgridCallback",
+  sender_ip: "209.85.216.44",
+  spam_report: `Spam detection software, running on the system "parsley-p1las1-spamassassin-864946f5dc-2dv42",
     has NOT identified this incoming email as spam.  The original
     message has been attached to this so you can view it or label
     similar future email.  If you have any questions, see
@@ -721,9 +721,9 @@ const emailFromMain = {
     -0.0 T_SCC_BODY_TEXT_LINE   No description available.
      0.0 T_REMOTE_IMAGE         Message contains an external image
     `,
-  "spam_score": "-0.1",
-  "subject": "Fwd: Finess Clinic Appointment Confirmation",
-  "text": `---------- Forwarded message ---------
+  spam_score: "-0.1",
+  subject: "Fwd: Finess Clinic Appointment Confirmation",
+  text: `---------- Forwarded message ---------
     From: Finess Clinic <noreply@treatwell.co.uk>
     Date: Tue, Mar 21, 2024 at 11:04 AM
     Subject: Finess Clinic Appointment Confirmation
@@ -800,17 +800,17 @@ const emailFromMain = {
     You're receiving this email because you recently made a booking with Finess
     Clinic.
     `,
-  "to": "calendar@fwd2cal.com",
+  to: "calendar@fwd2cal.com",
 };
 
 const addEmailAddress = {
-  "SPF": "pass",
-  "attachments": "0",
-  "charsets": `{"to":"UTF-8","from":"UTF-8","subject":"UTF-8","text":"utf-8","html":"utf-8"}`,
-  "dkim": "{@gmail.com : pass}",
-  "envelope": `{"to":["calendar@fwd2cal.com"],"from":"${TESTER_PRIMARY_GOOGLE_ACCT}"}`,
-  "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
-  "headers": `Content-Type: multipart/alternative; boundary="0000000000000f12e420614b61f6a"
+  SPF: "pass",
+  attachments: "0",
+  charsets: `{"to":"UTF-8","from":"UTF-8","subject":"UTF-8","text":"utf-8","html":"utf-8"}`,
+  dkim: "{@gmail.com : pass}",
+  envelope: `{"to":["calendar@fwd2cal.com"],"from":"${TESTER_PRIMARY_GOOGLE_ACCT}"}`,
+  from: `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
+  headers: `Content-Type: multipart/alternative; boundary="0000000000000f12e420614b61f6a"
     DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;        d=gmail.com; s=20230601; t=1711622313; x=1712227113; darn=fwd2cal.com;        h=to:subject:message-id:date:from:in-reply-to:references:mime-version         :from:to:cc:subject:date:message-id:reply-to;        bh=VcrjtrpPYi9Bt/kfjz9uIRySn0GCXUGae6f3/u6YmhI=;        b=UAjLPWTrzxT/kaJJERTco1Ps5zHK3d3mZX7MOaj7LqdFyjtVFwNOrSGy3e2LE9UvVS         iTESq02/mVB1pTvZqwsaI/K0YSaGjui9619nxi5dwaO/QySHvOSZ3SarmWuTSBs/XVw0         KRuXvEJ5CZ0sQRzfXO9nSVBMvDdobBPybTlgFuKQMHbtLiluAxZCz+wZvyLkMP9NYl8J         YzuaChshk6OHxDAYw2HoW7BdCEVRtqWRPUm1+hCV80lLxnrlWuzjOTgbrqPpiEohabYg         vT5MvWg2zSN4USlQqL80m035Y1Spa8le53KtHHHr/FquQhsp4jlMPUDVZEoovUaPpjWA         TYHA==
     Date: Thu, 28 Mar 2024 10:38:21 +0000
     From: Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>
@@ -827,10 +827,10 @@ const addEmailAddress = {
     X-Google-Smtp-Source: AGHT+IEc9vMa5b3wFzeMcFWyXKWFNGIXAsPg7hA/o63o4JEOr4urEW2JNXs9XJ9FH8ZoYR4+zz7SP2VOlotrtd0PZYQ=
     X-Received: by 2002:a17:90a:2f05:b0:29b:2268:3349 with SMTP id s5-20020a17090a2f0500b0029b22683349mr2184697pjd.18.1711622312765; Thu, 28 Mar 2024 03:38:32 -0700 (PDT)
     `,
-  "html": ``,
-  "message": "sendgridCallback",
-  "sender_ip": "209.85.216.44",
-  "spam_report": `Spam detection software, running on the system "parsley-p1las1-spamassassin-864946f5dc-2dv42",
+  html: ``,
+  message: "sendgridCallback",
+  sender_ip: "209.85.216.44",
+  spam_report: `Spam detection software, running on the system "parsley-p1las1-spamassassin-864946f5dc-2dv42",
     has NOT identified this incoming email as spam.  The original
     message has been attached to this so you can view it or label
     similar future email.  If you have any questions, see
@@ -859,10 +859,10 @@ const addEmailAddress = {
     -0.0 T_SCC_BODY_TEXT_LINE   No description available.
      0.0 T_REMOTE_IMAGE         Message contains an external image
     `,
-  "spam_score": "-0.1",
-  "subject": `add ${TESTER_SECONDARY_EMAIL_ACCT}`,
-  "text": ``,
-  "to": "calendar@fwd2cal.com",
+  spam_score: "-0.1",
+  subject: `add ${TESTER_SECONDARY_EMAIL_ACCT}`,
+  text: ``,
+  to: "calendar@fwd2cal.com",
 };
 
 const eventEmailFromSecondEmail = {
@@ -1114,13 +1114,13 @@ const eventEmailFromSecondEmail = {
 };
 
 const basicDetailedEmail = {
-  "SPF": "pass",
-  "attachments": "0",
-  "charsets": `{"to":"UTF-8","from":"UTF-8","subject":"UTF-8","text":"utf-8","html":"utf-8"}`,
-  "dkim": "{@gmail.com : pass}",
-  "envelope": `{"to":["calendar@fwd2cal.com"],"from":"${TESTER_PRIMARY_GOOGLE_ACCT}"}`,
-  "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
-  "headers": `Content-Type: multipart/alternative; boundary="0000000000000f12e420614b61f6a"
+  SPF: "pass",
+  attachments: "0",
+  charsets: `{"to":"UTF-8","from":"UTF-8","subject":"UTF-8","text":"utf-8","html":"utf-8"}`,
+  dkim: "{@gmail.com : pass}",
+  envelope: `{"to":["calendar@fwd2cal.com"],"from":"${TESTER_PRIMARY_GOOGLE_ACCT}"}`,
+  from: `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
+  headers: `Content-Type: multipart/alternative; boundary="0000000000000f12e420614b61f6a"
     DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;        d=gmail.com; s=20230601; t=1711622313; x=1712227113; darn=fwd2cal.com;        h=to:subject:message-id:date:from:in-reply-to:references:mime-version         :from:to:cc:subject:date:message-id:reply-to;        bh=VcrjtrpPYi9Bt/kfjz9uIRySn0GCXUGae6f3/u6YmhI=;        b=UAjLPWTrzxT/kaJJERTco1Ps5zHK3d3mZX7MOaj7LqdFyjtVFwNOrSGy3e2LE9UvVS         iTESq02/mVB1pTvZqwsaI/K0YSaGjui9619nxi5dwaO/QySHvOSZ3SarmWuTSBs/XVw0         KRuXvEJ5CZ0sQRzfXO9nSVBMvDdobBPybTlgFuKQMHbtLiluAxZCz+wZvyLkMP9NYl8J         YzuaChshk6OHxDAYw2HoW7BdCEVRtqWRPUm1+hCV80lLxnrlWuzjOTgbrqPpiEohabYg         vT5MvWg2zSN4USlQqL80m035Y1Spa8le53KtHHHr/FquQhsp4jlMPUDVZEoovUaPpjWA         TYHA==
     Date: Thu, 28 Mar 2024 10:38:21 +0000
     From: Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>
@@ -1137,10 +1137,10 @@ const basicDetailedEmail = {
     X-Google-Smtp-Source: AGHT+IEc9vMa5b3wFzeMcFWyXKWFNGIXAsPg7hA/o63o4JEOr4urEW2JNXs9XJ9FH8ZoYR4+zz7SP2VOlotrtd0PZYQ=
     X-Received: by 2002:a17:90a:2f05:b0:29b:2268:3349 with SMTP id s5-20020a17090a2f0500b0029b22683349mr2184697pjd.18.1711622312765; Thu, 28 Mar 2024 03:38:32 -0700 (PDT)
     `,
-  "html": `starbucks 12pm next friday`,
-  "message": "sendgridCallback",
-  "sender_ip": "209.85.216.44",
-  "spam_report": `Spam detection software, running on the system "parsley-p1las1-spamassassin-864946f5dc-2dv42",
+  html: `starbucks 12pm next friday`,
+  message: "sendgridCallback",
+  sender_ip: "209.85.216.44",
+  spam_report: `Spam detection software, running on the system "parsley-p1las1-spamassassin-864946f5dc-2dv42",
     has NOT identified this incoming email as spam.  The original
     message has been attached to this so you can view it or label
     similar future email.  If you have any questions, see
@@ -1166,20 +1166,20 @@ const basicDetailedEmail = {
     -0.0 T_SCC_BODY_TEXT_LINE   No description available.
      0.0 T_REMOTE_IMAGE         Message contains an external image
     `,
-  "spam_score": "-0.1",
-  "subject": `meet jimmy for coffee`,
-  "text": `starbucks 12pm next friday`,
-  "to": "calendar@fwd2cal.com",
+  spam_score: "-0.1",
+  subject: `meet jimmy for coffee`,
+  text: `starbucks 12pm next friday`,
+  to: "calendar@fwd2cal.com",
 };
 
 const basicEmailFuture = {
-  "SPF": "pass",
-  "attachments": "0",
-  "charsets": `{"to":"UTF-8","from":"UTF-8","subject":"UTF-8","text":"utf-8","html":"utf-8"}`,
-  "dkim": "{@gmail.com : pass}",
-  "envelope": `{"to":["calendar@fwd2cal.com"],"from":"${TESTER_PRIMARY_GOOGLE_ACCT}"}`,
-  "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
-  "headers": `Content-Type: multipart/alternative; boundary="0000000000000f12e420614b61f6a"
+  SPF: "pass",
+  attachments: "0",
+  charsets: `{"to":"UTF-8","from":"UTF-8","subject":"UTF-8","text":"utf-8","html":"utf-8"}`,
+  dkim: "{@gmail.com : pass}",
+  envelope: `{"to":["calendar@fwd2cal.com"],"from":"${TESTER_PRIMARY_GOOGLE_ACCT}"}`,
+  from: `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
+  headers: `Content-Type: multipart/alternative; boundary="0000000000000f12e420614b61f6a"
     DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;        d=gmail.com; s=20230601; t=1711622313; x=1712227113; darn=fwd2cal.com;        h=to:subject:message-id:date:from:in-reply-to:references:mime-version         :from:to:cc:subject:date:message-id:reply-to;        bh=VcrjtrpPYi9Bt/kfjz9uIRySn0GCXUGae6f3/u6YmhI=;        b=UAjLPWTrzxT/kaJJERTco1Ps5zHK3d3mZX7MOaj7LqdFyjtVFwNOrSGy3e2LE9UvVS         iTESq02/mVB1pTvZqwsaI/K0YSaGjui9619nxi5dwaO/QySHvOSZ3SarmWuTSBs/XVw0         KRuXvEJ5CZ0sQRzfXO9nSVBMvDdobBPybTlgFuKQMHbtLiluAxZCz+wZvyLkMP9NYl8J         YzuaChshk6OHxDAYw2HoW7BdCEVRtqWRPUm1+hCV80lLxnrlWuzjOTgbrqPpiEohabYg         vT5MvWg2zSN4USlQqL80m035Y1Spa8le53KtHHHr/FquQhsp4jlMPUDVZEoovUaPpjWA         TYHA==
     Date: Thu, 28 Mar 2024 10:38:21 +0000
     From: Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>
@@ -1196,10 +1196,10 @@ const basicEmailFuture = {
     X-Google-Smtp-Source: AGHT+IEc9vMa5b3wFzeMcFWyXKWFNGIXAsPg7hA/o63o4JEOr4urEW2JNXs9XJ9FH8ZoYR4+zz7SP2VOlotrtd0PZYQ=
     X-Received: by 2002:a17:90a:2f05:b0:29b:2268:3349 with SMTP id s5-20020a17090a2f0500b0029b22683349mr2184697pjd.18.1711622312765; Thu, 28 Mar 2024 03:38:32 -0700 (PDT)
     `,
-  "html": `starbucks 12pm next friday`,
-  "message": "sendgridCallback",
-  "sender_ip": "209.85.216.44",
-  "spam_report": `Spam detection software, running on the system "parsley-p1las1-spamassassin-864946f5dc-2dv42",
+  html: `starbucks 12pm next friday`,
+  message: "sendgridCallback",
+  sender_ip: "209.85.216.44",
+  spam_report: `Spam detection software, running on the system "parsley-p1las1-spamassassin-864946f5dc-2dv42",
     has NOT identified this incoming email as spam.  The original
     message has been attached to this so you can view it or label
     similar future email.  If you have any questions, see
@@ -1225,9 +1225,9 @@ const basicEmailFuture = {
     -0.0 T_SCC_BODY_TEXT_LINE   No description available.
      0.0 T_REMOTE_IMAGE         Message contains an external image
     `,
-  "spam_score": "-0.1",
-  "subject": `Fwd: meet jimmy for coffee`,
-  "text": `
+  spam_score: "-0.1",
+  subject: `Fwd: meet jimmy for coffee`,
+  text: `
   ---------- Forwarded message ---------
     From: Gill Bates <${TESTER_SECONDARY_EMAIL_ACCT}>
     Date: Tue, Mar 21, 2024 at 11:04 AM
@@ -1237,17 +1237,17 @@ const basicEmailFuture = {
     Hey Jon, lets both meet at starbucks, 12pm %DATE_IN_THE_FUTURE%
     
     Gill.`,
-  "to": "calendar@fwd2cal.com",
+  to: "calendar@fwd2cal.com",
 };
 
 const removeEmailAddress = {
-  "SPF": "pass",
-  "attachments": "0",
-  "charsets": `{"to":"UTF-8","from":"UTF-8","subject":"UTF-8","text":"utf-8","html":"utf-8"}`,
-  "dkim": "{@gmail.com : pass}",
-  "envelope": `{"to":["calendar@fwd2cal.com"],"from":"${TESTER_PRIMARY_GOOGLE_ACCT}"}`,
-  "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
-  "headers": `Content-Type: multipart/alternative; boundary="0000000000000f12e420614b61f6a"
+  SPF: "pass",
+  attachments: "0",
+  charsets: `{"to":"UTF-8","from":"UTF-8","subject":"UTF-8","text":"utf-8","html":"utf-8"}`,
+  dkim: "{@gmail.com : pass}",
+  envelope: `{"to":["calendar@fwd2cal.com"],"from":"${TESTER_PRIMARY_GOOGLE_ACCT}"}`,
+  from: `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
+  headers: `Content-Type: multipart/alternative; boundary="0000000000000f12e420614b61f6a"
     DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;        d=gmail.com; s=20230601; t=1711622313; x=1712227113; darn=fwd2cal.com;        h=to:subject:message-id:date:from:in-reply-to:references:mime-version         :from:to:cc:subject:date:message-id:reply-to;        bh=VcrjtrpPYi9Bt/kfjz9uIRySn0GCXUGae6f3/u6YmhI=;        b=UAjLPWTrzxT/kaJJERTco1Ps5zHK3d3mZX7MOaj7LqdFyjtVFwNOrSGy3e2LE9UvVS         iTESq02/mVB1pTvZqwsaI/K0YSaGjui9619nxi5dwaO/QySHvOSZ3SarmWuTSBs/XVw0         KRuXvEJ5CZ0sQRzfXO9nSVBMvDdobBPybTlgFuKQMHbtLiluAxZCz+wZvyLkMP9NYl8J         YzuaChshk6OHxDAYw2HoW7BdCEVRtqWRPUm1+hCV80lLxnrlWuzjOTgbrqPpiEohabYg         vT5MvWg2zSN4USlQqL80m035Y1Spa8le53KtHHHr/FquQhsp4jlMPUDVZEoovUaPpjWA         TYHA==
     Date: Thu, 28 Mar 2024 10:38:21 +0000
     From: Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>
@@ -1264,10 +1264,10 @@ const removeEmailAddress = {
     X-Google-Smtp-Source: AGHT+IEc9vMa5b3wFzeMcFWyXKWFNGIXAsPg7hA/o63o4JEOr4urEW2JNXs9XJ9FH8ZoYR4+zz7SP2VOlotrtd0PZYQ=
     X-Received: by 2002:a17:90a:2f05:b0:29b:2268:3349 with SMTP id s5-20020a17090a2f0500b0029b22683349mr2184697pjd.18.1711622312765; Thu, 28 Mar 2024 03:38:32 -0700 (PDT)
     `,
-  "html": ``,
-  "message": "sendgridCallback",
-  "sender_ip": "209.85.216.44",
-  "spam_report": `Spam detection software, running on the system "parsley-p1las1-spamassassin-864946f5dc-2dv42",
+  html: ``,
+  message: "sendgridCallback",
+  sender_ip: "209.85.216.44",
+  spam_report: `Spam detection software, running on the system "parsley-p1las1-spamassassin-864946f5dc-2dv42",
     has NOT identified this incoming email as spam.  The original
     message has been attached to this so you can view it or label
     similar future email.  If you have any questions, see
@@ -1296,20 +1296,20 @@ const removeEmailAddress = {
     -0.0 T_SCC_BODY_TEXT_LINE   No description available.
      0.0 T_REMOTE_IMAGE         Message contains an external image
     `,
-  "spam_score": "-0.1",
-  "subject": `remove ${TESTER_SECONDARY_EMAIL_ACCT}`,
-  "text": ``,
-  "to": "calendar@fwd2cal.com",
+  spam_score: "-0.1",
+  subject: `remove ${TESTER_SECONDARY_EMAIL_ACCT}`,
+  text: ``,
+  to: "calendar@fwd2cal.com",
 };
 
 const deleteAccount = {
-  "SPF": "pass",
-  "attachments": "0",
-  "charsets": `{"to":"UTF-8","from":"UTF-8","subject":"UTF-8","text":"utf-8","html":"utf-8"}`,
-  "dkim": "{@gmail.com : pass}",
-  "envelope": `{"to":["calendar@fwd2cal.com"],"from":"${TESTER_PRIMARY_GOOGLE_ACCT}"}`,
-  "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
-  "headers": `Content-Type: multipart/alternative; boundary="0000000000000f12e420614b61f6a"
+  SPF: "pass",
+  attachments: "0",
+  charsets: `{"to":"UTF-8","from":"UTF-8","subject":"UTF-8","text":"utf-8","html":"utf-8"}`,
+  dkim: "{@gmail.com : pass}",
+  envelope: `{"to":["calendar@fwd2cal.com"],"from":"${TESTER_PRIMARY_GOOGLE_ACCT}"}`,
+  from: `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
+  headers: `Content-Type: multipart/alternative; boundary="0000000000000f12e420614b61f6a"
     DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;        d=gmail.com; s=20230601; t=1711622313; x=1712227113; darn=fwd2cal.com;        h=to:subject:message-id:date:from:in-reply-to:references:mime-version         :from:to:cc:subject:date:message-id:reply-to;        bh=VcrjtrpPYi9Bt/kfjz9uIRySn0GCXUGae6f3/u6YmhI=;        b=UAjLPWTrzxT/kaJJERTco1Ps5zHK3d3mZX7MOaj7LqdFyjtVFwNOrSGy3e2LE9UvVS         iTESq02/mVB1pTvZqwsaI/K0YSaGjui9619nxi5dwaO/QySHvOSZ3SarmWuTSBs/XVw0         KRuXvEJ5CZ0sQRzfXO9nSVBMvDdobBPybTlgFuKQMHbtLiluAxZCz+wZvyLkMP9NYl8J         YzuaChshk6OHxDAYw2HoW7BdCEVRtqWRPUm1+hCV80lLxnrlWuzjOTgbrqPpiEohabYg         vT5MvWg2zSN4USlQqL80m035Y1Spa8le53KtHHHr/FquQhsp4jlMPUDVZEoovUaPpjWA         TYHA==
     Date: Thu, 28 Mar 2024 10:38:21 +0000
     From: Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>
@@ -1326,10 +1326,10 @@ const deleteAccount = {
     X-Google-Smtp-Source: AGHT+IEc9vMa5b3wFzeMcFWyXKWFNGIXAsPg7hA/o63o4JEOr4urEW2JNXs9XJ9FH8ZoYR4+zz7SP2VOlotrtd0PZYQ=
     X-Received: by 2002:a17:90a:2f05:b0:29b:2268:3349 with SMTP id s5-20020a17090a2f0500b0029b22683349mr2184697pjd.18.1711622312765; Thu, 28 Mar 2024 03:38:32 -0700 (PDT)
     `,
-  "html": ``,
-  "message": "sendgridCallback",
-  "sender_ip": "209.85.216.44",
-  "spam_report": `Spam detection software, running on the system "parsley-p1las1-spamassassin-864946f5dc-2dv42",
+  html: ``,
+  message: "sendgridCallback",
+  sender_ip: "209.85.216.44",
+  spam_report: `Spam detection software, running on the system "parsley-p1las1-spamassassin-864946f5dc-2dv42",
     has NOT identified this incoming email as spam.  The original
     message has been attached to this so you can view it or label
     similar future email.  If you have any questions, see
@@ -1358,12 +1358,96 @@ const deleteAccount = {
     -0.0 T_SCC_BODY_TEXT_LINE   No description available.
      0.0 T_REMOTE_IMAGE         Message contains an external image
     `,
+  spam_score: "-0.1",
+  subject: `delete account`,
+  text: ``,
+  to: "calendar@fwd2cal.com",
+};
+
+const emailWithICSAttachment = {
+  "attachment-info": `"{"attachment1":{"filename": "calendar.ics","name": "calendar.ics","charset": "US-ASCII","type": "text/calendar","content-id": "f_lvxmti5g0"}}"`,
+  "attachments": "1",
+  "SPF": "pass",
+  "charsets": `{"to":"UTF-8","from":"UTF-8","subject":"UTF-8","text":"utf-8","html":"utf-8"}`,
+  "dkim": "{@gmail.com : pass}",
+  "envelope": `{"to":["calendar@fwd2cal.com"],"from":"${TESTER_PRIMARY_GOOGLE_ACCT}"}`,
+  "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
+  "headers": `Content-Type: multipart/alternative; boundary="0000000000000f12e420614b61f6a"
+    DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;        d=gmail.com; s=20230601; t=1711622313; x=1712227113; darn=fwd2cal.com;        h=to:subject:message-id:date:from:in-reply-to:references:mime-version         :from:to:cc:subject:date:message-id:reply-to;        bh=VcrjtrpPYi9Bt/kfjz9uIRySn0GCXUGae6f3/u6YmhI=;        b=UAjLPWTrzxT/kaJJERTco1Ps5zHK3d3mZX7MOaj7LqdFyjtVFwNOrSGy3e2LE9UvVS         iTESq02/mVB1pTvZqwsaI/K0YSaGjui9619nxi5dwaO/QySHvOSZ3SarmWuTSBs/XVw0         KRuXvEJ5CZ0sQRzfXO9nSVBMvDdobBPybTlgFuKQMHbtLiluAxZCz+wZvyLkMP9NYl8J         YzuaChshk6OHxDAYw2HoW7BdCEVRtqWRPUm1+hCV80lLxnrlWuzjOTgbrqPpiEohabYg         vT5MvWg2zSN4USlQqL80m035Y1Spa8le53KtHHHr/FquQhsp4jlMPUDVZEoovUaPpjWA         TYHA==
+    Date: Thu, 28 Mar 2024 10:38:21 +0000
+    From: Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>
+    In-Reply-To: <0102018e7a6e84ed-c41fff4f-700a-4606-bbcb-c4051ba055cd-000000@eu-west-1.amazonses.com>
+    MIME-Version: 1.0
+    Message-ID: <CAA4swFcWNQJRndNXq0u3Gcs-0U7kBXmMxNh6gS6qtXk7V4KqXw@mail.gmail.com>
+    Received: from mail-pj1-f44.google.com (mxd [209.85.216.44]) by mx.sendgrid.net with ESMTP id dXoUcqmOSqe8hO0WFt6vsQ for <calendar@fwd2cal.com>; Thu, 28 Mar 2024 10:38:33.988 +0000 (UTC)
+    Received: by mail-pj1-f44.google.com with SMTP id 98e67ed59e1d1-29dfad24f36so634763a91.0        for <calendar@fwd2cal.com>; Thu, 28 Mar 2024 03:38:33 -0700 (PDT)
+    References: <0102018e7a6e84ed-c41fff4f-700a-4606-bbcb-c4051ba055cd-000000@eu-west-1.amazonses.com>
+    Subject: email with ics attachment
+    To: calendar@fwd2cal.com
+    X-Gm-Message-State: AOJu0Yx7KViB979IYYeK6S1QzIqMpgqyMQFTmhFh89Jg3XX2iXvPfY/5	RnWgjTG8A2xecs85V/6ty7ISvvVLOrz8fMAQqdZE17/m3rr0Dqk73v9RbX5dRte4jF6X1RRoh9G	8xCNTy3c+uBs6oTF2QQdJHaZrTAJatc3tQkI=
+    X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;        d=1e100.net; s=20230601; t=1711622313; x=1712227113;        h=to:subject:message-id:date:from:in-reply-to:references:mime-version         :x-gm-message-state:from:to:cc:subject:date:message-id:reply-to;        bh=VcrjtrpPYi9Bt/kfjz9uIRySn0GCXUGae6f3/u6YmhI=;        b=YoacecYc7qtyCtYDV6Rf9d+6xvgsq2C8JHLhbweKI6/DFu1Aqplgp2vmuyNxuZM3hR         IIe0p+J3kUmAnIRG6N+XFvU7j0XwrKtZt2EY1SG5wUiahi5q+SKCbYa6/6diT8RDklNx         5Ut6nRP9sF+EZxHnZwq4JM9vGPPIpB0XziUK6Nra7PFnhWOpDYgVKkG6/qvaRD84LRHh         yN6E7ENIvaOYdHIy8HGJy4zlkOKt264LgXh0Qh02reGfDr2Ng8hv3e1A64jtS93ne8yx         XfPJxX4iPWbBGTIncCuinZFf0+Yn5o3TYH5JFf7cmbSOMEMvBavIq2af0q8HqbhRBiuV         sW2A==
+    X-Google-Smtp-Source: AGHT+IEc9vMa5b3wFzeMcFWyXKWFNGIXAsPg7hA/o63o4JEOr4urEW2JNXs9XJ9FH8ZoYR4+zz7SP2VOlotrtd0PZYQ=
+    X-Received: by 2002:a17:90a:2f05:b0:29b:2268:3349 with SMTP id s5-20020a17090a2f0500b0029b22683349mr2184697pjd.18.1711622312765; Thu, 28 Mar 2024 03:38:32 -0700 (PDT)
+    `,
+  "html": `here is the ics`,
+  "message": "sendgridCallback",
+  "sender_ip": "209.85.216.44",
+  "spam_report": `Spam detection software, running on the system "parsley-p1las1-spamassassin-864946f5dc-2dv42",
+    has NOT identified this incoming email as spam.  The original
+    message has been attached to this so you can view it or label
+    similar future email.  If you have any questions, see
+    the administrator of that system for details.
+    
+    Content preview:  here is the ics
+    
+    Content analysis details:   (-0.1 points, 5.0 required)
+    
+     pts rule name              description
+    ---- ---------------------- --------------------------------------------------
+     0.0 URIBL_BLOCKED          ADMINISTRATOR NOTICE: The query to URIBL was
+     0.0 RCVD_IN_ZEN_BLOCKED    RBL: ADMINISTRATOR NOTICE: The query to
+    -0.0 RCVD_IN_DNSWL_NONE     RBL: Sender listed at https://www.dnswl.org/,
+     0.0 URIBL_ZEN_BLOCKED      ADMINISTRATOR NOTICE: The query to
+     0.0 FREEMAIL_FROM          Sender email is commonly abused enduser mail
+     0.0 RCVD_IN_MSPIKE_H3      RBL: Good reputation (+3)
+     0.0 HTML_MESSAGE           BODY: HTML included in message
+    -0.1 DKIM_VALID_AU          Message has a valid DKIM or DK signature from
+    -0.1 DKIM_VALID             Message has at least one valid DKIM or DK signature
+     0.1 DKIM_SIGNED            Message has a DKIM or DK signature, not necessarily
+     0.0 RCVD_IN_MSPIKE_WL      Mailspike good senders
+    -0.0 T_SCC_BODY_TEXT_LINE   No description available.
+     0.0 T_REMOTE_IMAGE         Message contains an external image
+    `,
   "spam_score": "-0.1",
-  "subject": `delete account`,
-  "text": ``,
+  "subject": `email with ics attachment`,
+  "text": `here is the ics`,
   "to": "calendar@fwd2cal.com",
 };
 
+// const icsFiles = [
+//   {
+//     fieldname: 'attachment1',
+//     //file: <Buffer 42 45 47 49 4e 3a 56 43 41 4c 45 4e 44 41 52 0d 0a 56 45 52 53 49 4f 4e 3a 32 2e 30 0d 0a 50 52 4f 44 49 44 3a 2d 2f 2f 69 63 61 6c 2e 6d 61 72 75 64 ... 801 more bytes>,
+//     filename: {
+//       filename: 'attachment1',
+//       encoding: '7bit',
+//       mimeType: 'text/calendar'
+//     },
+//     // encoding: undefined,
+//     // mimetype: undefined
+//   },
+//   {
+//     fieldname: 'attachment2',
+//     //file: <Buffer 42 45 47 49 4e 3a 56 43 41 4c 45 4e 44 41 52 0d 0a 56 45 52 53 49 4f 4e 3a 32 2e 30 0d 0a 50 52 4f 44 49 44 3a 2d 2f 2f 69 63 61 6c 2e 6d 61 72 75 64 ... 799 more bytes>,
+//     filename: {
+//       filename: 'event.ics',
+//       encoding: '7bit',
+//       mimeType: 'text/calendar'
+//     },
+//     // encoding: undefined,
+//     // mimetype: undefined
+//   }
+// ];
 
 module.exports = {
   emailFromMain,
@@ -1373,4 +1457,5 @@ module.exports = {
   eventEmailFromSecondEmail,
   basicDetailedEmail,
   basicEmailFuture,
+  emailWithICSAttachment,
 };
