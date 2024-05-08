@@ -59,6 +59,10 @@
         "function": "verifyAdditionalEmail"
       },
       {
+        "source": "/auth/inviteAdditionalAttendees",
+        "function": "inviteAdditionalAttendees"
+      },
+      {
         "source": "/auth/oauthCallback",
         "function": "oauthCallback"
       },

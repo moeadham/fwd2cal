@@ -23,8 +23,10 @@
     "googleapis": "^134.0.0",
     "js-tiktoken": "^1.0.10",
     "moment-timezone": "^0.5.45",
+    "node-ical": "^0.18.0",
     "openai": "^4.29.2",
     "qs": "^6.12.1",
+    "underscore": "^1.13.6",
     "uuid": "^9.0.1",
     "validator": "^13.11.0"
   },

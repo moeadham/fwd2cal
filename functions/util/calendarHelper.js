@@ -7,6 +7,8 @@ const moment = require("moment-timezone");
 const {google} = require("googleapis");
 const handleAsync = require("./handleAsync");
 const {getOauthClient} = require("./authHandler");
+const ical = require("node-ical");
+const _ = require("underscore");
 
 const DEFAULT_EVENT_LENGTH = 30;
 const ONLY_INVITE_HOST = true;
@@ -102,6 +104,73 @@ async function addEvent(oauth2Client, event, uid) {
   return insertEvent.data;
 }
 
+async function eventFromICS(icsFile) {
+  const icsString = Buffer.from(icsFile.file).toString("utf-8");
+  const ics = await ical.async.parseICS(icsString);
+  const timezones = _.select(_.values(ics), (x) => {
+    return x.type === "VTIMEZONE";
+  });
+  if (timezones.length > 1) {
+    throw new Error("Multiple timezones found, too complicated.");
+  }
+  const timezone = timezones[0].tzid;
+  const events = _.select(_.values(ics), (x) => {
+    return x.type === "VEVENT";
+  });
+  if (events.length > 1) {
+    throw new Error("Multiple events found, too complicated.");
+  }
+  const event = events[0];
+  if (!event) {
+    throw new Error("Event not found");
+  }
+  const start = moment(event.start).tz(timezone).format("HH:mm");
+  const end = moment(event.end).tz(timezone).format("HH:mm");
+  const date = moment(event.start).tz(timezone).format("DD MMMM YYYY");
+
+  let summary;
+  if (event.summary.val) {
+    summary = event.summary.val;
+  } else {
+    summary = event.summary;
+  }
+
+  let description;
+  if (event.description.val) {
+    description = event.description.val;
+  } else {
+    description = event.description;
+  }
+
+  let location;
+  if (event.location.val) {
+    location = event.location.val;
+  } else {
+    location = event.location;
+  }
+
+  const attendees = [];
+  if (event.organizer && event.organizer.val) {
+    attendees.push(event.organizer.val.replace("MAILTO:", ""));
+  }
+  if (event.attendee && event.attendee.length > 0 && event.attendee[0].val) {
+    attendees.push(...event.attendee.map((attendee) => attendee.val.replace("MAILTO:", "")));
+  }
+
+  const r = {
+    timezone: timezone,
+    summary: summary,
+    location: location,
+    description: description,
+    conference_call: "",
+    date: date,
+    start_time: start,
+    end_time: end,
+    attendees: attendees,
+  };
+  return r;
+}
+
 async function getUserCalendars(oauth2Client, uid) {
   const calendar = google.calendar({version: "v3", auth: oauth2Client});
   const calendarList = await calendar.calendarList.list();
@@ -172,5 +241,6 @@ module.exports = {
   addEvent,
   getUserCalendars,
   inviteAdditionalAttendees,
+  eventFromICS,
 };
 

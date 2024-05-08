@@ -68,15 +68,35 @@ const sendgridCallback = functions.https.onRequest(async (req, res) => {
   }
   const bb = busboy({headers: req.headers});
   const result = {};
+  const files = [];
 
   bb.on("field", (fieldname, val) => {
     result[fieldname] = val;
   });
 
+  bb.on("file", (fieldname, file, filename, encoding, mimetype) => {
+    const fileChunks = [];
+    file.on("data", (data) => {
+      fileChunks.push(data);
+    });
+    file.on("end", () => {
+      files.push({
+        fieldname,
+        file: Buffer.concat(fileChunks),
+        filename,
+        encoding,
+        mimetype,
+      });
+    });
+  });
+
   bb.on("finish", async () => {
-    // logger.log("FULL EMAIL BELOW");
-    // logger.log(result); // To capture emails for test bindings.
-    const outcome = await handleEmail(result);
+    if (ENVIRONMENT !== "production") {
+      logger.log("FULL EMAIL BELOW");
+      logger.log(result); // To capture emails for test bindings.
+      logger.log(files);
+    }
+    const outcome = await handleEmail(result, files);
     res.json({message: "thanks", data: outcome});
   });
 
