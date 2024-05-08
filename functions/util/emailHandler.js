@@ -114,8 +114,7 @@ async function handleEmail(email) {
   const to = getRecipientsFromRawEmail(email);
   if (to.includes("support@fwd2cal.com") ||
       to.includes("admin@fwd2cal.com") ||
-      email.subject.toLowerCase().startsWith("verify your email address")) {
-    // To handle google account creation.
+      email.subject.toLowerCase().startsWith("verify your email address")) { // To handle google account creation.
     return await sendToSupport(sender, email);
   }
 
@@ -148,7 +147,9 @@ async function handleEmail(email) {
 }
 
 async function sendToSupport(sender, email) {
-  logger.debug("support email received");
+  logger.log(`Support email received from ${sender}`);
+  logger.log(email.subject);
+  logger.log(email.text);
   const content = `From: ${sender} <br><br> Subject: ${email.subject} <br><br> ${email.html}`;
   await sendEmail({
     to: "fwd2cal@googlegroups.com",
