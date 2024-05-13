@@ -309,10 +309,11 @@ async function eventHandler(email, sender, uid, files) {
       return;
     }
     if (aiEvent.error) {
+      const parseError = event.description || "";
       const response = {
         ...EMAIL_RESPONSES.aiParseError,
         replace: {
-          PARSE_ERROR_DESCRIPTION: event.description,
+          PARSE_ERROR_DESCRIPTION: parseError,
         },
       };
       logger.error("Error in email contents: ", event);
