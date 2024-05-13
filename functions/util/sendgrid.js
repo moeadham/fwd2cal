@@ -16,6 +16,9 @@ sgMail.setApiKey(SENDGRID_API_KEY);
  * @return {Promise<void>} A promise that resolves when the email is sent.
  */
 async function sendEmail({to, from, subject, text, html = "", headers = {}}) {
+  if (!subject) {
+    subject = "fwd2cal";
+  }
   const msg = {
     to,
     from,
