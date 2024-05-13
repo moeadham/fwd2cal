@@ -113,7 +113,10 @@ async function eventFromICS(icsFile) {
   if (timezones.length > 1) {
     throw new Error("Multiple timezones found, too complicated.");
   }
-  const timezone = timezones[0].tzid;
+  let timezone;
+  if (timezones.length !== 0) {
+    timezone = timezones[0].tzid;
+  }
   const events = _.select(_.values(ics), (x) => {
     return x.type === "VEVENT";
   });
@@ -158,7 +161,6 @@ async function eventFromICS(icsFile) {
   }
 
   const r = {
-    timezone: timezone,
     summary: summary,
     location: location,
     description: description,
@@ -168,6 +170,9 @@ async function eventFromICS(icsFile) {
     end_time: end,
     attendees: attendees,
   };
+  if (timezone) {
+    r.timezone = timezone;
+  }
   return r;
 }
 
