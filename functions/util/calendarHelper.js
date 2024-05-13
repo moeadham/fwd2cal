@@ -132,28 +132,28 @@ async function eventFromICS(icsFile) {
   const date = moment(event.start).tz(timezone).format("DD MMMM YYYY");
 
   let summary;
-  if (event.summary.val) {
+  if (event.summary?.val) {
     summary = event.summary.val;
   } else {
     summary = event.summary;
   }
 
   let description;
-  if (event.description.val) {
+  if (event.description?.val) {
     description = event.description.val;
   } else {
     description = event.description;
   }
 
   let location;
-  if (event.location.val) {
+  if (event.location?.val) {
     location = event.location.val;
   } else {
     location = event.location;
   }
 
   const attendees = [];
-  if (event.organizer && event.organizer.val) {
+  if (event.organizer?.val) {
     attendees.push(event.organizer.val.replace("MAILTO:", ""));
   }
   if (event.attendee && event.attendee.length > 0 && event.attendee[0].val) {

@@ -284,7 +284,6 @@ async function eventHandler(email, sender, uid, files) {
   let event;
   if (files && files.length > 0) {
     logger.debug("Checking attachments for an ICS file");
-    console.log(files);
     const icsFile = files.find((file) => file.filename.filename.endsWith(".ics"));
     if (icsFile) {
       logger.debug("ICS file found");
