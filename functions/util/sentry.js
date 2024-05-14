@@ -1,6 +1,7 @@
 const Sentry = require("@sentry/node");
 const {nodeProfilingIntegration} = require("@sentry/profiling-node");
 const {SENTRY_DSN} = require("./credentials");
+const {logger} = require("firebase-functions");
 
 Sentry.init({
   dsn: SENTRY_DSN,
@@ -18,6 +19,8 @@ const wrapAndReport = (fn) => async (...args) => {
     return await fn(...args);
   } catch (e) {
     // TODO: Disable this on local.
+    logger.warn("Capturing exception in Sentry");
+    logger.error(e);
     Sentry.captureException(e);
     await Sentry.flush(2000);
     throw e;

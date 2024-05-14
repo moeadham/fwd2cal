@@ -100,7 +100,7 @@ async function handleEmail(email, files) {
   const sender = getSenderFromRawEmail(email);
   // Is the email sender verified?
   if (!verifyEmail(email)) {
-    logger.error("Unverified Email");
+    logger.warn("Unverified Email");
     const response = {
       ...EMAIL_RESPONSES.unverifiedEmail,
       replace: {
@@ -120,7 +120,7 @@ async function handleEmail(email, files) {
 
   const uid = await getUserFromEmail(sender);
   if (!uid) {
-    logger.error(`No User found with ${sender}`);
+    logger.warn(`No User found with ${sender}`);
     const response = {
       ...EMAIL_RESPONSES.noUserFound,
       replace: {
@@ -202,7 +202,7 @@ async function removeEmailAddressFromUser(email, sender, uid) {
   // If not, add it to the pending email address list.
   const existingUid = await getUserFromEmail(emailAddressToRemove);
   if (existingUid !== uid) {
-    logger.error(`${uid} attempted to remove 
+    logger.warn(`${uid} attempted to remove 
       ${emailAddressToRemove}, but registered to ${existingUid}`);
     const response = {
       ...EMAIL_RESPONSES.removalEmailInUse,
@@ -242,7 +242,7 @@ async function addEmailAddressToUser(email, sender, uid) {
   // If not, add it to the pending email address list.
   const existingUid = await getUserFromEmail(emailAddressToAdd);
   if (existingUid) {
-    logger.error(`${uid} attempted to add 
+    logger.warn(`${uid} attempted to add 
       ${emailAddressToAdd}, but already registered to ${existingUid}`);
     const response = {
       ...EMAIL_RESPONSES.additionalEmailInUse,
@@ -275,7 +275,7 @@ async function eventHandler(email, sender, uid, files) {
   // Can we authenticate with their calendar?
   const [oauthErr, oauth2Client] = await handleAsync(() => getOauthClient(uid));
   if (oauthErr) {
-    logger.error("Error getting OAuth client: ", oauthErr);
+    logger.warn("Error getting OAuth client: ", oauthErr);
     await sendEmailResponse(sender, email, EMAIL_RESPONSES.oauthFailed, true);
     return;
   }
@@ -289,7 +289,7 @@ async function eventHandler(email, sender, uid, files) {
       logger.debug("ICS file found");
       const [icsErr, icsEvent] = await handleAsync(() => eventFromICS(icsFile));
       if (icsErr) {
-        logger.error("ICS error: ", icsErr);
+        logger.warn("ICS error: ", icsErr);
       } else {
         event = icsEvent;
       }
@@ -303,19 +303,19 @@ async function eventHandler(email, sender, uid, files) {
     const headers = getEmailHeaders(email.headers, ["Date", "Subject", "From"]);
     const [processEmailErr, aiEvent] = await handleAsync(() => processEmail(email, headers));
     if (processEmailErr) {
-      logger.error("OpenAI error: ", processEmailErr);
+      logger.warn("OpenAI error: ", processEmailErr);
       await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true);
       return;
     }
     if (aiEvent.error) {
-      const parseError = event.description || "";
+      const parseError = aiEvent.description || "";
       const response = {
         ...EMAIL_RESPONSES.aiParseError,
         replace: {
           PARSE_ERROR_DESCRIPTION: parseError,
         },
       };
-      logger.error("Error in email contents: ", event);
+      logger.warn("Error in email contents: ", aiEvent);
       await sendEmailResponse(sender, email, response, true);
       return aiEvent;
     } else {
@@ -330,7 +330,7 @@ async function addEventAndSendResponse(oauth2Client, event, uid, sender, email) 
   const [addEventErr, eventObject] =
     await handleAsync(() => addEvent(oauth2Client, event, uid));
   if (addEventErr) {
-    logger.error("Error adding event to calendar: ", addEventErr);
+    logger.warn("Error adding event to calendar: ", addEventErr);
     await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true);
     return;
   }
@@ -384,7 +384,7 @@ function getSenderFromRawEmail(email) {
     const envelope = JSON.parse(email.envelope);
     sender = envelope.from.toLowerCase();
   } catch (error) {
-    logger.error("Error parsing envelope", error);
+    logger.warn("Error parsing envelope", error);
   }
   return sender;
 }
@@ -396,7 +396,7 @@ function getRecipientsFromRawEmail(email) {
     to = envelope.to;
     to = to.map((email) => email.toLowerCase());
   } catch (error) {
-    logger.error("Error parsing envelope", error);
+    logger.warn("Error parsing envelope", error);
   }
   return to;
 }
@@ -412,7 +412,7 @@ function getDateFromHeader(header) {
       date = moment(matches[1].trim(), "ddd, DD MMM YYYY HH:mm:ss ZZ").toDate();
     }
   } catch (error) {
-    logger.error("Error extracting date with moment from header", error);
+    logger.warn("Error extracting date with moment from header", error);
   }
   return date;
 }
@@ -433,7 +433,7 @@ function getEmailThreadHeaders(header) {
       headers["References"] = matches[1].trim();
     }
   } catch (error) {
-    logger.error("Error extracting date with moment from header", error);
+    logger.warn("Error extracting date with moment from header", error);
   }
   return headers;
 }
@@ -449,7 +449,7 @@ function getEmailHeaders(header, items) {
       }
     });
   } catch (error) {
-    logger.error("Error extracting headers", error);
+    logger.warn("Error extracting headers", error);
   }
   return headers;
 }

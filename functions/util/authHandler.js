@@ -20,7 +20,7 @@ async function refreshOAuthTokens(uid) {
     await updateUserTokens(tokens, uid);
     logger.log(`uid ${uid} access token refreshed to ${tokens.expiry_date}`);
   } catch (error) {
-    logger.error("Failed to refresh access token:", uid, error);
+    logger.warn("Failed to refresh access token:", uid, error);
     throw error;
   }
 }
@@ -29,7 +29,7 @@ async function refreshAccessToken(oauth2Client) {
   return new Promise((resolve, reject) => {
     oauth2Client.refreshAccessToken((err, tokens) => {
       if (err) {
-        logger.error("Error refreshing access token", err);
+        logger.warn("Error refreshing access token", err);
         reject(err);
       } else {
         resolve(tokens);
@@ -61,7 +61,7 @@ async function oauthCronJob() {
       await refreshOAuthTokens(user.id);
     }
   } catch (error) {
-    logger.error("Error refreshing tokens:", error);
+    logger.warn("Error refreshing tokens:", error);
   }
 }
 
@@ -71,7 +71,7 @@ async function deleteAccount(uid) {
     await auth.deleteUser(uid);
     logger.log(`Successfully deleted user with UID: ${uid}`);
   } catch (error) {
-    logger.error(`Failed to delete user with UID: ${uid}`, error);
+    logger.warn(`Failed to delete user with UID: ${uid}`, error);
     throw error;
   }
 }

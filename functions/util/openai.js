@@ -33,8 +33,8 @@ async function defaultCompletion(messages, temperature = DEFAULT_TEMP, format = 
 function parseJsonFromOpenAIResponse(completion, raw) {
   let response;
   if (!completion) {
-    logger.error(`Completion is null`);
-    logger.error(JSON.stringify(completion, null, 2));
+    logger.warn(`Completion is null`);
+    logger.warn(JSON.stringify(completion, null, 2));
     throw new Error("Completion is null");
   }
   if (!completion.choices || !completion.choices[0]) {

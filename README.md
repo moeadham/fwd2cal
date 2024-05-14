@@ -33,6 +33,7 @@ firebase functions:config:set environment.name="production"
 firebase functions:config:set environment.openai_api_key="sk-YOUR_API_KEY"
 firebase functions:config:set environment.sendgrid_api_key="YOUR_API_KEY"
 firebase functions:config:set environment.sendgrid_endpoint="very_hard_to_guess_endpoint"
+firebase functions:config:set environment.sentry_dsn="your sentry dsn"
 ```
 
 Make sure you then set the secret URL as your parse URL in sendgrid.
