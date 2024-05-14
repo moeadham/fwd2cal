@@ -308,14 +308,14 @@ async function eventHandler(email, sender, uid, files) {
       return;
     }
     if (aiEvent.error) {
-      const parseError = event.description || "";
+      const parseError = aiEvent.description || "";
       const response = {
         ...EMAIL_RESPONSES.aiParseError,
         replace: {
           PARSE_ERROR_DESCRIPTION: parseError,
         },
       };
-      logger.error("Error in email contents: ", event);
+      logger.error("Error in email contents: ", aiEvent);
       await sendEmailResponse(sender, email, response, true);
       return aiEvent;
     } else {
