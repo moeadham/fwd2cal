@@ -219,7 +219,7 @@ async function inviteAdditionalAttendees(req, res) {
   // Can we authenticate with their calendar?
   const [oauthErr, oauth2Client] = await handleAsync(() => getOauthClient(uid));
   if (oauthErr) {
-    logger.error("Error getting oauth2Client", oauthErr);
+    logger.warn("Error getting oauth2Client", oauthErr);
     return res.redirect(302, "https://fwd2cal.com/404");
   }
   const calendar = google.calendar({version: "v3", auth: oauth2Client});

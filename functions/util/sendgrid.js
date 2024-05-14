@@ -37,9 +37,9 @@ async function sendEmail({to, from, subject, text, html = "", headers = {}}) {
       logger.log("Email not sent. ENVIRONMENT is not production.");
     }
   } catch (error) {
-    logger.error("Error sending email:", error);
+    logger.warn("Error sending email:", error);
     if (error.response) {
-      logger.error(error.response.body);
+      logger.warn(error.response.body);
     }
   }
 }

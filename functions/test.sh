@@ -26,7 +26,7 @@ LOGS_PID=$!
 sleep 15
 
 echo "running tests"
-mocha test/test.js --timeout 99999999999 || TEST_FAILED=true
+mocha test/test.js --timeout 99999999999 --bail || TEST_FAILED=true
 
 # Stop the logs stream
 kill $LOGS_PID

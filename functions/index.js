@@ -55,7 +55,7 @@ exports.signup = functions.https.onRequest(
 exports.oauthCallback = functions.https.onRequest(async (req, res) => {
   const [err, userRecord] = await handleAsync(() => signupCallbackHandler(req.query));
   if (err) {
-    logger.error("Error in oauthCallback", err);
+    logger.warn("Error in oauthCallback", err);
     res.status(err.code).send(err.message);
     return;
   }
@@ -112,7 +112,7 @@ exports.verifyAdditionalEmail = functions.https.onRequest(
     wrapAndReport(async (req, res) => {
       const [err, addUserRecord] = await handleAsync(() => verifyAdditionalEmail(req, res));
       if (err) {
-        logger.error("Error in addUserRecord", err);
+        logger.warn("Error in addUserRecord", err);
         return res.redirect(302, "https://fwd2cal.com/404");
       }
     }),
@@ -122,7 +122,7 @@ exports.inviteAdditionalAttendees = functions.https.onRequest(
     wrapAndReport(async (req, res) => {
       const [err, addUserRecord] = await handleAsync(() => inviteAdditionalAttendees(req, res));
       if (err) {
-        logger.error("Error in inviteAdditionalAttendees", err);
+        logger.warn("Error in inviteAdditionalAttendees", err);
         return res.redirect(302, "https://fwd2cal.com/404");
       }
     }),
