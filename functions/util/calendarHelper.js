@@ -9,6 +9,7 @@ const handleAsync = require("./handleAsync");
 const {getOauthClient} = require("./authHandler");
 const ical = require("node-ical");
 const _ = require("underscore");
+const {sendEvent} = require("./analytics");
 
 const DEFAULT_EVENT_LENGTH = 30;
 const ONLY_INVITE_HOST = true;
@@ -99,6 +100,7 @@ async function addEvent(oauth2Client, event, uid) {
     sendUpdates: "all",
   });
   logger.log("Event added to google.", insertEvent.data.htmlLink);
+  sendEvent(uid, "addEvent", {result: "success"});
   insertEvent.data.calendarId = primaryCalendar.id;
   insertEvent.data.uid = uid;
   return insertEvent.data;

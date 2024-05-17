@@ -16,7 +16,7 @@ const handleAsync = require("./handleAsync");
 const {mailTemplates} = require("./mailTemplates");
 const moment = require("moment-timezone");
 const qs = require("qs");
-// const {event} = require("firebase-functions/v1/analytics");
+const {sendEvent} = require("./analytics");
 
 
 const EMAIL_RESPONSES = {
@@ -132,6 +132,7 @@ async function handleEmail(email, files) {
   }
   const subjectAction = understandSubject(email.subject);
   logger.log(`Request from ${sender} to ${subjectAction}`);
+  sendEvent(uid, subjectAction);
   switch (subjectAction) {
     case "addUser":
       return await addEmailAddressToUser(email, sender, uid);
@@ -277,6 +278,7 @@ async function eventHandler(email, sender, uid, files) {
   if (oauthErr) {
     logger.warn("Error getting OAuth client: ", oauthErr);
     await sendEmailResponse(sender, email, EMAIL_RESPONSES.oauthFailed, true);
+    sendEvent(uid, "addEvent", {result: "oauthFailed"});
     return;
   }
 
@@ -305,6 +307,7 @@ async function eventHandler(email, sender, uid, files) {
     if (processEmailErr) {
       logger.warn("OpenAI error: ", processEmailErr);
       await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true);
+      sendEvent(uid, "addEvent", {result: "aiUnableToParse"});
       return;
     }
     if (aiEvent.error) {
@@ -317,6 +320,7 @@ async function eventHandler(email, sender, uid, files) {
       };
       logger.warn("Error in email contents: ", aiEvent);
       await sendEmailResponse(sender, email, response, true);
+      sendEvent(uid, "addEvent", {result: "aiUnableToParse"});
       return aiEvent;
     } else {
       event = aiEvent;

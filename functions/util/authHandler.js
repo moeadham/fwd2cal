@@ -7,10 +7,14 @@ const {getUserFromUID,
   getPendingEmailAddressByCode,
 } = require("./firestoreHandler");
 const {google} = require("googleapis");
-const {CREDENTIALS, REDIRECT_URI_INDEX} = require("./credentials");
+const {CREDENTIALS,
+  REDIRECT_URI_INDEX,
+} = require("./credentials");
 const {getAuth} = require("firebase-admin/auth");
 const {logger} = require("firebase-functions");
 const {isUUID} = require("validator");
+const {sendEvent} = require("./analytics");
+
 
 async function refreshOAuthTokens(uid) {
   const oauth2Client = await getOauthClient(uid);
@@ -125,6 +129,7 @@ async function signupCallbackHandler(query) {
 
     await storeUser(tokens, userRecord);
     await addUserEmailAddress(userRecord, [{email: userEmail, default: true}]);
+    sendEvent(userRecord.uid, "sign_up");
     return userRecord;
   } catch (error) {
     console.error("Error exchanging code for tokens", error);
