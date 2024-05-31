@@ -59,7 +59,7 @@ exports.oauthCallback = functions.https.onRequest(async (req, res) => {
     res.status(err.code).send(err.message);
     return;
   }
-  res.redirect(302, "https://fwd2cal.com/thanks");
+  res.redirect(302, "https://www.fwd2cal.com/thanks");
 });
 
 const sendgridCallback = functions.https.onRequest(
@@ -113,7 +113,7 @@ exports.verifyAdditionalEmail = functions.https.onRequest(
       const [err, addUserRecord] = await handleAsync(() => verifyAdditionalEmail(req, res));
       if (err) {
         logger.warn("Error in addUserRecord", err);
-        return res.redirect(302, "https://fwd2cal.com/404");
+        return res.redirect(302, "https://www.fwd2cal.com/404");
       }
     }),
 );
@@ -123,7 +123,7 @@ exports.inviteAdditionalAttendees = functions.https.onRequest(
       const [err, addUserRecord] = await handleAsync(() => inviteAdditionalAttendees(req, res));
       if (err) {
         logger.warn("Error in inviteAdditionalAttendees", err);
-        return res.redirect(302, "https://fwd2cal.com/404");
+        return res.redirect(302, "https://www.fwd2cal.com/404");
       }
     }),
 );

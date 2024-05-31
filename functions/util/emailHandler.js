@@ -359,7 +359,7 @@ async function addEventAndSendResponse(oauth2Client, event, uid, sender, email) 
         EVENT_LINK: eventObject.htmlLink,
         EVENT_DATE: moment(eventObject.start.dateTime)
             .tz(eventObject.start.timeZone)
-            .format("dddd, MMMM Do [at] h:mm A"),
+            .format("dddd, MMMM Do [at] h:mm A z"),
         INVITE_LINK: inviteLink,
         EVENT_ATTENDEES: inviteesWithoutHost.join(", "),
       },
@@ -372,7 +372,7 @@ async function addEventAndSendResponse(oauth2Client, event, uid, sender, email) 
         EVENT_LINK: eventObject.htmlLink,
         EVENT_DATE: moment(eventObject.start.dateTime)
             .tz(eventObject.start.timeZone)
-            .format("dddd, MMMM Do [at] h:mm A"),
+            .format("dddd, MMMM Do [at] h:mm A z"),
         EVENT_ATTENDEES:
             eventObject.attendees.map((attendee) => attendee.email).join(", "),
       },
