@@ -7,7 +7,7 @@ That's it. No buttons, no clicking - just forward an email, and a calendar event
 
 fwd2cal uses an LLM to parse the thread, generate a JSON of the event details, and then adds the event to your google calendar.
 
-[fwd2cal.com](https://fwd2cal.com) - running in production, free until it gets annoying/expensive to run.
+[fwd2cal.com](https://www.fwd2cal.com) - running in production, free until it gets annoying/expensive to run.
 
 https://github.com/moeadham/fwd2cal/assets/2141397/bb081bb1-9518-4cb4-8bcb-a1b6559f0eb5
 

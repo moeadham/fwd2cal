@@ -144,13 +144,13 @@ async function signupCallbackHandler(query) {
 async function verifyAdditionalEmail(req, res) {
   if (!(req?.query?.uuid) && isUUID(req.query.uuid)) {
     // return a 404.
-    return res.redirect(302, "https://fwd2cal.com/not-found");
+    return res.redirect(302, "https://www.fwd2cal.com/not-found");
   }
 
   logger.log("Adding pending email with uuid:", req.query.uuid);
   const pendingEmail = await getPendingEmailAddressByCode(req.query.uuid);
   if (!pendingEmail) {
-    return res.redirect(302, "https://fwd2cal.com/not-found");
+    return res.redirect(302, "https://www.fwd2cal.com/not-found");
   }
   const mainUser = await getUserFromUID(pendingEmail.ownerUid);
   await addUserEmailAddress(mainUser, [{

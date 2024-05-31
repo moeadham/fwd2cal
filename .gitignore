@@ -18,6 +18,7 @@ functions/.runtimeconfig.json
 functions/firebase-debug.log
 
 test/bindings.js
+test/bindings/ics/
 firebase-debug.log
 pubsub-debug.log
 

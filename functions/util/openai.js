@@ -5,6 +5,7 @@ const {logger} = require("firebase-functions");
 const tokenHelper = require("./tokenHelper");
 const prompts = require("./prompts");
 const {OPENAI_API_KEY} = require("./credentials");
+// const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 const DEFAULT_TEMP = 0.1;
 const DEFAULT_MAX_TOKENS = 4096;
@@ -103,8 +104,20 @@ async function processEmail(email, headers) {
   return eventResponse;
 }
 
+async function parseICS(ics) {
+  const messages = [
+    {
+      role: "system",
+      content: prompts.parseICS,
+    },
+    {role: "user", content: ics},
+  ];
+  return await defaultCompletion(messages);
+}
+
 module.exports = {
   defaultCompletion,
   processEmail,
+  parseICS,
 };
 
