@@ -80,6 +80,9 @@ async function addEvent(oauth2Client, event, uid) {
     attendees: event.attendees.map((attendee) => ({email: attendee})),
     start: times.start,
     end: times.end,
+    guestsCanInviteOthers: true,
+    guestsCanModify: true,
+    guestsCanSeeOtherGuests: true,
   };
   if (event.location) {
     requestBody.location = event.location;
@@ -172,7 +175,7 @@ async function eventFromICS(icsFile) {
     end_time: end,
     attendees: attendees,
   };
-  if (timezone) {
+  if (event.timezone) {
     r.timezone = timezone;
   }
   return r;
@@ -222,7 +225,7 @@ async function inviteAdditionalAttendees(req, res) {
   const [oauthErr, oauth2Client] = await handleAsync(() => getOauthClient(uid));
   if (oauthErr) {
     logger.warn("Error getting oauth2Client", oauthErr);
-    return res.redirect(302, "https://fwd2cal.com/404");
+    return res.redirect(302, "https://www.fwd2cal.com/404");
   }
   const calendar = google.calendar({version: "v3", auth: oauth2Client});
   const eventToUpdate = await calendar.events.get({
