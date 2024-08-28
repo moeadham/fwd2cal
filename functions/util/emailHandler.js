@@ -335,7 +335,7 @@ async function addEventAndSendResponse(oauth2Client, event, uid, sender, email) 
     await handleAsync(() => addEvent(oauth2Client, event, uid));
   if (addEventErr) {
     logger.warn("Error adding event to calendar: ", addEventErr);
-    await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true);
+    await sendEmailResponse(sender, email, EMAIL_RESPONSES.oauthFailed, true);
     return;
   }
   let response;

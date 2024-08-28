@@ -21,6 +21,9 @@ Note: If you've already signed up for fwd2cal, and want to fwd events from this 
     html:
 `Sorry - there was an issue authenticating with Google. Please click <a href="https://app.fwd2cal.com/signup">to authorize Google again</a>, and then forward your thread another time.
 
+Make sure you complete the checkbox to allow fwd2cal to access your calendar.
+<img src="https://app.fwd2cal.com/fwd2calPermissions.png" alt="Google Permissions" width="394" height="170" style="display: block;">
+
 <br><br>You can always ask for help: <a href="mailto:support@fwd2cal.com">support@fwd2cal.com</a><br>`,
   },
   unableToParse: {
