@@ -1449,6 +1449,68 @@ const emailWithICSAttachment = {
 //   }
 // ];
 
+// Mailgun format test data using exact field names from your sample email
+const mailgunEmailFromMain = {
+  recipient: "calendar@test.fwd2cal.com",
+  sender: "moeadham@gmail.com",
+  from: "Moe Adham <moeadham@gmail.com>",
+  subject: "Fwd: Your United Airlines booking confirmation – PXV9GJ",
+  "body-plain": `*From:* United Airlines <notifications@united.com>
+*Date:* May 13, 2025 at 9:57:40 PM CDT
+*To:* saman.adham@gmail.com
+*Subject:* *Your United Airlines booking confirmation – PXV9GJ*
+
+Thanks Saman for choosing United!
+
+Confirmation number: PXV9GJ
+
+Flight to Tokyo
+Jul 25, 2025
+
+8:05 AM 9:28 AM
+AUS to LAX
+Austin, TX, US Los Angeles, CA, US
+
+FLIGHT INFO
+Duration: 3h 23m
+UA 357
+Airbus A320
+United Economy
+
+CONNECTION:
+
+12:00 PM 3:15 PM
+LAX to HND
+Los Angeles, CA, US Tokyo, JP
+
+FLIGHT INFO
+Duration: 11h 15m
+UA 39
+Boeing 787-10 Dreamliner
+United Premium Plus
+Meal`,
+  "body-html": `<div dir="ltr"><br><div class="gmail_quote gmail_quote_container"><div dir="auto"><div dir="ltr"><br><br></div><blockquote type="cite"><div dir="ltr"><b>From:</b> United Airlines &lt;<a href="mailto:notifications@united.com" target="_blank">notifications@united.com</a>&gt;<br><b>Date:</b> May 13, 2025 at 9:57:40 PM CDT<br><b>To:</b> <a href="mailto:saman.adham@gmail.com" target="_blank">saman.adham@gmail.com</a><br><b>Subject:</b> <b>Your United Airlines booking confirmation – PXV9GJ</b><br><br></div></blockquote><p>Thanks Saman for choosing United!</p><p><strong>Confirmation number: PXV9GJ</strong></p><p><strong>Flight to Tokyo</strong><br>Jul 25, 2025</p><p>8:05 AM → 9:28 AM<br>AUS to LAX<br>Austin, TX, US → Los Angeles, CA, US</p><p>Duration: 3h 23m<br>UA 357</p></div></div></div>`,
+  "stripped-text": `Thanks Saman for choosing United!
+
+Confirmation number: PXV9GJ
+
+Flight to Tokyo
+Jul 25, 2025
+
+8:05 AM 9:28 AM
+AUS to LAX
+Austin, TX, US Los Angeles, CA, US
+
+FLIGHT INFO
+Duration: 3h 23m
+UA 357`,
+  "stripped-html": `<p>Thanks Saman for choosing United!</p><p><strong>Confirmation number: PXV9GJ</strong></p><p><strong>Flight to Tokyo</strong><br>Jul 25, 2025</p><p>8:05 AM → 9:28 AM<br>AUS to LAX<br>Austin, TX, US → Los Angeles, CA, US</p>`,
+  "message-headers": `[["X-Mailgun-Spf","Pass"],["X-Mailgun-Dkim-Check-Result","Pass"],["From","Moe Adham <moeadham@gmail.com>"],["Date","Thu, 29 May 2025 21:15:03 +0900"],["Subject","Fwd: Your United Airlines booking confirmation – PXV9GJ"],["To","calendar@test.fwd2cal.com"],["Content-Type","multipart/alternative; boundary=\\"00000000000000ec3306364540e0\\""]]`,
+  timestamp: "1748520917",
+  token: "381ef780ce55aec8e03940b5ddb16c205ad6c677a7ecffcef4",
+  signature: "7f647071e989fe1291c8a5479d1800f05d187a6bab9e0dd89a387f0e280657f1"
+};
+
 module.exports = {
   emailFromMain,
   addEmailAddress,
@@ -1458,4 +1520,5 @@ module.exports = {
   basicDetailedEmail,
   basicEmailFuture,
   emailWithICSAttachment,
+  mailgunEmailFromMain,
 };

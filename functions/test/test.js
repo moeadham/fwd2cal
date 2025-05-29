@@ -205,7 +205,24 @@ describe("fwd2cal", () => {
       done();
     });
   });
-  it("UT11 delete account", (done) => {
+  it("UT11 test mailgun callback generates event", (done) => {
+    const testMessage = bindings.mailgunEmailFromMain;
+    const req = chai.request(apiURL).post("/mailgunCallback").type("form");
+    Object.keys(testMessage).forEach((key) => {
+      req.field(key, testMessage[key]);
+    });
+    req.end((err, res) => {
+      expect(err).to.be.null;
+      expect(res).to.have.status(200);
+      console.log(res.body);
+      expect(res.body).to.be.an("object");
+      // We should get an event
+      expect(res.body.data).to.not.have.property("error");
+      expect(res.body.data.kind).to.equal("calendar#event");
+      done();
+    });
+  });
+  it("UT12 delete account", (done) => {
     const testMessage = bindings.deleteAccount;
     const req = chai.request(apiURL).post("/sendgridCallback").type("form");
     Object.keys(testMessage).forEach((key) => {
