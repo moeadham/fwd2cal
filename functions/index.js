@@ -99,7 +99,7 @@ const sendgridCallback = functions.https.onRequest(
         //   logger.log(result); // To capture emails for test bindings.
         //   logger.log(files);
         // }
-        const outcome = await handleEmail(result, files);
+        const outcome = await handleEmail(result, files, "sendgrid");
         res.json({message: "thanks", data: outcome});
       });
 
@@ -155,7 +155,8 @@ const mailgunCallback = functions.https.onRequest(
         // Transform Mailgun format to match SendGrid format expected by handleEmail
         const transformedEmail = transformMailgunToSendGrid(result);
 
-        if (ENVIRONMENT !== "production") {
+        if (ENVIRONMENT) {
+        // if (ENVIRONMENT !== "production") {
           logger.log("FULL MAILGUN EMAIL BELOW");
           logger.log(result);
           logger.log("TRANSFORMED EMAIL");
@@ -163,7 +164,7 @@ const mailgunCallback = functions.https.onRequest(
           logger.log(files);
         }
 
-        const outcome = await handleEmail(transformedEmail, files);
+        const outcome = await handleEmail(transformedEmail, files, "mailgun");
         res.json({message: "thanks", data: outcome});
       });
 
