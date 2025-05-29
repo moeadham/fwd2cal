@@ -94,11 +94,11 @@ const sendgridCallback = functions.https.onRequest(
       });
 
       bb.on("finish", async () => {
-        if (ENVIRONMENT !== "production") {
-          logger.log("FULL EMAIL BELOW");
-          logger.log(result); // To capture emails for test bindings.
-          logger.log(files);
-        }
+        // if (ENVIRONMENT !== "production") {
+        //   logger.log("FULL EMAIL BELOW");
+        //   logger.log(result); // To capture emails for test bindings.
+        //   logger.log(files);
+        // }
         const outcome = await handleEmail(result, files);
         res.json({message: "thanks", data: outcome});
       });
@@ -119,7 +119,7 @@ const mailgunCallback = functions.https.onRequest(
       // Check spam filtering headers from Mailgun
       const spamFlag = req.headers["x-mailgun-sflag"];
       const spamScore = parseFloat(req.headers["x-mailgun-sscore"] || "0");
-      
+
       // Reject obvious spam (SFlag: Yes or high spam score > 0.5)
       if (spamFlag === "Yes" || spamScore > 0.5) {
         logger.warn(`Rejected spam email - SFlag: ${spamFlag}, SScore: ${spamScore}`);
@@ -154,7 +154,7 @@ const mailgunCallback = functions.https.onRequest(
       bb.on("finish", async () => {
         // Transform Mailgun format to match SendGrid format expected by handleEmail
         const transformedEmail = transformMailgunToSendGrid(result);
-        
+
         if (ENVIRONMENT !== "production") {
           logger.log("FULL MAILGUN EMAIL BELOW");
           logger.log(result);
@@ -162,7 +162,7 @@ const mailgunCallback = functions.https.onRequest(
           logger.log(transformedEmail);
           logger.log(files);
         }
-        
+
         const outcome = await handleEmail(transformedEmail, files);
         res.json({message: "thanks", data: outcome});
       });
@@ -180,20 +180,20 @@ function transformMailgunToSendGrid(mailgunData) {
     html: mailgunData["body-html"] || "",
     from: mailgunData.from || "",
     to: mailgunData.recipient || "",
-    
+
     // Headers - Mailgun sends message-headers as JSON string
     headers: constructHeadersFromMailgun(mailgunData),
-    
+
     // Envelope information (construct from Mailgun fields)
     envelope: JSON.stringify({
       from: mailgunData.sender || "",
       to: [mailgunData.recipient || ""],
     }),
-    
+
     // Spam filtering - use Mailgun DKIM/SPF if available, otherwise pass
     SPF: getMailgunSpfResult(mailgunData),
     dkim: getMailgunDkimResult(mailgunData),
-    
+
     // Additional Mailgun-specific fields for debugging
     mailgun_timestamp: mailgunData.timestamp,
     mailgun_signature: mailgunData.signature,
@@ -206,7 +206,7 @@ function transformMailgunToSendGrid(mailgunData) {
 function constructHeadersFromMailgun(mailgunData) {
   // Construct headers string from Mailgun's message-headers field
   let headers = "";
-  
+
   // Parse message-headers if available (Mailgun sends this as JSON string)
   if (mailgunData["message-headers"]) {
     try {
@@ -218,7 +218,7 @@ function constructHeadersFromMailgun(mailgunData) {
       logger.warn("Error parsing message-headers", error);
     }
   }
-  
+
   // Fallback to individual fields if message-headers not available or failed to parse
   if (!headers) {
     if (mailgunData.timestamp) {
@@ -229,7 +229,7 @@ function constructHeadersFromMailgun(mailgunData) {
     if (mailgunData.from) headers += `From: ${mailgunData.from}\n`;
     if (mailgunData.recipient) headers += `To: ${mailgunData.recipient}\n`;
   }
-  
+
   return headers;
 }
 
