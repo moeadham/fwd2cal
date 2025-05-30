@@ -32,7 +32,7 @@ async function sendEvent(uid, eventName, eventParams = {}) {
       logger.debug("GA event sent successfully:", response.data);
       return; // Success, exit function
     } catch (error) {
-      const isRetriableError = error.code === "ECONNRESET" || 
+      const isRetriableError = error.code === "ECONNRESET" ||
                               error.code === "ETIMEDOUT" ||
                               error.message.includes("socket hang up") ||
                               error.message.includes("timeout") ||
@@ -40,7 +40,7 @@ async function sendEvent(uid, eventName, eventParams = {}) {
 
       if (attempt < maxRetries && isRetriableError) {
         logger.warn(`GA Error sending event (attempt ${attempt + 1}/${maxRetries + 1}): ${error.message}. Retrying in ${retryDelay}ms...`);
-        await new Promise(resolve => setTimeout(resolve, retryDelay));
+        await new Promise((resolve) => setTimeout(resolve, retryDelay));
       } else {
         logger.error("GA Error sending event:", error.response ? error.response.data : error.message);
         return; // Give up after max retries or non-retriable error
