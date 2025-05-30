@@ -331,9 +331,50 @@ async function eventHandler(email, sender, uid, files = [], emailService = "send
       return aiEvent;
     } else {
       event = aiEvent;
+      
+      // Validate event times before proceeding
+      const timeValidation = validateEventTimes(event);
+      if (!timeValidation.isValid) {
+        logger.warn(`Invalid event times from AI: ${timeValidation.error}`);
+        await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true, emailService);
+        sendEvent(uid, "addEvent", {result: "aiUnableToParse"});
+        return;
+      }
     }
   }
   return addEventAndSendResponse(oauth2Client, event, uid, sender, email, emailService);
+}
+
+function validateEventTimes(event) {
+  const moment = require("moment-timezone");
+  
+  if (!event.date || !event.start_time) {
+    return {isValid: false, error: "Missing required date or start_time"};
+  }
+  
+  // Try to parse the start time
+  const startTime = `${event.date} ${event.start_time}`;
+  const startDate = moment.tz(startTime, "DD MMMM YYYY HH:mm", event.timeZone || "UTC");
+  
+  if (!startDate.isValid()) {
+    return {isValid: false, error: `Invalid start date/time: ${event.date} ${event.start_time}`};
+  }
+  
+  // If end_time is provided, validate it too
+  if (event.end_time) {
+    const endTime = `${event.date} ${event.end_time}`;
+    const endDate = moment.tz(endTime, "DD MMMM YYYY HH:mm", event.timeZone || "UTC");
+    
+    if (!endDate.isValid()) {
+      logger.warn(`Invalid end time, will use default duration: ${event.end_time}`);
+      event.end_time = undefined; // Remove invalid end time
+    } else if (endDate.isSameOrBefore(startDate)) {
+      logger.warn(`End time is not after start time, will use default duration: ${event.end_time}`);
+      event.end_time = undefined; // Remove invalid end time
+    }
+  }
+  
+  return {isValid: true};
 }
 
 function isValidEmail(email) {
