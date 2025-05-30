@@ -23,7 +23,7 @@ lsof -ti :8080 | xargs kill
 echo "Starting firebase emulator"
 firebase emulators:start > /dev/stdout &
 LOGS_PID=$!
-sleep 15
+sleep 20
 
 echo "running tests"
 mocha test/test.js --timeout 99999999999 --bail || TEST_FAILED=true

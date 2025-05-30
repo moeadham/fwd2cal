@@ -3,17 +3,27 @@
 /* eslint-disable no-undef */
 const chai = require("chai");
 const chaiHttp = require("chai-http");
-const bindings = require("./bindings/binding");
 const {exec} = require("child_process");
+
+// Configuration: Set EMAIL_SERVICE to "sendgrid" or "mailgun"
+const EMAIL_SERVICE = process.env.EMAIL_SERVICE || "mailgun"; // Default to mailgun
+
+const bindings = EMAIL_SERVICE === "mailgun" ?
+  require("./bindings/mailgunBindings") :
+  require("./bindings/sendgridBindings");
 
 chai.use(chaiHttp);
 const expect = chai.expect;
 const apiURL = "http://127.0.0.1:5001/fwd2cal/us-central1"; // URL of your Vercel dev server
 
+// Dynamic endpoint and attachment field based on email service
+const CALLBACK_ENDPOINT = EMAIL_SERVICE === "mailgun" ? "/mailgunCallback" : "/sendgridCallback";
+const ATTACHMENT_FIELD = EMAIL_SERVICE === "mailgun" ? "attachment-1" : "attachment";
+
 const TESTER_PRIMARY_GOOGLE_ACCT = process.env.TESTER_PRIMARY_GOOGLE_ACCT;
 const TESTER_SECONDARY_EMAIL_ACCT = process.env.TESTER_SECONDARY_EMAIL_ACCT;
 
-describe("fwd2cal", () => {
+describe(`fwd2cal (${EMAIL_SERVICE.toUpperCase()})`, () => {
   it("UT00 get login URL and wait for tester to create account", (done) => {
     chai.request(apiURL)
         .get("/signup")
@@ -42,7 +52,7 @@ describe("fwd2cal", () => {
   });
   it("UT01 test generating an event", (done) => {
     const testMessage = bindings.emailFromMain;
-    const req = chai.request(apiURL).post("/sendgridCallback").type("form");
+    const req = chai.request(apiURL).post(CALLBACK_ENDPOINT).type("form");
     Object.keys(testMessage).forEach((key) => {
       req.field(key, testMessage[key]);
     });
@@ -60,7 +70,7 @@ describe("fwd2cal", () => {
   let verificationCode = "";
   it("UT02 test adding a new email address", (done) => {
     const testMessage = bindings.addEmailAddress;
-    const req = chai.request(apiURL).post("/sendgridCallback").type("form");
+    const req = chai.request(apiURL).post(CALLBACK_ENDPOINT).type("form");
     Object.keys(testMessage).forEach((key) => {
       req.field(key, testMessage[key]);
     });
@@ -77,7 +87,7 @@ describe("fwd2cal", () => {
   });
   it("UT03 try to  email from secondary email address", (done) => {
     const testMessage = bindings.eventEmailFromSecondEmail;
-    const req = chai.request(apiURL).post("/sendgridCallback").type("form");
+    const req = chai.request(apiURL).post(CALLBACK_ENDPOINT).type("form");
     Object.keys(testMessage).forEach((key) => {
       req.field(key, testMessage[key]);
     });
@@ -105,7 +115,7 @@ describe("fwd2cal", () => {
   });
   it("UT05 try to  email from secondary email address", (done) => {
     const testMessage = bindings.eventEmailFromSecondEmail;
-    const req = chai.request(apiURL).post("/sendgridCallback").type("form");
+    const req = chai.request(apiURL).post(CALLBACK_ENDPOINT).type("form");
     Object.keys(testMessage).forEach((key) => {
       req.field(key, testMessage[key]);
     });
@@ -120,7 +130,7 @@ describe("fwd2cal", () => {
   });
   it("UT06 try a basic email with no forward but instructions", (done) => {
     const testMessage = bindings.basicDetailedEmail;
-    const req = chai.request(apiURL).post("/sendgridCallback").type("form");
+    const req = chai.request(apiURL).post(CALLBACK_ENDPOINT).type("form");
     Object.keys(testMessage).forEach((key) => {
       req.field(key, testMessage[key]);
     });
@@ -143,10 +153,19 @@ describe("fwd2cal", () => {
     const threeDaysFromNow = new Date();
     threeDaysFromNow.setDate(threeDaysFromNow.getDate() + 3);
     const formattedDate = threeDaysFromNow.toLocaleDateString("en-US", {year: "numeric", month: "short", day: "numeric"});
-    testMessage.text = testMessage.text.replace("%DATE_IN_THE_FUTURE%", formattedDate);
-    testMessage.text = testMessage.text.replace("%DATE_IN_THE_FUTURE%", formattedDate);
 
-    const req = chai.request(apiURL).post("/sendgridCallback").type("form");
+    // Handle different field names for different email services
+    const fieldsToUpdate = EMAIL_SERVICE === "mailgun" ?
+      ["body-plain", "body-html", "stripped-text", "stripped-html"] :
+      ["text"];
+
+    fieldsToUpdate.forEach((field) => {
+      if (testMessage[field]) {
+        testMessage[field] = testMessage[field].replace(/%DATE_IN_THE_FUTURE%/g, formattedDate);
+      }
+    });
+
+    const req = chai.request(apiURL).post(CALLBACK_ENDPOINT).type("form");
     Object.keys(testMessage).forEach((key) => {
       req.field(key, testMessage[key]);
     });
@@ -173,11 +192,11 @@ describe("fwd2cal", () => {
   });
   it("UT09 add an event with an ics attachment.", (done) => {
     const testMessage = bindings.emailWithICSAttachment;
-    const req = chai.request(apiURL).post("/sendgridCallback").type("form");
+    const req = chai.request(apiURL).post(CALLBACK_ENDPOINT).type("form");
     Object.keys(testMessage).forEach((key) => {
       req.field(key, testMessage[key]);
     });
-    req.attach("attachment", "./test/bindings/calendar.ics", "calendar.ics");
+    req.attach(ATTACHMENT_FIELD, "./test/bindings/calendar.ics", "calendar.ics");
     req.end((err, res) => {
       expect(err).to.be.null;
       expect(res).to.have.status(200);
@@ -191,7 +210,7 @@ describe("fwd2cal", () => {
   });
   it("UT10 remove secondary email address", (done) => {
     const testMessage = bindings.removeEmailAddress;
-    const req = chai.request(apiURL).post("/sendgridCallback").type("form");
+    const req = chai.request(apiURL).post(CALLBACK_ENDPOINT).type("form");
     Object.keys(testMessage).forEach((key) => {
       req.field(key, testMessage[key]);
     });
@@ -207,7 +226,7 @@ describe("fwd2cal", () => {
   });
   it("UT11 delete account", (done) => {
     const testMessage = bindings.deleteAccount;
-    const req = chai.request(apiURL).post("/sendgridCallback").type("form");
+    const req = chai.request(apiURL).post(CALLBACK_ENDPOINT).type("form");
     Object.keys(testMessage).forEach((key) => {
       req.field(key, testMessage[key]);
     });

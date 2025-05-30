@@ -3,35 +3,48 @@
 const OpenAI = require("openai");
 const {logger} = require("firebase-functions");
 const tokenHelper = require("./tokenHelper");
-const prompts = require("./prompts");
+const {prompts, schemas} = require("./prompts");
 const {OPENAI_API_KEY} = require("./credentials");
 // const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 const DEFAULT_TEMP = 0.1;
 const DEFAULT_MAX_TOKENS = 4096;
-const DEFAULT_MODEL = "gpt-4-1106-preview";
+const DEFAULT_MODEL = "gpt-4.1-mini-2025-04-14";// "gpt-4o-mini-2024-07-18";
 
 const openai = new OpenAI({
   apiKey: OPENAI_API_KEY,
 });
 
-async function defaultCompletion(messages, temperature = DEFAULT_TEMP, format = "json_object") {
+async function defaultCompletion(messages, temperature = DEFAULT_TEMP, schema = null) {
   logger.debug(`OpenAI request with ${tokenHelper.countTokens(JSON.stringify(messages))} prompt tokens`);
-  const {data: completion, response: raw} = await openai.chat.completions.create({
+
+  const requestOptions = {
     messages: messages,
     model: DEFAULT_MODEL,
-    response_format: {type: format},
     temperature: temperature,
     max_tokens: DEFAULT_MAX_TOKENS,
-  }).withResponse();
-  if (format === "json_object") {
-    return parseJsonFromOpenAIResponse(completion, raw);
+  };
+
+  if (schema) {
+    requestOptions.response_format = {
+      type: "json_schema",
+      json_schema: {
+        name: "response",
+        schema: schema,
+      },
+    };
+  }
+
+  const completion = await openai.chat.completions.create(requestOptions);
+
+  if (schema) {
+    return parseJsonFromOpenAIResponse(completion);
   } else {
     return completion.choices[0].message.content;
   }
 }
 
-function parseJsonFromOpenAIResponse(completion, raw) {
+function parseJsonFromOpenAIResponse(completion) {
   let response;
   if (!completion) {
     logger.warn(`Completion is null`);
@@ -58,7 +71,7 @@ function parseJsonFromOpenAIResponse(completion, raw) {
   } catch (error) {
     throw new Error("Non JSON response received. Try again.");
   }
-  logger.debug(`OpenAI tokens used: ${completion.usage.total_tokens} remaining tokens: ${raw.headers.get("x-ratelimit-remaining-tokens")}`);
+  logger.debug(`OpenAI tokens used: ${completion.usage.total_tokens}`);
   return response;
 }
 
@@ -86,13 +99,13 @@ async function processEmail(email, headers) {
   ];
 
   const [eventResponse, timezoneResponse] = await Promise.all([
-    defaultCompletion(eventMessages),
-    defaultCompletion(timezoneMessages),
+    defaultCompletion(eventMessages, DEFAULT_TEMP, schemas.eventData),
+    defaultCompletion(timezoneMessages, DEFAULT_TEMP, schemas.timezone),
   ]);
 
   [eventResponse, timezoneResponse].forEach((res) => {
     Object.keys(res).forEach((key) => {
-      if (res[key] === "undefined") {
+      if (res[key] === "undefined" || res[key] === null) {
         res[key] = undefined;
       }
     });
@@ -112,7 +125,7 @@ async function parseICS(ics) {
     },
     {role: "user", content: ics},
   ];
-  return await defaultCompletion(messages);
+  return await defaultCompletion(messages, DEFAULT_TEMP, schemas.icsParser);
 }
 
 module.exports = {
