@@ -207,6 +207,8 @@ function transformMailgunToSendGrid(mailgunData) {
 function constructHeadersFromMailgun(mailgunData) {
   // Construct headers string from Mailgun's message-headers field
   let headers = "";
+  let messageId = null;
+  let existingReferences = null;
 
   // Parse message-headers if available (Mailgun sends this as JSON string)
   if (mailgunData["message-headers"]) {
@@ -214,6 +216,15 @@ function constructHeadersFromMailgun(mailgunData) {
       const messageHeaders = JSON.parse(mailgunData["message-headers"]);
       messageHeaders.forEach(([key, value]) => {
         headers += `${key}: ${value}\n`;
+
+        // Extract Message-Id for threading
+        if (key === "Message-Id") {
+          messageId = value;
+        }
+        // Extract existing References chain
+        if (key === "References") {
+          existingReferences = value;
+        }
       });
     } catch (error) {
       logger.warn("Error parsing message-headers", error);
@@ -229,6 +240,20 @@ function constructHeadersFromMailgun(mailgunData) {
     if (mailgunData.subject) headers += `Subject: ${mailgunData.subject}\n`;
     if (mailgunData.from) headers += `From: ${mailgunData.from}\n`;
     if (mailgunData.recipient) headers += `To: ${mailgunData.recipient}\n`;
+  }
+
+  // Add threading headers for responses if we have a Message-Id
+  if (messageId) {
+    // For threading, our reply should have:
+    // In-Reply-To: the original Message-Id
+    // References: existing References + original Message-Id
+    headers += `In-Reply-To: ${messageId}\n`;
+
+    if (existingReferences) {
+      headers += `References: ${existingReferences} ${messageId}\n`;
+    } else {
+      headers += `References: ${messageId}\n`;
+    }
   }
 
   return headers;

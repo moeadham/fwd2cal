@@ -58,7 +58,7 @@ Suite 1, Beatty House, Admirals Way, Canary Wharf, London, UK, E14 9UF`,
 };
 
 const addEmailAddress = {
-  "recipient": "calendar@test.fwd2cal.com", 
+  "recipient": "calendar@test.fwd2cal.com",
   "sender": TESTER_PRIMARY_GOOGLE_ACCT,
   "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
   "subject": `add ${TESTER_SECONDARY_EMAIL_ACCT}`,
