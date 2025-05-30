@@ -481,20 +481,29 @@ async function addEventsAndSendResponse(oauth2Client, events, uid, sender, email
         .format("dddd, MMMM Do [at] h:mm A z");
 
     responseHtml += `<p><strong>${eventObject.summary}</strong><br>`;
-    responseHtml += `${eventDate}<br>`;
+    responseHtml += `Date: ${eventDate}<br>`;
     if (eventObject.location) {
       responseHtml += `Location: ${eventObject.location}<br>`;
     }
-    responseHtml += `<a href="${eventObject.htmlLink}">View in Calendar</a></p>`;
 
     // Check if any event has multiple attendees
     if (eventObject.attendees && eventObject.attendees.length > 1) {
-      // hasMultipleAttendees = true;
       const attendeeEmails = eventObject.attendees.map((a) => a.email).join(", ");
-      responseHtml += `<p>Attendees: ${attendeeEmails}</p>`;
+      responseHtml += `Attendees: ${attendeeEmails}<br>`;
     }
 
-    responseHtml += "<hr>";
+    responseHtml += `<a href="${eventObject.htmlLink}" style="display:inline-block; padding:10px 20px; margin:5px 0; background-color:#3498db; color:white; text-align:center; text-decoration:none; font-weight:bold; border-radius:5px; border:none; cursor:pointer;">View Event</a>`;
+
+    // Add invite button if there are multiple attendees and an invite link
+    if (eventObject.inviteOthersLink) {
+      const inviteesWithoutHost = eventObject.attendees.filter((attendee) => attendee.email !== eventObject.organizer.email);
+      if (inviteesWithoutHost.length > 0) {
+        responseHtml += `<br>You may want to invite: ${inviteesWithoutHost.map((a) => a.email).join(", ")}<br>`;
+        responseHtml += `<a href="${eventObject.inviteOthersLink}" style="display:inline-block; padding:10px 20px; margin:5px 0; background-color:#3498db; color:white; text-align:center; text-decoration:none; font-weight:bold; border-radius:5px; border:none; cursor:pointer;">Invite Guests</a>`;
+      }
+    }
+
+    responseHtml += "</p><hr>";
   }
 
   // Add failed events info if any
@@ -550,9 +559,9 @@ async function addEventsAndSendResponse(oauth2Client, events, uid, sender, email
   } else {
     // Multiple events - send custom HTML email
     const customHtml = `
-      <p>I've added ${successfulEvents.length} events to your calendar:</p>
-      ${responseHtml}
-      <p>Powered by <a href="https://fwd2cal.com">fwd2cal.com</a></p>
+${successfulEvents.length} events added to your calendar.
+${responseHtml}
+<br><br>You can always ask for help: <a href="mailto:support@fwd2cal.com">support@fwd2cal.com</a><br>
     `;
 
     const sendEmail = getSendEmailFunction(emailService);
