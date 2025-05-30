@@ -336,7 +336,25 @@ async function eventHandler(email, sender, uid, files = [], emailService = "send
   return addEventAndSendResponse(oauth2Client, event, uid, sender, email, emailService);
 }
 
+function isValidEmail(email) {
+  // Email validation regex that supports + character and other common email patterns
+  const emailRegex = /^[a-zA-Z0-9._+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+  return emailRegex.test(email);
+}
+
 async function addEventAndSendResponse(oauth2Client, event, uid, sender, email, emailService = "sendgrid") {
+  // Filter out invalid email addresses from attendees
+  const validAttendees = event.attendees.filter((attendee) => {
+    const isValid = isValidEmail(attendee);
+    if (!isValid) {
+      logger.warn(`Dropping invalid email address from attendees: ${attendee}`);
+    }
+    return isValid;
+  });
+
+  // Update event with filtered attendees
+  event.attendees = validAttendees;
+
   // Can we add the event to their calendar?
   const [addEventErr, eventObject] =
     await handleAsync(() => addEvent(oauth2Client, event, uid));
