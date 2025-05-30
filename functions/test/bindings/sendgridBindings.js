@@ -1449,57 +1449,6 @@ const emailWithICSAttachment = {
 //   }
 // ];
 
-// Mailgun format test data using exact field names from your sample email
-const mailgunEmailFromMain = {
-  "recipient": "calendar@test.fwd2cal.com",
-  "sender": TESTER_PRIMARY_GOOGLE_ACCT,
-  "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
-  "subject": "Fwd: Finess Clinic Appointment Confirmation",
-  "body-plain": `---------- Forwarded message ---------
-From: Finess Clinic <noreply@treatwell.co.uk>
-Date: Tue, Aug 26, 2025 at 11:04 AM
-Subject: Finess Clinic Appointment Confirmation
-To: ${TESTER_PRIMARY_GOOGLE_ACCT}
-
-Your booking is confirmed
-
-Order reference: W1503268392
-
-Your appointment
-
-Tuesday, 26 August 2025, 8:15 PM
-
-Acupuncture
-30 minutes session
-
-Amount to pay at the salon
-£45.00
-
-Finess Clinic
-Suite 1, Beatty House, Admirals Way, Canary Wharf, London, UK, E14 9UF`,
-  "body-html": `<div dir="ltr"><br><div class="gmail_quote"><div dir="ltr" class="gmail_attr">---------- Forwarded message ---------<br>From: <strong class="gmail_sendername" dir="auto">Finess Clinic</strong> <span dir="auto">&lt;<a href="mailto:noreply@treatwell.co.uk">noreply@treatwell.co.uk</a>&gt;</span><br>Date: Tue, Aug 26, 2025 at 11:04 AM<br>Subject: Finess Clinic Appointment Confirmation<br>To: &lt;<a href="mailto:${TESTER_PRIMARY_GOOGLE_ACCT}">${TESTER_PRIMARY_GOOGLE_ACCT}</a>&gt;<br></div><br><p><strong>Your booking is confirmed</strong></p><p>Order reference: W1503268392</p><p><strong>Your appointment</strong></p><p>Tuesday, 26 August 2025, 8:15 PM</p><p>Acupuncture<br>30 minutes session</p><p>Amount to pay at the salon<br>£45.00</p><p>Finess Clinic<br>Suite 1, Beatty House, Admirals Way, Canary Wharf, London, UK, E14 9UF</p></div></div>`,
-  "stripped-text": `Your booking is confirmed
-
-Order reference: W1503268392
-
-Your appointment
-
-Tuesday, 26 August 2025, 8:15 PM
-
-Acupuncture
-30 minutes session
-
-Amount to pay at the salon
-£45.00
-
-Finess Clinic
-Suite 1, Beatty House, Admirals Way, Canary Wharf, London, UK, E14 9UF`,
-  "stripped-html": `<p><strong>Your booking is confirmed</strong></p><p>Order reference: W1503268392</p><p><strong>Your appointment</strong></p><p>Tuesday, 26 August 2025, 8:15 PM</p><p>Acupuncture<br>30 minutes session</p><p>Amount to pay at the salon<br>£45.00</p><p>Finess Clinic<br>Suite 1, Beatty House, Admirals Way, Canary Wharf, London, UK, E14 9UF</p>`,
-  "message-headers": `[["X-Mailgun-Spf","Pass"],["X-Mailgun-Dkim-Check-Result","Pass"],["From","Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>"],["Date","Thu, 29 May 2025 21:15:03 +0900"],["Subject","Fwd: Finess Clinic Appointment Confirmation"],["To","calendar@test.fwd2cal.com"],["Content-Type","multipart/alternative; boundary=\\"00000000000000ec3306364540e0\\""]]`,
-  "timestamp": "1748520917",
-  "token": "dummy_mailgun_token_for_testing_purposes_only",
-  "signature": "dummy_mailgun_signature_for_testing_purposes_only",
-};
 
 module.exports = {
   emailFromMain,
@@ -1510,5 +1459,4 @@ module.exports = {
   basicDetailedEmail,
   basicEmailFuture,
   emailWithICSAttachment,
-  mailgunEmailFromMain,
 };
