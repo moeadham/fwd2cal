@@ -103,6 +103,7 @@ async function processEmail(email, headers) {
     defaultCompletion(timezoneMessages, DEFAULT_TEMP, schemas.timezone),
   ]);
 
+  // Clean up undefined values
   [eventResponse, timezoneResponse].forEach((res) => {
     Object.keys(res).forEach((key) => {
       if (res[key] === "undefined" || res[key] === null) {
@@ -110,9 +111,36 @@ async function processEmail(email, headers) {
       }
     });
   });
+
   logger.debug(`Timezone selection: ${timezoneResponse.timezone}, ${timezoneResponse.reason}`);
 
-  eventResponse.timeZone = timezoneResponse.timezone;
+  // Handle both old single event format and new array format
+  if (eventResponse.events && Array.isArray(eventResponse.events)) {
+    // New array format - add timezone to each event
+    eventResponse.events.forEach((event) => {
+      event.timeZone = timezoneResponse.timezone;
+      // Clean up undefined values in each event
+      Object.keys(event).forEach((key) => {
+        if (event[key] === "undefined" || event[key] === null) {
+          event[key] = undefined;
+        }
+      });
+    });
+  } else if (!eventResponse.error) {
+    // Old single event format - convert to array format
+    const singleEvent = {
+      summary: eventResponse.summary,
+      location: eventResponse.location,
+      description: eventResponse.description,
+      conference_call: eventResponse.conference_call,
+      date: eventResponse.date,
+      start_time: eventResponse.start_time,
+      end_time: eventResponse.end_time,
+      attendees: eventResponse.attendees,
+      timeZone: timezoneResponse.timezone,
+    };
+    return {events: [singleEvent]};
+  }
 
   return eventResponse;
 }

@@ -1,17 +1,23 @@
 /* eslint-disable max-len */
 const prompts = {
   getEventData: `
-Task: Review the following email thread and return a event_json with the following fields:
+Task: Review the following email thread and extract ALL events mentioned. Return an events_json with the following structure:
 {
-summary: the title of the event
-location: a location of the event if one has been given
-description: a description of the event if one has been given
-conference_call: true or false, if the event is a conference call or virtual
-date: DD MMMM YYYY - the date of the event
-start_time: HH:mm - the start time of the event in 24 hour format
-end_time: HH:mm - the end time of the event in 24 hour format
-attendees: a list of attendees
+  events: [
+    {
+      summary: the title of the event
+      location: a location of the event if one has been given
+      description: a description of the event if one has been given
+      conference_call: true or false, if the event is a conference call or virtual
+      date: DD MMMM YYYY - the date of the event
+      start_time: HH:mm - the start time of the event in 24 hour format
+      end_time: HH:mm - the end time of the event in 24 hour format
+      attendees: a list of attendees
+    }
+  ]
 }
+
+IMPORTANT: Extract ALL distinct events mentioned in the email. Each event with a different date, time, or purpose should be a separate entry in the events array.
 
 The text will start with a Date. That is the date the email was sent.
 The next line is a subject, that is the subject of the email thread.
@@ -21,7 +27,7 @@ If the email is a thread,  the most recent email is most relevant, but keep othe
 Relative dates are fine - like "next tuesday". Determine the date of the event based off of the relative difference from the date of the email.
 Set the "summary" and "description" to "Event" if there are not enough details in the text to complete either of these fields.
 
-To create an event, at minimum, you need to determine a date. If you can't determine a date, respond with an error that no date has been provided:
+To create an event, at minimum, you need to determine a date. If you can't determine a date for any event, respond with an error:
 {
 error: "No date provided"
 description: "A short outline of what was specifically missing from the email"
@@ -65,16 +71,20 @@ Case ID: 102258148113
 
 Manage my reservations
 
-event_json:
+events_json:
 {
-summary: "Genius Bar",
-location: "Apple Covent Garden",
-description: "Case ID: 102258148113",
-conference_call: false,
-date: "3 April 2024",
-start_time: "10:20",
-end_time: undefined
-attendees: ["timmy@gmail.com"]
+  events: [
+    {
+      summary: "Genius Bar",
+      location: "Apple Covent Garden",
+      description: "Case ID: 102258148113",
+      conference_call: false,
+      date: "3 April 2024",
+      start_time: "10:20",
+      end_time: undefined,
+      attendees: ["timmy@gmail.com"]
+    }
+  ]
 }
 
 
@@ -133,18 +143,22 @@ You had proposed March 28th at 9:30, 10:30 or 11am, do you have any availability
 Best regards  
 
 
-event_json:
+events_json:
 {
-summary: "Investing Holdings Strategic Initiative",
-location: undefined,
-description: "Introduction to Soom Toom
+  events: [
+    {
+      summary: "Investing Holdings Strategic Initiative",
+      location: undefined,
+      description: "Introduction to Soom Toom
 Investing's progress on sourcing deals to date
 potential opportunities to work together",
-conference_call: true,
-date: "26 March 2024",
-start_time: "15:00",
-end_time: undefined,
-attendees: ["rsoom@toom.com", "jeff@investing.com", "Joe@investing.com"]
+      conference_call: true,
+      date: "26 March 2024",
+      start_time: "15:00",
+      end_time: undefined,
+      attendees: ["rsoom@toom.com", "jeff@investing.com", "Joe@investing.com"]
+    }
+  ]
 }
 
 --- EXAMPLE 2 END ---
@@ -156,19 +170,98 @@ Subject: find a new suit
 From: jeff john <jeff@john.com>
 go to h&m next saturday at 2pm
 
-event_json:
+events_json:
 {
-summary: "Find new suit",
-location: "H&M",
-description: "find new suit from H&M",
-conference_call: false,
-date: "13 April 2024",
-start_time: "14:00",
-end_time: undefined,
-attendees: ["jeff@john.com"]
+  events: [
+    {
+      summary: "Find new suit",
+      location: "H&M",
+      description: "find new suit from H&M",
+      conference_call: false,
+      date: "13 April 2024",
+      start_time: "14:00",
+      end_time: undefined,
+      attendees: ["jeff@john.com"]
+    }
+  ]
 }
 
 --- EXAMPLE 3 END ---
+
+---EXAMPLE 4 START---
+email_text: 
+Date: Wed, 15 Apr 2025 16:30:00 +0000
+Subject: Fwd: Conference Schedule - Tech Summit 2025
+From: alex@techco.com
+---------- Forwarded message ---------
+From: Tech Summit <noreply@techsummit.com>
+Date: Wed, Apr 15, 2025 at 4:30 PM
+Subject: Conference Schedule - Tech Summit 2025
+To: <alex@techco.com>
+
+Dear Attendee,
+
+Your personalized schedule for Tech Summit 2025:
+
+Day 1 (May 5th):
+- Keynote: Future of AI at 9:00 AM - 10:30 AM in Main Auditorium
+- Workshop: Machine Learning Basics from 2:00 PM to 5:00 PM in Room 201
+
+Day 2 (May 6th):  
+- Panel Discussion: Ethics in Tech at 11:00 AM (1 hour) in Conference Hall B
+- Networking Lunch at 12:30 PM in the Atrium
+
+Looking forward to seeing you there!
+
+Tech Summit Team
+
+events_json:
+{
+  events: [
+    {
+      summary: "Keynote: Future of AI",
+      location: "Main Auditorium",
+      description: "Tech Summit 2025 - Keynote: Future of AI",
+      conference_call: false,
+      date: "5 May 2025",
+      start_time: "09:00",
+      end_time: "10:30",
+      attendees: ["alex@techco.com"]
+    },
+    {
+      summary: "Workshop: Machine Learning Basics",
+      location: "Room 201",
+      description: "Tech Summit 2025 - Workshop: Machine Learning Basics",
+      conference_call: false,
+      date: "5 May 2025",
+      start_time: "14:00",
+      end_time: "17:00",
+      attendees: ["alex@techco.com"]
+    },
+    {
+      summary: "Panel Discussion: Ethics in Tech",
+      location: "Conference Hall B",
+      description: "Tech Summit 2025 - Panel Discussion: Ethics in Tech",
+      conference_call: false,
+      date: "6 May 2025",
+      start_time: "11:00",
+      end_time: "12:00",
+      attendees: ["alex@techco.com"]
+    },
+    {
+      summary: "Networking Lunch",
+      location: "Atrium",
+      description: "Tech Summit 2025 - Networking Lunch",
+      conference_call: false,
+      date: "6 May 2025",
+      start_time: "12:30",
+      end_time: undefined,
+      attendees: ["alex@techco.com"]
+    }
+  ]
+}
+
+--- EXAMPLE 4 END ---
 
 Respond only with JSON.
 `,
@@ -444,44 +537,59 @@ const schemas = {
   eventData: {
     type: "object",
     properties: {
-      summary: {
-        type: "string",
-        description: "The title of the event",
-      },
-      location: {
-        type: ["string", "null"],
-        description: "A location of the event if one has been given",
-      },
-      description: {
-        type: ["string", "null"],
-        description: "A description of the event if one has been given",
-      },
-      conference_call: {
-        type: "boolean",
-        description: "True or false, if the event is a conference call or virtual",
-      },
-      date: {
-        type: "string",
-        description: "DD MMMM YYYY - the date of the event",
-      },
-      start_time: {
-        type: "string",
-        description: "HH:mm - the start time of the event in 24 hour format",
-      },
-      end_time: {
-        type: ["string", "null"],
-        description: "HH:mm - the end time of the event in 24 hour format",
-      },
-      attendees: {
+      events: {
         type: "array",
         items: {
-          type: "string",
+          type: "object",
+          properties: {
+            summary: {
+              type: "string",
+              description: "The title of the event",
+            },
+            location: {
+              type: ["string", "null"],
+              description: "A location of the event if one has been given",
+            },
+            description: {
+              type: ["string", "null"],
+              description: "A description of the event if one has been given",
+            },
+            conference_call: {
+              type: "boolean",
+              description: "True or false, if the event is a conference call or virtual",
+            },
+            date: {
+              type: "string",
+              description: "DD MMMM YYYY - the date of the event",
+            },
+            start_time: {
+              type: "string",
+              description: "HH:mm - the start time of the event in 24 hour format",
+            },
+            end_time: {
+              type: ["string", "null"],
+              description: "HH:mm - the end time of the event in 24 hour format",
+            },
+            attendees: {
+              type: "array",
+              items: {
+                type: "string",
+              },
+              description: "A list of attendees",
+            },
+          },
+          required: ["summary", "date", "start_time", "attendees"],
+          additionalProperties: false,
         },
-        description: "A list of attendees",
+        description: "Array of events extracted from the email",
       },
       error: {
         type: "string",
         description: "Error message if no date provided",
+      },
+      description: {
+        type: "string",
+        description: "Error description if no date provided",
       },
     },
     additionalProperties: false,

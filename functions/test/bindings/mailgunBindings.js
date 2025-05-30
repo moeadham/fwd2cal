@@ -216,6 +216,49 @@ const emailWithICSAttachment = {
   "attachment-count": "1",
 };
 
+const multipleEventsEmail = {
+  "recipient": "calendar@test.fwd2cal.com",
+  "sender": TESTER_PRIMARY_GOOGLE_ACCT,
+  "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
+  "subject": "Fwd: Schedule for next week",
+  "body-plain": `---------- Forwarded message ---------
+From: Sarah Manager <sarah@company.com>
+Date: Mon, June 1, 2025 at 9:00 AM
+Subject: Schedule for next week
+To: <${TESTER_PRIMARY_GOOGLE_ACCT}>
+
+Hi Jon,
+
+Here's your schedule for next week:
+
+Monday June 8th - Team standup at 9:30 AM in Conference Room A
+Tuesday June 9th - Client meeting at 2:00 PM to 3:30 PM (virtual on Zoom)
+Thursday June 11th - Project review at 11:00 AM for 1 hour with the full team
+
+Please make sure to prepare for the client meeting.
+
+Best,
+Sarah`,
+  "body-html": `<div dir="ltr"><br><div class="gmail_quote"><div dir="ltr" class="gmail_attr">---------- Forwarded message ---------<br>From: <strong class="gmail_sendername" dir="auto">Sarah Manager</strong> <span dir="auto">&lt;<a href="mailto:sarah@company.com">sarah@company.com</a>&gt;</span><br>Date: Mon, June 1, 2025 at 9:00 AM<br>Subject: Schedule for next week<br>To: &lt;<a href="mailto:${TESTER_PRIMARY_GOOGLE_ACCT}">${TESTER_PRIMARY_GOOGLE_ACCT}</a>&gt;<br></div><br><p>Hi Jon,</p><p>Here's your schedule for next week:</p><p>Monday June 8th - Team standup at 9:30 AM in Conference Room A<br>Tuesday June 9th - Client meeting at 2:00 PM to 3:30 PM (virtual on Zoom)<br>Thursday June 11th - Project review at 11:00 AM for 1 hour with the full team</p><p>Please make sure to prepare for the client meeting.</p><p>Best,<br>Sarah</p></div></div>`,
+  "stripped-text": `Hi Jon,
+
+Here's your schedule for next week:
+
+Monday June 8th - Team standup at 9:30 AM in Conference Room A
+Tuesday June 9th - Client meeting at 2:00 PM to 3:30 PM (virtual on Zoom)
+Thursday June 11th - Project review at 11:00 AM for 1 hour with the full team
+
+Please make sure to prepare for the client meeting.
+
+Best,
+Sarah`,
+  "stripped-html": `<p>Hi Jon,</p><p>Here's your schedule for next week:</p><p>Monday June 8th - Team standup at 9:30 AM in Conference Room A<br>Tuesday June 9th - Client meeting at 2:00 PM to 3:30 PM (virtual on Zoom)<br>Thursday June 11th - Project review at 11:00 AM for 1 hour with the full team</p><p>Please make sure to prepare for the client meeting.</p><p>Best,<br>Sarah</p>`,
+  "message-headers": `[["X-Mailgun-Spf","Pass"],["X-Mailgun-Dkim-Check-Result","Pass"],["From","Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>"],["Date","Mon, 1 Jun 2025 09:00:00 +0000"],["Subject","Fwd: Schedule for next week"],["To","calendar@test.fwd2cal.com"],["Content-Type","multipart/alternative; boundary=\\"boundary901\\""]]`,
+  "timestamp": "1748854800",
+  "token": "dummy_mailgun_token_for_testing_purposes_only",
+  "signature": "dummy_mailgun_signature_for_testing_purposes_only",
+};
+
 module.exports = {
   emailFromMain,
   addEmailAddress,
@@ -225,4 +268,5 @@ module.exports = {
   basicDetailedEmail,
   basicEmailFuture,
   emailWithICSAttachment,
+  multipleEventsEmail,
 };
