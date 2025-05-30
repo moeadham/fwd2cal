@@ -95,14 +95,39 @@ async function addEvent(oauth2Client, event, uid) {
         responseStatus: "accepted"}];
   }
   logger.log("Attempting to add event to google.");
-  const insertEvent = await calendar.events.insert({
-    calendarId: primaryCalendar.id,
-    conferenceDataVersion: 1,
-    resource: requestBody,
-    sendNotifications: true,
-    sendUpdates: "all",
-  });
-  logger.log("Event added to google.", insertEvent.data.htmlLink);
+
+  const maxRetries = 1;
+  const retryDelay = 1000; // 1 second
+  let insertEvent;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      insertEvent = await calendar.events.insert({
+        calendarId: primaryCalendar.id,
+        conferenceDataVersion: 1,
+        resource: requestBody,
+        sendNotifications: true,
+        sendUpdates: "all",
+      });
+      logger.log("Event added to google.", insertEvent.data.htmlLink);
+      break; // Success, exit retry loop
+    } catch (error) {
+      const isRetriableError = error.code === "ECONNRESET" ||
+                              error.code === "ETIMEDOUT" ||
+                              error.message.includes("socket hang up") ||
+                              error.message.includes("timeout") ||
+                              error.message.includes("The specified time range is empty") === false && // Don't retry validation errors
+                              (error.response && error.response.status >= 500);
+
+      if (attempt < maxRetries && isRetriableError) {
+        logger.warn(`Calendar API error (attempt ${attempt + 1}/${maxRetries + 1}): ${error.message}. Retrying in ${retryDelay}ms...`);
+        await new Promise((resolve) => setTimeout(resolve, retryDelay));
+      } else {
+        logger.error("Calendar API error (final attempt):", error.message);
+        throw error; // Re-throw the error after max retries or non-retriable error
+      }
+    }
+  }
   sendEvent(uid, "addEvent", {result: "success"});
   insertEvent.data.calendarId = primaryCalendar.id;
   insertEvent.data.uid = uid;
