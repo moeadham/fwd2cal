@@ -155,8 +155,8 @@ const mailgunCallback = functions.https.onRequest(
         // Transform Mailgun format to match SendGrid format expected by handleEmail
         const transformedEmail = transformMailgunToSendGrid(result);
 
-        if (ENVIRONMENT) {
-        // if (ENVIRONMENT !== "production") {
+        // if (ENVIRONMENT) {
+        if (ENVIRONMENT !== "production") {
           logger.log("FULL MAILGUN EMAIL BELOW");
           logger.log(result);
           logger.log("TRANSFORMED EMAIL");

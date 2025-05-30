@@ -224,7 +224,31 @@ describe(`fwd2cal (${EMAIL_SERVICE.toUpperCase()})`, () => {
       done();
     });
   });
-  it("UT11 delete account", (done) => {
+  it("UT11 multiple events in one email", (done) => {
+    const testMessage = bindings.multipleEventsEmail;
+    const req = chai.request(apiURL).post(CALLBACK_ENDPOINT).type("form");
+    Object.keys(testMessage).forEach((key) => {
+      req.field(key, testMessage[key]);
+    });
+    req.end((err, res) => {
+      expect(err).to.be.null;
+      expect(res).to.have.status(200);
+      console.log(res.body);
+      expect(res.body).to.be.an("object");
+      expect(res.body.data).to.be.an("array");
+      expect(res.body.data).to.have.lengthOf(3);
+      // Check each event was created
+      res.body.data.forEach((event) => {
+        expect(event.kind).to.equal("calendar#event");
+        expect(event).to.have.property("summary");
+        expect(event).to.have.property("start");
+        expect(event).to.have.property("end");
+      });
+      done();
+    });
+  });
+
+  it("UT12 delete account", (done) => {
     const testMessage = bindings.deleteAccount;
     const req = chai.request(apiURL).post(CALLBACK_ENDPOINT).type("form");
     Object.keys(testMessage).forEach((key) => {

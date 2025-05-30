@@ -330,63 +330,252 @@ async function eventHandler(email, sender, uid, files = [], emailService = "send
       sendEvent(uid, "addEvent", {result: "aiUnableToParse"});
       return aiEvent;
     } else {
-      event = aiEvent;
+      // Handle new array format
+      if (aiEvent.events && Array.isArray(aiEvent.events)) {
+        if (aiEvent.events.length === 0) {
+          logger.warn("No events found in email");
+          await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true, emailService);
+          sendEvent(uid, "addEvent", {result: "aiUnableToParse"});
+          return;
+        }
+
+        // Validate all events
+        const invalidEvents = [];
+        for (let i = 0; i < aiEvent.events.length; i++) {
+          const event = aiEvent.events[i];
+          const timeValidation = validateEventTimes(event);
+          if (!timeValidation.isValid) {
+            logger.warn(`Invalid event times from AI for event ${i + 1}: ${timeValidation.error}`);
+            invalidEvents.push(i);
+          }
+        }
+
+        // Remove invalid events
+        if (invalidEvents.length > 0) {
+          aiEvent.events = aiEvent.events.filter((_, index) => !invalidEvents.includes(index));
+        }
+
+        if (aiEvent.events.length === 0) {
+          logger.warn("All events had invalid times");
+          await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true, emailService);
+          sendEvent(uid, "addEvent", {result: "aiUnableToParse"});
+          return;
+        }
+
+        // Process multiple events
+        return addEventsAndSendResponse(oauth2Client, aiEvent.events, uid, sender, email, emailService);
+      } else {
+        // Old single event format (backward compatibility)
+        event = aiEvent;
+
+        // Validate event times before proceeding
+        const timeValidation = validateEventTimes(event);
+        if (!timeValidation.isValid) {
+          logger.warn(`Invalid event times from AI: ${timeValidation.error}`);
+          await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true, emailService);
+          sendEvent(uid, "addEvent", {result: "aiUnableToParse"});
+          return;
+        }
+
+        // Convert to array format
+        return addEventsAndSendResponse(oauth2Client, [event], uid, sender, email, emailService);
+      }
     }
   }
-  return addEventAndSendResponse(oauth2Client, event, uid, sender, email, emailService);
+
+  // Handle ICS event (convert to array format)
+  return addEventsAndSendResponse(oauth2Client, [event], uid, sender, email, emailService);
 }
 
-async function addEventAndSendResponse(oauth2Client, event, uid, sender, email, emailService = "sendgrid") {
-  // Can we add the event to their calendar?
-  const [addEventErr, eventObject] =
-    await handleAsync(() => addEvent(oauth2Client, event, uid));
-  if (addEventErr) {
-    logger.warn("Error adding event to calendar: ", addEventErr);
+function validateEventTimes(event) {
+  const moment = require("moment-timezone");
+
+  if (!event.date || !event.start_time) {
+    return {isValid: false, error: "Missing required date or start_time"};
+  }
+
+  // Try to parse the start time
+  const startTime = `${event.date} ${event.start_time}`;
+  const startDate = moment.tz(startTime, "DD MMMM YYYY HH:mm", event.timeZone || "UTC");
+
+  if (!startDate.isValid()) {
+    return {isValid: false, error: `Invalid start date/time: ${event.date} ${event.start_time}`};
+  }
+
+  // If end_time is provided, validate it too
+  if (event.end_time) {
+    const endTime = `${event.date} ${event.end_time}`;
+    const endDate = moment.tz(endTime, "DD MMMM YYYY HH:mm", event.timeZone || "UTC");
+
+    if (!endDate.isValid()) {
+      logger.warn(`Invalid end time, will use default duration: ${event.end_time}`);
+      event.end_time = undefined; // Remove invalid end time
+    } else if (endDate.isSameOrBefore(startDate)) {
+      logger.warn(`End time is not after start time, will use default duration: ${event.end_time}`);
+      event.end_time = undefined; // Remove invalid end time
+    }
+  }
+
+  return {isValid: true};
+}
+
+function isValidEmail(email) {
+  // Email validation regex that supports + character and other common email patterns
+  const emailRegex = /^[a-zA-Z0-9._+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+  return emailRegex.test(email);
+}
+
+async function addEventsAndSendResponse(oauth2Client, events, uid, sender, email, emailService = "sendgrid") {
+  const successfulEvents = [];
+  const failedEvents = [];
+
+  // Process each event
+  for (const event of events) {
+    // Filter out invalid email addresses from attendees
+    const validAttendees = event.attendees.filter((attendee) => {
+      const isValid = isValidEmail(attendee);
+      if (!isValid) {
+        logger.warn(`Dropping invalid email address from attendees: ${attendee}`);
+      }
+      return isValid;
+    });
+
+    // Update event with filtered attendees
+    event.attendees = validAttendees;
+
+    // Try to add the event to their calendar
+    const [addEventErr, eventObject] =
+      await handleAsync(() => addEvent(oauth2Client, event, uid));
+
+    if (addEventErr) {
+      logger.warn(`Error adding event "${event.summary}" to calendar: `, addEventErr);
+      failedEvents.push({event, error: addEventErr.message});
+    } else {
+      // Add invite link if there are multiple attendees
+      if (event.attendees && event.attendees.length > 1) {
+        const params = {
+          eventId: eventObject.id,
+          calendarId: eventObject.calendarId,
+          uid: uid,
+          attendees: event.attendees,
+        };
+        eventObject.inviteOthersLink = `${API_URL}inviteAdditionalAttendees?${qs.stringify(params)}`;
+      }
+      successfulEvents.push(eventObject);
+    }
+  }
+
+  // If all events failed, send oauth failed response
+  if (successfulEvents.length === 0) {
     await sendEmailResponse(sender, email, EMAIL_RESPONSES.oauthFailed, true, emailService);
     return;
   }
-  let response;
 
-  // Now we check if we need to add a button to the email
-  // so additional attendees can be invited.
-  if (event.attendees.length > 1) {
-    logger.debug(`Multiple attendees - invite link to email.`);
-    const params = {
-      eventId: eventObject.id,
-      calendarId: eventObject.calendarId,
-      uid: uid,
-      attendees: event.attendees,
-    };
-    const inviteLink = `${API_URL}inviteAdditionalAttendees?${qs.stringify(params)}`;
-    eventObject.inviteOthersLink = inviteLink;
-    const inviteesWithoutHost = event.attendees.filter((attendee) => attendee !== eventObject.organizer.email);
-    response = {
-      ...EMAIL_RESPONSES.eventAddedAttendees,
-      replace: {
-        EVENT_LINK: eventObject.htmlLink,
-        EVENT_DATE: moment(eventObject.start.dateTime)
-            .tz(eventObject.start.timeZone)
-            .format("dddd, MMMM Do [at] h:mm A z"),
-        INVITE_LINK: inviteLink,
-        EVENT_ATTENDEES: inviteesWithoutHost.join(", "),
-      },
-    };
-  } else {
-    logger.debug(`Only one attendee - not invitation link needed.`);
-    response = {
-      ...EMAIL_RESPONSES.eventAdded,
-      replace: {
-        EVENT_LINK: eventObject.htmlLink,
-        EVENT_DATE: moment(eventObject.start.dateTime)
-            .tz(eventObject.start.timeZone)
-            .format("dddd, MMMM Do [at] h:mm A z"),
-        EVENT_ATTENDEES:
-            eventObject.attendees.map((attendee) => attendee.email).join(", "),
-      },
-    };
+  // Build response with all successful events
+  let responseHtml = "";
+  // let hasMultipleAttendees = false;
+
+  for (const eventObject of successfulEvents) {
+    const eventDate = moment(eventObject.start.dateTime)
+        .tz(eventObject.start.timeZone)
+        .format("dddd, MMMM Do [at] h:mm A z");
+
+    responseHtml += `<p><strong>${eventObject.summary}</strong><br>`;
+    responseHtml += `Date: ${eventDate}<br>`;
+    if (eventObject.location) {
+      responseHtml += `Location: ${eventObject.location}<br>`;
+    }
+
+    // Check if any event has multiple attendees
+    if (eventObject.attendees && eventObject.attendees.length > 1) {
+      const attendeeEmails = eventObject.attendees.map((a) => a.email).join(", ");
+      responseHtml += `Attendees: ${attendeeEmails}<br>`;
+    }
+
+    responseHtml += `<a href="${eventObject.htmlLink}" style="display:inline-block; padding:10px 20px; margin:5px 0; background-color:#3498db; color:white; text-align:center; text-decoration:none; font-weight:bold; border-radius:5px; border:none; cursor:pointer;">View Event</a>`;
+
+    // Add invite button if there are multiple attendees and an invite link
+    if (eventObject.inviteOthersLink) {
+      const inviteesWithoutHost = eventObject.attendees.filter((attendee) => attendee.email !== eventObject.organizer.email);
+      if (inviteesWithoutHost.length > 0) {
+        responseHtml += `<br>You may want to invite: ${inviteesWithoutHost.map((a) => a.email).join(", ")}<br>`;
+        responseHtml += `<a href="${eventObject.inviteOthersLink}" style="display:inline-block; padding:10px 20px; margin:5px 0; background-color:#3498db; color:white; text-align:center; text-decoration:none; font-weight:bold; border-radius:5px; border:none; cursor:pointer;">Invite Guests</a>`;
+      }
+    }
+
+    responseHtml += "</p><hr>";
   }
-  await sendEmailResponse(sender, email, response, true, emailService);
-  return eventObject;
+
+  // Add failed events info if any
+  if (failedEvents.length > 0) {
+    responseHtml += `<p><strong>Failed to add ${failedEvents.length} event(s):</strong><br>`;
+    for (const failed of failedEvents) {
+      responseHtml += `- ${failed.event.summary}: ${failed.error}<br>`;
+    }
+    responseHtml += "</p>";
+  }
+
+  // Use existing email response system with custom HTML
+  if (successfulEvents.length === 1) {
+    // Single event - use existing response format
+    const eventObject = successfulEvents[0];
+    let response;
+
+    if (eventObject.attendees && eventObject.attendees.length > 1) {
+      const params = {
+        eventId: eventObject.id,
+        calendarId: eventObject.calendarId,
+        uid: uid,
+        attendees: eventObject.attendees.map((a) => a.email),
+      };
+      const inviteLink = `${API_URL}inviteAdditionalAttendees?${qs.stringify(params)}`;
+      const inviteesWithoutHost = eventObject.attendees.filter((attendee) => attendee.email !== eventObject.organizer.email);
+
+      response = {
+        ...EMAIL_RESPONSES.eventAddedAttendees,
+        replace: {
+          EVENT_LINK: eventObject.htmlLink,
+          EVENT_DATE: moment(eventObject.start.dateTime)
+              .tz(eventObject.start.timeZone)
+              .format("dddd, MMMM Do [at] h:mm A z"),
+          INVITE_LINK: inviteLink,
+          EVENT_ATTENDEES: inviteesWithoutHost.map((a) => a.email).join(", "),
+        },
+      };
+    } else {
+      response = {
+        ...EMAIL_RESPONSES.eventAdded,
+        replace: {
+          EVENT_LINK: eventObject.htmlLink,
+          EVENT_DATE: moment(eventObject.start.dateTime)
+              .tz(eventObject.start.timeZone)
+              .format("dddd, MMMM Do [at] h:mm A z"),
+          EVENT_ATTENDEES: eventObject.attendees ? eventObject.attendees.map((attendee) => attendee.email).join(", ") : "",
+        },
+      };
+    }
+
+    await sendEmailResponse(sender, email, response, true, emailService);
+  } else {
+    // Multiple events - send custom HTML email
+    const customHtml = `
+${successfulEvents.length} events added to your calendar.
+${responseHtml}
+<br><br>You can always ask for help: <a href="mailto:support@fwd2cal.com">support@fwd2cal.com</a><br>
+    `;
+
+    const sendEmail = getSendEmailFunction(emailService);
+    await sendEmail({
+      to: sender,
+      from: MAIN_EMAIL_ADDRESS,
+      subject: `Re: ${email.subject}`,
+      html: threadEmailHtml(email, customHtml),
+      headers: getEmailThreadHeaders(email.headers),
+    });
+  }
+
+  // Return single event for backward compatibility, array for multiple
+  return successfulEvents.length === 1 ? successfulEvents[0] : successfulEvents;
 }
 
 function getSenderFromRawEmail(email) {
