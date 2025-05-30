@@ -440,5 +440,357 @@ ICS File:
 `,
 };
 
-module.exports = prompts;
+const schemas = {
+  eventData: {
+    type: "object",
+    properties: {
+      summary: {
+        type: "string",
+        description: "The title of the event",
+      },
+      location: {
+        type: ["string", "null"],
+        description: "A location of the event if one has been given",
+      },
+      description: {
+        type: ["string", "null"],
+        description: "A description of the event if one has been given",
+      },
+      conference_call: {
+        type: "boolean",
+        description: "True or false, if the event is a conference call or virtual",
+      },
+      date: {
+        type: "string",
+        description: "DD MMMM YYYY - the date of the event",
+      },
+      start_time: {
+        type: "string",
+        description: "HH:mm - the start time of the event in 24 hour format",
+      },
+      end_time: {
+        type: ["string", "null"],
+        description: "HH:mm - the end time of the event in 24 hour format",
+      },
+      attendees: {
+        type: "array",
+        items: {
+          type: "string",
+        },
+        description: "A list of attendees",
+      },
+      error: {
+        type: "string",
+        description: "Error message if no date provided",
+      },
+    },
+    additionalProperties: false,
+  },
+
+  timezone: {
+    type: "object",
+    properties: {
+      reason: {
+        type: "string",
+        description: "Brief reasoning of why the timezone was chosen",
+      },
+      timezone: {
+        type: ["string", "null"],
+        description: "IANA Time Zone Database formatted string",
+      },
+    },
+    required: ["reason", "timezone"],
+    additionalProperties: false,
+  },
+
+  icsParser: {
+    type: "object",
+    properties: {
+      kind: {
+        type: "string",
+        description: "Type of the resource (calendar#event)",
+      },
+      created: {
+        type: "string",
+        description: "Creation time of the event (as a RFC3339 timestamp)",
+      },
+      updated: {
+        type: "string",
+        description: "Last modification time of the event (as a RFC3339 timestamp)",
+      },
+      summary: {
+        type: "string",
+        description: "Title of the event",
+      },
+      description: {
+        type: "string",
+        description: "Description of the event. Can contain HTML",
+      },
+      location: {
+        type: "string",
+        description: "Geographic location of the event as free-form text",
+      },
+      creator: {
+        type: "object",
+        properties: {
+          id: {type: "string", description: "The creator's Profile ID"},
+          email: {type: "string", description: "The creator's email address"},
+          displayName: {type: "string", description: "The creator's name"},
+        },
+        additionalProperties: false,
+      },
+      organizer: {
+        type: "object",
+        properties: {
+          id: {type: "string", description: "The organizer's Profile ID"},
+          email: {type: "string", description: "The organizer's email address"},
+          displayName: {type: "string", description: "The organizer's name"},
+        },
+        additionalProperties: false,
+      },
+      start: {
+        type: "object",
+        properties: {
+          date: {type: "string", description: "The date, in the format yyyy-mm-dd, if this is an all-day event"},
+          dateTime: {type: "string", description: "The time, as a combined date-time value (formatted according to RFC3339)"},
+          timeZone: {type: "string", description: "IANA Time Zone Database formatted string. Example: Europe/London"},
+        },
+        required: ["timeZone"],
+        additionalProperties: false,
+      },
+      end: {
+        type: "object",
+        properties: {
+          date: {type: "string", description: "The date, in the format yyyy-mm-dd, if this is an all-day event"},
+          dateTime: {type: "string", description: "The time, as a combined date-time value (formatted according to RFC3339)"},
+          timeZone: {type: "string", description: "IANA Time Zone Database formatted string. Example: Europe/London"},
+        },
+        required: ["timeZone"],
+        additionalProperties: false,
+      },
+      endTimeUnspecified: {
+        type: "boolean",
+        description: "Whether the end time is actually unspecified",
+      },
+      recurrence: {
+        type: "array",
+        items: {type: "string"},
+        description: "List of RRULE, EXRULE, RDATE and EXDATE lines for a recurring event",
+      },
+      recurringEventId: {
+        type: "string",
+        description: "For an instance of a recurring event, this is the id of the recurring event",
+      },
+      originalStartTime: {
+        type: "object",
+        properties: {
+          date: {type: "string", description: "The date, in the format yyyy-mm-dd, if this is an all-day event"},
+          dateTime: {type: "string", description: "The time, as a combined date-time value (formatted according to RFC3339)"},
+          timeZone: {type: "string", description: "IANA Time Zone Database formatted string"},
+        },
+        additionalProperties: false,
+      },
+      attendees: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            id: {type: "string", description: "The attendee's Profile ID"},
+            email: {type: "string", description: "The attendee's email address"},
+            displayName: {type: "string", description: "The attendee's name"},
+            organizer: {type: "boolean", description: "Whether the attendee is the organizer of the event"},
+            resource: {type: "boolean", description: "Whether the attendee is a resource"},
+            optional: {type: "boolean", description: "Whether this is an optional attendee"},
+            responseStatus: {
+              type: "string",
+              enum: ["needsAction", "declined", "tentative", "accepted"],
+              description: "The attendee's response status",
+            },
+            comment: {type: "string", description: "The attendee's response comment"},
+            additionalGuests: {type: "integer", description: "Number of additional guests"},
+          },
+          additionalProperties: false,
+        },
+      },
+      attendeesOmitted: {
+        type: "boolean",
+        description: "Whether attendees may have been omitted from the event's representation",
+      },
+      hangoutLink: {
+        type: "string",
+        description: "An absolute link to the Google Hangout associated with this event",
+      },
+      conferenceData: {
+        type: "object",
+        properties: {
+          createRequest: {
+            type: "object",
+            properties: {
+              requestId: {type: "string", description: "The client-generated unique ID for this request"},
+              conferenceSolutionKey: {
+                type: "object",
+                properties: {
+                  type: {
+                    type: "string",
+                    enum: ["eventHangout", "eventNamedHangout", "hangoutsMeet", "addOn"],
+                    description: "The conference solution type",
+                  },
+                },
+                additionalProperties: false,
+              },
+              status: {
+                type: "object",
+                properties: {
+                  statusCode: {
+                    type: "string",
+                    enum: ["pending", "success", "failure"],
+                    description: "The current status of the conference create request",
+                  },
+                },
+                additionalProperties: false,
+              },
+            },
+            additionalProperties: false,
+          },
+          entryPoints: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                entryPointType: {
+                  type: "string",
+                  enum: ["video", "phone", "sip", "more"],
+                  description: "The type of the conference entry point",
+                },
+                uri: {type: "string", description: "The URI of the entry point"},
+                label: {type: "string", description: "The label for the URI"},
+                pin: {type: "string", description: "The PIN to access the conference"},
+                accessCode: {type: "string", description: "The access code to access the conference"},
+                meetingCode: {type: "string", description: "The meeting code to access the conference"},
+                passcode: {type: "string", description: "The passcode to access the conference"},
+                password: {type: "string", description: "The password to access the conference"},
+              },
+              additionalProperties: false,
+            },
+          },
+          conferenceSolution: {
+            type: "object",
+            properties: {
+              key: {
+                type: "object",
+                properties: {
+                  type: {
+                    type: "string",
+                    enum: ["eventHangout", "eventNamedHangout", "hangoutsMeet", "addOn"],
+                  },
+                },
+                additionalProperties: false,
+              },
+              name: {type: "string", description: "The user-visible name of this solution"},
+              iconUri: {type: "string", description: "The user-visible icon for this solution"},
+            },
+            additionalProperties: false,
+          },
+          conferenceId: {type: "string", description: "The ID of the conference"},
+          signature: {type: "string", description: "The signature of the conference data"},
+          notes: {type: "string", description: "Additional notes to display to the user"},
+        },
+        additionalProperties: false,
+      },
+      reminders: {
+        type: "object",
+        properties: {
+          useDefault: {type: "boolean", description: "Whether the default reminders of the calendar apply to the event"},
+          overrides: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                method: {
+                  type: "string",
+                  enum: ["email", "popup"],
+                  description: "The method used by this reminder",
+                },
+                minutes: {type: "integer", description: "Number of minutes before the start of the event when the reminder should trigger"},
+              },
+              required: ["method", "minutes"],
+              additionalProperties: false,
+            },
+          },
+        },
+        additionalProperties: false,
+      },
+      source: {
+        type: "object",
+        properties: {
+          url: {type: "string", description: "URL of the source pointing to a resource"},
+          title: {type: "string", description: "Title of the source"},
+        },
+        additionalProperties: false,
+      },
+      workingLocationProperties: {
+        type: "object",
+        properties: {
+          type: {
+            type: "string",
+            enum: ["homeOffice", "officeLocation", "customLocation"],
+            description: "Type of the working location",
+          },
+          homeOffice: {description: "Specifies that the user is working at home"},
+          customLocation: {
+            type: "object",
+            properties: {
+              label: {type: "string", description: "An optional extra label for additional information"},
+            },
+            additionalProperties: false,
+          },
+          officeLocation: {
+            type: "object",
+            properties: {
+              buildingId: {type: "string", description: "An optional building identifier"},
+              floorId: {type: "string", description: "An optional floor identifier"},
+              floorSectionId: {type: "string", description: "An optional floor section identifier"},
+              deskId: {type: "string", description: "An optional desk identifier"},
+              label: {type: "string", description: "The office name that's displayed in Calendar clients"},
+            },
+            additionalProperties: false,
+          },
+        },
+        additionalProperties: false,
+      },
+      outOfOfficeProperties: {
+        type: "object",
+        properties: {
+          autoDeclineMode: {
+            type: "string",
+            enum: ["declineNone", "declineAllConflictingInvitations", "declineOnlyNewConflictingInvitations"],
+            description: "Whether to decline meeting invitations which overlap Out of office events",
+          },
+          declineMessage: {type: "string", description: "Response message to set if an event is automatically declined"},
+        },
+        additionalProperties: false,
+      },
+      focusTimeProperties: {
+        type: "object",
+        properties: {
+          autoDeclineMode: {
+            type: "string",
+            enum: ["declineNone", "declineAllConflictingInvitations", "declineOnlyNewConflictingInvitations"],
+            description: "Whether to decline meeting invitations which overlap Focus Time events",
+          },
+          declineMessage: {type: "string", description: "Response message to set if an event is automatically declined"},
+          chatStatus: {
+            type: "string",
+            enum: ["available", "doNotDisturb"],
+            description: "The status to mark the user in Chat and related products",
+          },
+        },
+        additionalProperties: false,
+      },
+    },
+    additionalProperties: false,
+  },
+};
+
+module.exports = {prompts, schemas};
 

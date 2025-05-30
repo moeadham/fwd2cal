@@ -14,22 +14,22 @@ const emailFromMain = {
   from: `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
   headers: `Content-Type: multipart/alternative; boundary="0000000000000f12e420614b61f6a"
     DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;        d=gmail.com; s=20230601; t=1711622313; x=1712227113; darn=fwd2cal.com;        h=to:subject:message-id:date:from:in-reply-to:references:mime-version         :from:to:cc:subject:date:message-id:reply-to;        bh=VcrjtrpPYi9Bt/kfjz9uIRySn0GCXUGae6f3/u6YmhI=;        b=UAjLPWTrzxT/kaJJERTco1Ps5zHK3d3mZX7MOaj7LqdFyjtVFwNOrSGy3e2LE9UvVS         iTESq02/mVB1pTvZqwsaI/K0YSaGjui9619nxi5dwaO/QySHvOSZ3SarmWuTSBs/XVw0         KRuXvEJ5CZ0sQRzfXO9nSVBMvDdobBPybTlgFuKQMHbtLiluAxZCz+wZvyLkMP9NYl8J         YzuaChshk6OHxDAYw2HoW7BdCEVRtqWRPUm1+hCV80lLxnrlWuzjOTgbrqPpiEohabYg         vT5MvWg2zSN4USlQqL80m035Y1Spa8le53KtHHHr/FquQhsp4jlMPUDVZEoovUaPpjWA         TYHA==
-    Date: Thu, 21 Mar 2024 10:38:21 +0000
+    Date: Thu, 21 Mar 2025 10:38:21 +0000
     From: Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>
     In-Reply-To: <0102018e7a6e84ed-c41fff4f-700a-4606-bbcb-c4051ba055cd-000000@eu-west-1.amazonses.com>
     MIME-Version: 1.0
     Message-ID: <CAA4swFcWNQJRndNXq0u3Gcs-0U7kBXmMxNh6gS6qtXk7V4KqXw@mail.gmail.com>
-    Received: from mail-pj1-f44.google.com (mxd [209.85.216.44]) by mx.sendgrid.net with ESMTP id dXoUcqmOSqe8hO0WFt6vsQ for <calendar@fwd2cal.com>; Thu, 28 Mar 2024 10:38:33.988 +0000 (UTC)
-    Received: by mail-pj1-f44.google.com with SMTP id 98e67ed59e1d1-29dfad24f36so634763a91.0        for <calendar@fwd2cal.com>; Thu, 28 Mar 2024 03:38:33 -0700 (PDT)
+    Received: from mail-pj1-f44.google.com (mxd [209.85.216.44]) by mx.sendgrid.net with ESMTP id dXoUcqmOSqe8hO0WFt6vsQ for <calendar@fwd2cal.com>; Thu, 28 Mar 2025 10:38:33.988 +0000 (UTC)
+    Received: by mail-pj1-f44.google.com with SMTP id 98e67ed59e1d1-29dfad24f36so634763a91.0        for <calendar@fwd2cal.com>; Thu, 28 Mar 2025 03:38:33 -0700 (PDT)
     References: <0102018e7a6e84ed-c41fff4f-700a-4606-bbcb-c4051ba055cd-000000@eu-west-1.amazonses.com>
     Subject: Fwd: Finess Clinic Appointment Confirmation
     To: calendar@fwd2cal.com
     X-Gm-Message-State: AOJu0Yx7KViB979IYYeK6S1QzIqMpgqyMQFTmhFh89Jg3XX2iXvPfY/5	RnWgjTG8A2xecs85V/6ty7ISvvVLOrz8fMAQqdZE17/m3rr0Dqk73v9RbX5dRte4jF6X1RRoh9G	8xCNTy3c+uBs6oTF2QQdJHaZrTAJatc3tQkI=
     X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;        d=1e100.net; s=20230601; t=1711622313; x=1712227113;        h=to:subject:message-id:date:from:in-reply-to:references:mime-version         :x-gm-message-state:from:to:cc:subject:date:message-id:reply-to;        bh=VcrjtrpPYi9Bt/kfjz9uIRySn0GCXUGae6f3/u6YmhI=;        b=YoacecYc7qtyCtYDV6Rf9d+6xvgsq2C8JHLhbweKI6/DFu1Aqplgp2vmuyNxuZM3hR         IIe0p+J3kUmAnIRG6N+XFvU7j0XwrKtZt2EY1SG5wUiahi5q+SKCbYa6/6diT8RDklNx         5Ut6nRP9sF+EZxHnZwq4JM9vGPPIpB0XziUK6Nra7PFnhWOpDYgVKkG6/qvaRD84LRHh         yN6E7ENIvaOYdHIy8HGJy4zlkOKt264LgXh0Qh02reGfDr2Ng8hv3e1A64jtS93ne8yx         XfPJxX4iPWbBGTIncCuinZFf0+Yn5o3TYH5JFf7cmbSOMEMvBavIq2af0q8HqbhRBiuV         sW2A==
     X-Google-Smtp-Source: AGHT+IEc9vMa5b3wFzeMcFWyXKWFNGIXAsPg7hA/o63o4JEOr4urEW2JNXs9XJ9FH8ZoYR4+zz7SP2VOlotrtd0PZYQ=
-    X-Received: by 2002:a17:90a:2f05:b0:29b:2268:3349 with SMTP id s5-20020a17090a2f0500b0029b22683349mr2184697pjd.18.1711622312765; Thu, 28 Mar 2024 03:38:32 -0700 (PDT)
+    X-Received: by 2002:a17:90a:2f05:b0:29b:2268:3349 with SMTP id s5-20020a17090a2f0500b0029b22683349mr2184697pjd.18.1711622312765; Thu, 28 Mar 2025 03:38:32 -0700 (PDT)
     `,
-  html: `<div dir="ltr"><br><br><div class="gmail_quote"><div dir="ltr" class="gmail_attr">---------- Forwarded message ---------<br>From: <strong class="gmail_sendername" dir="auto">Finess Clinic</strong> <span dir="auto">&lt;<a href="mailto:noreply@treatwell.co.uk">noreply@treatwell.co.uk</a>&gt;</span><br>Date: Tue, Mar 26, 2024 at 11:04 AM<br>Subject: Finess Clinic Appointment Confirmation<br>To:  &lt;<a href="mailto:${TESTER_PRIMARY_GOOGLE_ACCT}">${TESTER_PRIMARY_GOOGLE_ACCT}</a>&gt;<br></div><br><br><div class="msg-8594583518145648811"><table id="m_-8594583518145648811view-email-on-site" cellpadding="4" width="100%" border="0" color="#888888"><tbody><tr><td color="#000000" style="color:#646464;font-family:Arial,Helvetica,sans-serif;font-size:16px;text-align:center">Email having a bad hair day? <a href="https://www.treatwell.co.uk/email/" style="color:#5a6a9d" target="_blank">Click here to view it in your browser</a></td></tr></tbody></table><u></u>
+  html: `<div dir="ltr"><br><br><div class="gmail_quote"><div dir="ltr" class="gmail_attr">---------- Forwarded message ---------<br>From: <strong class="gmail_sendername" dir="auto">Finess Clinic</strong> <span dir="auto">&lt;<a href="mailto:noreply@treatwell.co.uk">noreply@treatwell.co.uk</a>&gt;</span><br>Date: Tue, Mar 26, 2025 at 11:04 AM<br>Subject: Finess Clinic Appointment Confirmation<br>To:  &lt;<a href="mailto:${TESTER_PRIMARY_GOOGLE_ACCT}">${TESTER_PRIMARY_GOOGLE_ACCT}</a>&gt;<br></div><br><br><div class="msg-8594583518145648811"><table id="m_-8594583518145648811view-email-on-site" cellpadding="4" width="100%" border="0" color="#888888"><tbody><tr><td color="#000000" style="color:#646464;font-family:Arial,Helvetica,sans-serif;font-size:16px;text-align:center">Email having a bad hair day? <a href="https://www.treatwell.co.uk/email/" style="color:#5a6a9d" target="_blank">Click here to view it in your browser</a></td></tr></tbody></table><u></u>
     
       
         
@@ -699,7 +699,7 @@ const emailFromMain = {
     the administrator of that system for details.
     
     Content preview:  Forwarded message --------- From: Finess Clinic Date: Tue,
-       Mar 26, 2024 at 11:04 AM Subject: Finess Clinic Appointment Confirmation
+       Mar 26, 2025 at 11:04 AM Subject: Finess Clinic Appointment Confirmation
        To: Email having a bad hair day? Click here to view it in your browser <https://www.treatwell.co.uk/email/r35abc3c0-d978-497d-9bce-197baa779003.x607CA89B/>
        Finess Clinic [image: Your booking is confirmed] 
     
@@ -725,7 +725,7 @@ const emailFromMain = {
   subject: "Fwd: Finess Clinic Appointment Confirmation",
   text: `---------- Forwarded message ---------
     From: Finess Clinic <noreply@treatwell.co.uk>
-    Date: Tue, Mar 21, 2024 at 11:04 AM
+    Date: Tue, Mar 21, 2025 at 11:04 AM
     Subject: Finess Clinic Appointment Confirmation
     To: <${TESTER_PRIMARY_GOOGLE_ACCT}>
     
@@ -740,8 +740,8 @@ const emailFromMain = {
     <https://treatwell.onelink.me/32083905?pid=wahanda-email&c=Supplier%20Customer%20Appointment%20Confirmation%20Widget&content=Banner&is_retargeting=true&af_dp=treatwell%3A%2F%2Fwww.treatwell.co.uk%2Fmy-bookings&af_web_dp=https%3A%2F%2Fwww.treatwell.co.uk>
     Your booking information
     Order reference: W1503268392
-    Date order placed: 21 March 2024
-    When: 11:15, 26 March 2024
+    Date order placed: 21 March 2025
+    When: 11:15, 26 March 2025
     Booked for: Jon Doe
     Change your booking?
     If you can no longer make it to your appointment, please reschedule. That
@@ -812,20 +812,20 @@ const addEmailAddress = {
   from: `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
   headers: `Content-Type: multipart/alternative; boundary="0000000000000f12e420614b61f6a"
     DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;        d=gmail.com; s=20230601; t=1711622313; x=1712227113; darn=fwd2cal.com;        h=to:subject:message-id:date:from:in-reply-to:references:mime-version         :from:to:cc:subject:date:message-id:reply-to;        bh=VcrjtrpPYi9Bt/kfjz9uIRySn0GCXUGae6f3/u6YmhI=;        b=UAjLPWTrzxT/kaJJERTco1Ps5zHK3d3mZX7MOaj7LqdFyjtVFwNOrSGy3e2LE9UvVS         iTESq02/mVB1pTvZqwsaI/K0YSaGjui9619nxi5dwaO/QySHvOSZ3SarmWuTSBs/XVw0         KRuXvEJ5CZ0sQRzfXO9nSVBMvDdobBPybTlgFuKQMHbtLiluAxZCz+wZvyLkMP9NYl8J         YzuaChshk6OHxDAYw2HoW7BdCEVRtqWRPUm1+hCV80lLxnrlWuzjOTgbrqPpiEohabYg         vT5MvWg2zSN4USlQqL80m035Y1Spa8le53KtHHHr/FquQhsp4jlMPUDVZEoovUaPpjWA         TYHA==
-    Date: Thu, 28 Mar 2024 10:38:21 +0000
+    Date: Thu, 28 Mar 2025 10:38:21 +0000
     From: Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>
     In-Reply-To: <0102018e7a6e84ed-c41fff4f-700a-4606-bbcb-c4051ba055cd-000000@eu-west-1.amazonses.com>
     MIME-Version: 1.0
     Message-ID: <CAA4swFcWNQJRndNXq0u3Gcs-0U7kBXmMxNh6gS6qtXk7V4KqXw@mail.gmail.com>
-    Received: from mail-pj1-f44.google.com (mxd [209.85.216.44]) by mx.sendgrid.net with ESMTP id dXoUcqmOSqe8hO0WFt6vsQ for <calendar@fwd2cal.com>; Thu, 28 Mar 2024 10:38:33.988 +0000 (UTC)
-    Received: by mail-pj1-f44.google.com with SMTP id 98e67ed59e1d1-29dfad24f36so634763a91.0        for <calendar@fwd2cal.com>; Thu, 28 Mar 2024 03:38:33 -0700 (PDT)
+    Received: from mail-pj1-f44.google.com (mxd [209.85.216.44]) by mx.sendgrid.net with ESMTP id dXoUcqmOSqe8hO0WFt6vsQ for <calendar@fwd2cal.com>; Thu, 28 Mar 2025 10:38:33.988 +0000 (UTC)
+    Received: by mail-pj1-f44.google.com with SMTP id 98e67ed59e1d1-29dfad24f36so634763a91.0        for <calendar@fwd2cal.com>; Thu, 28 Mar 2025 03:38:33 -0700 (PDT)
     References: <0102018e7a6e84ed-c41fff4f-700a-4606-bbcb-c4051ba055cd-000000@eu-west-1.amazonses.com>
     Subject: add ${TESTER_SECONDARY_EMAIL_ACCT}
     To: calendar@fwd2cal.com
     X-Gm-Message-State: AOJu0Yx7KViB979IYYeK6S1QzIqMpgqyMQFTmhFh89Jg3XX2iXvPfY/5	RnWgjTG8A2xecs85V/6ty7ISvvVLOrz8fMAQqdZE17/m3rr0Dqk73v9RbX5dRte4jF6X1RRoh9G	8xCNTy3c+uBs6oTF2QQdJHaZrTAJatc3tQkI=
     X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;        d=1e100.net; s=20230601; t=1711622313; x=1712227113;        h=to:subject:message-id:date:from:in-reply-to:references:mime-version         :x-gm-message-state:from:to:cc:subject:date:message-id:reply-to;        bh=VcrjtrpPYi9Bt/kfjz9uIRySn0GCXUGae6f3/u6YmhI=;        b=YoacecYc7qtyCtYDV6Rf9d+6xvgsq2C8JHLhbweKI6/DFu1Aqplgp2vmuyNxuZM3hR         IIe0p+J3kUmAnIRG6N+XFvU7j0XwrKtZt2EY1SG5wUiahi5q+SKCbYa6/6diT8RDklNx         5Ut6nRP9sF+EZxHnZwq4JM9vGPPIpB0XziUK6Nra7PFnhWOpDYgVKkG6/qvaRD84LRHh         yN6E7ENIvaOYdHIy8HGJy4zlkOKt264LgXh0Qh02reGfDr2Ng8hv3e1A64jtS93ne8yx         XfPJxX4iPWbBGTIncCuinZFf0+Yn5o3TYH5JFf7cmbSOMEMvBavIq2af0q8HqbhRBiuV         sW2A==
     X-Google-Smtp-Source: AGHT+IEc9vMa5b3wFzeMcFWyXKWFNGIXAsPg7hA/o63o4JEOr4urEW2JNXs9XJ9FH8ZoYR4+zz7SP2VOlotrtd0PZYQ=
-    X-Received: by 2002:a17:90a:2f05:b0:29b:2268:3349 with SMTP id s5-20020a17090a2f0500b0029b22683349mr2184697pjd.18.1711622312765; Thu, 28 Mar 2024 03:38:32 -0700 (PDT)
+    X-Received: by 2002:a17:90a:2f05:b0:29b:2268:3349 with SMTP id s5-20020a17090a2f0500b0029b22683349mr2184697pjd.18.1711622312765; Thu, 28 Mar 2025 03:38:32 -0700 (PDT)
     `,
   html: ``,
   message: "sendgridCallback",
@@ -837,7 +837,7 @@ const addEmailAddress = {
     the administrator of that system for details.
     
     Content preview:  Forwarded message --------- From: Finess Clinic Date: Tue,
-       Mar 26, 2024 at 11:04 AM Subject: Finess Clinic Appointment Confirmation
+       Mar 26, 2025 at 11:04 AM Subject: Finess Clinic Appointment Confirmation
        To: Email having a bad hair day? Click here to view it in your browser <https://www.treatwell.co.uk/email/r35abc3c0-d978-497d-9bce-197baa779003.x607CA89B/>
        Finess Clinic [image: Your booking is confirmed] 
     
@@ -875,13 +875,13 @@ const eventEmailFromSecondEmail = {
   "from": `Joe McDoe <${TESTER_SECONDARY_EMAIL_ACCT}>`,
   "headers": `Content-Type: multipart/signed; protocol="application/pgp-signature"; micalg=pgp-sha256; boundary="------16617b4dab814421708054b0aa5dcdb8bf040043d2ec54d5832691c55211b9f2"; charset=utf-8
   DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=pm.me;	s=protonmail3; t=1712313306; x=1712572506;	bh=G1P/3TtG1VHCdldgM18TVRufRQrycolfMjwYv8Fg3P4=;	h=Date:To:From:Subject:Message-ID:In-Reply-To:References:	 Feedback-ID:From:To:Cc:Date:Subject:Reply-To:Feedback-ID:	 Message-ID:BIMI-Selector;	b=dJjFxov5d8+W/wDB17GZZAr3Ay+ooS8b5+cVnRrARCno2KLJU7lFOTnh6cMnxn+3V	 rpYhU1JFU9Mkbjl34inUQxmEtJrums4Btwsf/8FIOaGmEjJxm+Wo1OsikZRkIBqTkk	 1FqfBvqDt7Kr6eA7GgiLm+aaOOWmUEpMy4yOu1+14GzZAQtrhJGI/vd6onUk0O0INr	 MD7mCWCeMx88GcXTdau33EstgQPR54Ik2UAlY6+dBevjtmvWSIp67+z2hfb7vwOZi0	 Y3bWNOSX8fnowN/kcdXx7NrptQEPe604XBtE4r/ZW+PYowjglaYDOMEKuly5+ZdwfO	 7pmhI9etVKUIA==
-  Date: Fri, 05 Apr 2024 10:35:00 +0000
+  Date: Fri, 05 Apr 2025 10:35:00 +0000
   Feedback-ID: 37775047:user:proton
   From: Joe McDoe <${TESTER_SECONDARY_EMAIL_ACCT}>
   In-Reply-To: <4DMQ.1M8RB.E8544A49A3E97BE67JFAIJ3BCC498D9BE426A7.da0aec62-5dee-4965-8e4a-e1cfffb502a7@official.tottenhamhotspur.com>
   MIME-Version: 1.0
   Message-ID: <_ruwIFDr0RzYZpPCuwnfbV4mRqNvhaAWTsmDZ1pu9I1EopB8gDVXClZjYDa09JsdPaV33SKhBiHqfDIwLvpHZj4hq63Fa0uYoEc6ZV5ZOKg=@pm.me>
-  Received: from mail-4323.proton.ch (mxd [185.70.43.23]) by mx.sendgrid.net with ESMTP id dLJsdRauSKiauU8sqtw3HQ for <calendar@fwd2cal.com>; Fri, 05 Apr 2024 10:35:07.810 +0000 (UTC)
+  Received: from mail-4323.proton.ch (mxd [185.70.43.23]) by mx.sendgrid.net with ESMTP id dLJsdRauSKiauU8sqtw3HQ for <calendar@fwd2cal.com>; Fri, 05 Apr 2025 10:35:07.810 +0000 (UTC)
   References: <4DMQ.1M8RB.E8544A49A3E97BE67JFAIJ3BCC498D9BE426A7.da0aec62-5dee-4965-8e4a-e1cfffb502a7@official.tottenhamhotspur.com>
   Subject: Fw: Fixture Update: Tottenham Hotspur v Arsenal
   To: "calendar@fwd2cal.com" <calendar@fwd2cal.com>
@@ -899,7 +899,7 @@ const eventEmailFromSecondEmail = {
   <div style="font-family: Arial, sans-serif; font-size: 14px;"><br></div><div class="protonmail_quote">
           ------- Forwarded Message -------<br>
           From: Tottenham Hotspur &lt;info@official.tottenhamhotspur.com&gt;<br>
-          Date: On Saturday, March 23rd, 2024 at 11:02 AM<br>
+          Date: On Saturday, March 23rd, 2025 at 11:02 AM<br>
           Subject: Fixture Update: Tottenham Hotspur v Arsenal<br>
           To: ${TESTER_SECONDARY_EMAIL_ACCT} &lt;${TESTER_SECONDARY_EMAIL_ACCT}&gt;<br>
           <br>
@@ -936,7 +936,7 @@ const eventEmailFromSecondEmail = {
   Hotspur Stadium has been selected for broadcast and is now scheduled to take
   place on Sunday 28 April, kick-off 2pm.</font></p><p style="word-wrap: break-word;word-break: break-word;margin: 0px;color: rgb(23, 43, 92)"><br></p><p style="word-wrap: break-word;word-break: break-word;margin: 0px;color: rgb(23, 43, 92)"><font style="word-wrap: break-word;word-break: break-word">All tickets will remain valid for this fixture and all
   digital passes will update with the new fixture date and time. There is no
-  further action required.</font></p><p style="word-wrap: break-word;word-break: break-word;margin: 0px;color: rgb(23, 43, 92)"><br></p><p style="word-wrap: break-word;word-break: break-word;margin: 0px;color: rgb(23, 43, 92)"><b><font style="word-wrap: break-word;word-break: break-word">Tottenham Hotspur v Arsenal</font></b></p><ul style="margin-top: 0cm; color: rgb(23, 43, 92);"> <li style="margin: 0;word-wrap: break-word;word-break: break-word;margin-left: -18pt;color: rgb(23, 43, 92)"><font style="word-wrap: break-word;word-break: break-word">Sunday 28 April 2024<b></b></font></li> <li style="margin: 0;word-wrap: break-word;word-break: break-word;margin-left: -18pt;color: rgb(23, 43, 92)"><font style="word-wrap: break-word;word-break: break-word">Kick-off: 2pm</font></li>
+  further action required.</font></p><p style="word-wrap: break-word;word-break: break-word;margin: 0px;color: rgb(23, 43, 92)"><br></p><p style="word-wrap: break-word;word-break: break-word;margin: 0px;color: rgb(23, 43, 92)"><b><font style="word-wrap: break-word;word-break: break-word">Tottenham Hotspur v Arsenal</font></b></p><ul style="margin-top: 0cm; color: rgb(23, 43, 92);"> <li style="margin: 0;word-wrap: break-word;word-break: break-word;margin-left: -18pt;color: rgb(23, 43, 92)"><font style="word-wrap: break-word;word-break: break-word">Sunday 28 April 2025<b></b></font></li> <li style="margin: 0;word-wrap: break-word;word-break: break-word;margin-left: -18pt;color: rgb(23, 43, 92)"><font style="word-wrap: break-word;word-break: break-word">Kick-off: 2pm</font></li>
   </ul><p style="word-wrap: break-word;word-break: break-word;margin: 0px"><font style="word-wrap: break-word;word-break: break-word" color="#172b5c"><b><br></b></font></p><p style="word-wrap: break-word;word-break: break-word;margin: 0px;color: rgb(23, 43, 92)"><b><font style="word-wrap: break-word;word-break: break-word"> </font></b></p><p style="word-wrap: break-word;word-break: break-word;margin: 0px;color: rgb(23, 43, 92)"><font style="word-wrap: break-word;word-break: break-word"><b>Please note – </b>if Arsenal are scheduled to play in the
   UEFA Champions League on Tuesday 30 April, the North London derby will move to
   Saturday 27 April, with a 12.30pm kick-off.</font></p><p style="word-wrap: break-word;word-break: break-word;margin: 0px;color: rgb(23, 43, 92)"><br></p><p style="word-wrap: break-word;word-break: break-word;margin: 0px;color: rgb(23, 43, 92)"><font style="word-wrap: break-word;word-break: break-word">Arsenal face Bayern Munich in the quarter-finals of the
@@ -989,7 +989,7 @@ const eventEmailFromSecondEmail = {
   
   Content preview:  Joe McDoe | ${TESTER_SECONDARY_EMAIL_ACCT} ------- Forwarded Message -------
      From: Tottenham Hotspur <info@official.tottenhamhotspur.com> Date: On Saturday,
-     March 23rd, 2024 at 11:02 AM Subject: Fixture Update: Tottenham Hotspur v
+     March 23rd, 2025 at 11:02 AM Subject: Fixture Update: Tottenham Hotspur v
      Arsenal To: [...] 
   
   Content analysis details:   (-0.1 points, 5.0 required)
@@ -1016,7 +1016,7 @@ const eventEmailFromSecondEmail = {
   
   ------- Forwarded Message -------
   From: Tottenham Hotspur <info@official.tottenhamhotspur.com>
-  Date: On Saturday, March 23rd, 2024 at 11:02 AM
+  Date: On Saturday, March 23rd, 2025 at 11:02 AM
   Subject: Fixture Update: Tottenham Hotspur v Arsenal
   To: ${TESTER_SECONDARY_EMAIL_ACCT} <${TESTER_SECONDARY_EMAIL_ACCT}>
   
@@ -1122,20 +1122,20 @@ const basicDetailedEmail = {
   from: `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
   headers: `Content-Type: multipart/alternative; boundary="0000000000000f12e420614b61f6a"
     DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;        d=gmail.com; s=20230601; t=1711622313; x=1712227113; darn=fwd2cal.com;        h=to:subject:message-id:date:from:in-reply-to:references:mime-version         :from:to:cc:subject:date:message-id:reply-to;        bh=VcrjtrpPYi9Bt/kfjz9uIRySn0GCXUGae6f3/u6YmhI=;        b=UAjLPWTrzxT/kaJJERTco1Ps5zHK3d3mZX7MOaj7LqdFyjtVFwNOrSGy3e2LE9UvVS         iTESq02/mVB1pTvZqwsaI/K0YSaGjui9619nxi5dwaO/QySHvOSZ3SarmWuTSBs/XVw0         KRuXvEJ5CZ0sQRzfXO9nSVBMvDdobBPybTlgFuKQMHbtLiluAxZCz+wZvyLkMP9NYl8J         YzuaChshk6OHxDAYw2HoW7BdCEVRtqWRPUm1+hCV80lLxnrlWuzjOTgbrqPpiEohabYg         vT5MvWg2zSN4USlQqL80m035Y1Spa8le53KtHHHr/FquQhsp4jlMPUDVZEoovUaPpjWA         TYHA==
-    Date: Thu, 28 Mar 2024 10:38:21 +0000
+    Date: Thu, 28 Mar 2025 10:38:21 +0000
     From: Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>
     In-Reply-To: <0102018e7a6e84ed-c41fff4f-700a-4606-bbcb-c4051ba055cd-000000@eu-west-1.amazonses.com>
     MIME-Version: 1.0
     Message-ID: <CAA4swFcWNQJRndNXq0u3Gcs-0U7kBXmMxNh6gS6qtXk7V4KqXw@mail.gmail.com>
-    Received: from mail-pj1-f44.google.com (mxd [209.85.216.44]) by mx.sendgrid.net with ESMTP id dXoUcqmOSqe8hO0WFt6vsQ for <calendar@fwd2cal.com>; Thu, 28 Mar 2024 10:38:33.988 +0000 (UTC)
-    Received: by mail-pj1-f44.google.com with SMTP id 98e67ed59e1d1-29dfad24f36so634763a91.0        for <calendar@fwd2cal.com>; Thu, 28 Mar 2024 03:38:33 -0700 (PDT)
+    Received: from mail-pj1-f44.google.com (mxd [209.85.216.44]) by mx.sendgrid.net with ESMTP id dXoUcqmOSqe8hO0WFt6vsQ for <calendar@fwd2cal.com>; Thu, 28 Mar 2025 10:38:33.988 +0000 (UTC)
+    Received: by mail-pj1-f44.google.com with SMTP id 98e67ed59e1d1-29dfad24f36so634763a91.0        for <calendar@fwd2cal.com>; Thu, 28 Mar 2025 03:38:33 -0700 (PDT)
     References: <0102018e7a6e84ed-c41fff4f-700a-4606-bbcb-c4051ba055cd-000000@eu-west-1.amazonses.com>
     Subject: meet jimmy for coffee
     To: calendar@fwd2cal.com
     X-Gm-Message-State: AOJu0Yx7KViB979IYYeK6S1QzIqMpgqyMQFTmhFh89Jg3XX2iXvPfY/5	RnWgjTG8A2xecs85V/6ty7ISvvVLOrz8fMAQqdZE17/m3rr0Dqk73v9RbX5dRte4jF6X1RRoh9G	8xCNTy3c+uBs6oTF2QQdJHaZrTAJatc3tQkI=
     X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;        d=1e100.net; s=20230601; t=1711622313; x=1712227113;        h=to:subject:message-id:date:from:in-reply-to:references:mime-version         :x-gm-message-state:from:to:cc:subject:date:message-id:reply-to;        bh=VcrjtrpPYi9Bt/kfjz9uIRySn0GCXUGae6f3/u6YmhI=;        b=YoacecYc7qtyCtYDV6Rf9d+6xvgsq2C8JHLhbweKI6/DFu1Aqplgp2vmuyNxuZM3hR         IIe0p+J3kUmAnIRG6N+XFvU7j0XwrKtZt2EY1SG5wUiahi5q+SKCbYa6/6diT8RDklNx         5Ut6nRP9sF+EZxHnZwq4JM9vGPPIpB0XziUK6Nra7PFnhWOpDYgVKkG6/qvaRD84LRHh         yN6E7ENIvaOYdHIy8HGJy4zlkOKt264LgXh0Qh02reGfDr2Ng8hv3e1A64jtS93ne8yx         XfPJxX4iPWbBGTIncCuinZFf0+Yn5o3TYH5JFf7cmbSOMEMvBavIq2af0q8HqbhRBiuV         sW2A==
     X-Google-Smtp-Source: AGHT+IEc9vMa5b3wFzeMcFWyXKWFNGIXAsPg7hA/o63o4JEOr4urEW2JNXs9XJ9FH8ZoYR4+zz7SP2VOlotrtd0PZYQ=
-    X-Received: by 2002:a17:90a:2f05:b0:29b:2268:3349 with SMTP id s5-20020a17090a2f0500b0029b22683349mr2184697pjd.18.1711622312765; Thu, 28 Mar 2024 03:38:32 -0700 (PDT)
+    X-Received: by 2002:a17:90a:2f05:b0:29b:2268:3349 with SMTP id s5-20020a17090a2f0500b0029b22683349mr2184697pjd.18.1711622312765; Thu, 28 Mar 2025 03:38:32 -0700 (PDT)
     `,
   html: `starbucks 12pm next friday`,
   message: "sendgridCallback",
@@ -1181,20 +1181,20 @@ const basicEmailFuture = {
   from: `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
   headers: `Content-Type: multipart/alternative; boundary="0000000000000f12e420614b61f6a"
     DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;        d=gmail.com; s=20230601; t=1711622313; x=1712227113; darn=fwd2cal.com;        h=to:subject:message-id:date:from:in-reply-to:references:mime-version         :from:to:cc:subject:date:message-id:reply-to;        bh=VcrjtrpPYi9Bt/kfjz9uIRySn0GCXUGae6f3/u6YmhI=;        b=UAjLPWTrzxT/kaJJERTco1Ps5zHK3d3mZX7MOaj7LqdFyjtVFwNOrSGy3e2LE9UvVS         iTESq02/mVB1pTvZqwsaI/K0YSaGjui9619nxi5dwaO/QySHvOSZ3SarmWuTSBs/XVw0         KRuXvEJ5CZ0sQRzfXO9nSVBMvDdobBPybTlgFuKQMHbtLiluAxZCz+wZvyLkMP9NYl8J         YzuaChshk6OHxDAYw2HoW7BdCEVRtqWRPUm1+hCV80lLxnrlWuzjOTgbrqPpiEohabYg         vT5MvWg2zSN4USlQqL80m035Y1Spa8le53KtHHHr/FquQhsp4jlMPUDVZEoovUaPpjWA         TYHA==
-    Date: Thu, 28 Mar 2024 10:38:21 +0000
+    Date: Thu, 28 Mar 2025 10:38:21 +0000
     From: Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>
     In-Reply-To: <0102018e7a6e84ed-c41fff4f-700a-4606-bbcb-c4051ba055cd-000000@eu-west-1.amazonses.com>
     MIME-Version: 1.0
     Message-ID: <CAA4swFcWNQJRndNXq0u3Gcs-0U7kBXmMxNh6gS6qtXk7V4KqXw@mail.gmail.com>
-    Received: from mail-pj1-f44.google.com (mxd [209.85.216.44]) by mx.sendgrid.net with ESMTP id dXoUcqmOSqe8hO0WFt6vsQ for <calendar@fwd2cal.com>; Thu, 28 Mar 2024 10:38:33.988 +0000 (UTC)
-    Received: by mail-pj1-f44.google.com with SMTP id 98e67ed59e1d1-29dfad24f36so634763a91.0        for <calendar@fwd2cal.com>; Thu, 28 Mar 2024 03:38:33 -0700 (PDT)
+    Received: from mail-pj1-f44.google.com (mxd [209.85.216.44]) by mx.sendgrid.net with ESMTP id dXoUcqmOSqe8hO0WFt6vsQ for <calendar@fwd2cal.com>; Thu, 28 Mar 2025 10:38:33.988 +0000 (UTC)
+    Received: by mail-pj1-f44.google.com with SMTP id 98e67ed59e1d1-29dfad24f36so634763a91.0        for <calendar@fwd2cal.com>; Thu, 28 Mar 2025 03:38:33 -0700 (PDT)
     References: <0102018e7a6e84ed-c41fff4f-700a-4606-bbcb-c4051ba055cd-000000@eu-west-1.amazonses.com>
     Subject: meet jimmy for coffee
     To: calendar@fwd2cal.com
     X-Gm-Message-State: AOJu0Yx7KViB979IYYeK6S1QzIqMpgqyMQFTmhFh89Jg3XX2iXvPfY/5	RnWgjTG8A2xecs85V/6ty7ISvvVLOrz8fMAQqdZE17/m3rr0Dqk73v9RbX5dRte4jF6X1RRoh9G	8xCNTy3c+uBs6oTF2QQdJHaZrTAJatc3tQkI=
     X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;        d=1e100.net; s=20230601; t=1711622313; x=1712227113;        h=to:subject:message-id:date:from:in-reply-to:references:mime-version         :x-gm-message-state:from:to:cc:subject:date:message-id:reply-to;        bh=VcrjtrpPYi9Bt/kfjz9uIRySn0GCXUGae6f3/u6YmhI=;        b=YoacecYc7qtyCtYDV6Rf9d+6xvgsq2C8JHLhbweKI6/DFu1Aqplgp2vmuyNxuZM3hR         IIe0p+J3kUmAnIRG6N+XFvU7j0XwrKtZt2EY1SG5wUiahi5q+SKCbYa6/6diT8RDklNx         5Ut6nRP9sF+EZxHnZwq4JM9vGPPIpB0XziUK6Nra7PFnhWOpDYgVKkG6/qvaRD84LRHh         yN6E7ENIvaOYdHIy8HGJy4zlkOKt264LgXh0Qh02reGfDr2Ng8hv3e1A64jtS93ne8yx         XfPJxX4iPWbBGTIncCuinZFf0+Yn5o3TYH5JFf7cmbSOMEMvBavIq2af0q8HqbhRBiuV         sW2A==
     X-Google-Smtp-Source: AGHT+IEc9vMa5b3wFzeMcFWyXKWFNGIXAsPg7hA/o63o4JEOr4urEW2JNXs9XJ9FH8ZoYR4+zz7SP2VOlotrtd0PZYQ=
-    X-Received: by 2002:a17:90a:2f05:b0:29b:2268:3349 with SMTP id s5-20020a17090a2f0500b0029b22683349mr2184697pjd.18.1711622312765; Thu, 28 Mar 2024 03:38:32 -0700 (PDT)
+    X-Received: by 2002:a17:90a:2f05:b0:29b:2268:3349 with SMTP id s5-20020a17090a2f0500b0029b22683349mr2184697pjd.18.1711622312765; Thu, 28 Mar 2025 03:38:32 -0700 (PDT)
     `,
   html: `starbucks 12pm next friday`,
   message: "sendgridCallback",
@@ -1230,7 +1230,7 @@ const basicEmailFuture = {
   text: `
   ---------- Forwarded message ---------
     From: Gill Bates <${TESTER_SECONDARY_EMAIL_ACCT}>
-    Date: Tue, Mar 21, 2024 at 11:04 AM
+    Date: Tue, Mar 21, 2025 at 11:04 AM
     Subject: meet jimmy for coffee
     To: <${TESTER_PRIMARY_GOOGLE_ACCT}>
     
@@ -1249,20 +1249,20 @@ const removeEmailAddress = {
   from: `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
   headers: `Content-Type: multipart/alternative; boundary="0000000000000f12e420614b61f6a"
     DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;        d=gmail.com; s=20230601; t=1711622313; x=1712227113; darn=fwd2cal.com;        h=to:subject:message-id:date:from:in-reply-to:references:mime-version         :from:to:cc:subject:date:message-id:reply-to;        bh=VcrjtrpPYi9Bt/kfjz9uIRySn0GCXUGae6f3/u6YmhI=;        b=UAjLPWTrzxT/kaJJERTco1Ps5zHK3d3mZX7MOaj7LqdFyjtVFwNOrSGy3e2LE9UvVS         iTESq02/mVB1pTvZqwsaI/K0YSaGjui9619nxi5dwaO/QySHvOSZ3SarmWuTSBs/XVw0         KRuXvEJ5CZ0sQRzfXO9nSVBMvDdobBPybTlgFuKQMHbtLiluAxZCz+wZvyLkMP9NYl8J         YzuaChshk6OHxDAYw2HoW7BdCEVRtqWRPUm1+hCV80lLxnrlWuzjOTgbrqPpiEohabYg         vT5MvWg2zSN4USlQqL80m035Y1Spa8le53KtHHHr/FquQhsp4jlMPUDVZEoovUaPpjWA         TYHA==
-    Date: Thu, 28 Mar 2024 10:38:21 +0000
+    Date: Thu, 28 Mar 2025 10:38:21 +0000
     From: Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>
     In-Reply-To: <0102018e7a6e84ed-c41fff4f-700a-4606-bbcb-c4051ba055cd-000000@eu-west-1.amazonses.com>
     MIME-Version: 1.0
     Message-ID: <CAA4swFcWNQJRndNXq0u3Gcs-0U7kBXmMxNh6gS6qtXk7V4KqXw@mail.gmail.com>
-    Received: from mail-pj1-f44.google.com (mxd [209.85.216.44]) by mx.sendgrid.net with ESMTP id dXoUcqmOSqe8hO0WFt6vsQ for <calendar@fwd2cal.com>; Thu, 28 Mar 2024 10:38:33.988 +0000 (UTC)
-    Received: by mail-pj1-f44.google.com with SMTP id 98e67ed59e1d1-29dfad24f36so634763a91.0        for <calendar@fwd2cal.com>; Thu, 28 Mar 2024 03:38:33 -0700 (PDT)
+    Received: from mail-pj1-f44.google.com (mxd [209.85.216.44]) by mx.sendgrid.net with ESMTP id dXoUcqmOSqe8hO0WFt6vsQ for <calendar@fwd2cal.com>; Thu, 28 Mar 2025 10:38:33.988 +0000 (UTC)
+    Received: by mail-pj1-f44.google.com with SMTP id 98e67ed59e1d1-29dfad24f36so634763a91.0        for <calendar@fwd2cal.com>; Thu, 28 Mar 2025 03:38:33 -0700 (PDT)
     References: <0102018e7a6e84ed-c41fff4f-700a-4606-bbcb-c4051ba055cd-000000@eu-west-1.amazonses.com>
     Subject: remove ${TESTER_SECONDARY_EMAIL_ACCT}
     To: calendar@fwd2cal.com
     X-Gm-Message-State: AOJu0Yx7KViB979IYYeK6S1QzIqMpgqyMQFTmhFh89Jg3XX2iXvPfY/5	RnWgjTG8A2xecs85V/6ty7ISvvVLOrz8fMAQqdZE17/m3rr0Dqk73v9RbX5dRte4jF6X1RRoh9G	8xCNTy3c+uBs6oTF2QQdJHaZrTAJatc3tQkI=
     X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;        d=1e100.net; s=20230601; t=1711622313; x=1712227113;        h=to:subject:message-id:date:from:in-reply-to:references:mime-version         :x-gm-message-state:from:to:cc:subject:date:message-id:reply-to;        bh=VcrjtrpPYi9Bt/kfjz9uIRySn0GCXUGae6f3/u6YmhI=;        b=YoacecYc7qtyCtYDV6Rf9d+6xvgsq2C8JHLhbweKI6/DFu1Aqplgp2vmuyNxuZM3hR         IIe0p+J3kUmAnIRG6N+XFvU7j0XwrKtZt2EY1SG5wUiahi5q+SKCbYa6/6diT8RDklNx         5Ut6nRP9sF+EZxHnZwq4JM9vGPPIpB0XziUK6Nra7PFnhWOpDYgVKkG6/qvaRD84LRHh         yN6E7ENIvaOYdHIy8HGJy4zlkOKt264LgXh0Qh02reGfDr2Ng8hv3e1A64jtS93ne8yx         XfPJxX4iPWbBGTIncCuinZFf0+Yn5o3TYH5JFf7cmbSOMEMvBavIq2af0q8HqbhRBiuV         sW2A==
     X-Google-Smtp-Source: AGHT+IEc9vMa5b3wFzeMcFWyXKWFNGIXAsPg7hA/o63o4JEOr4urEW2JNXs9XJ9FH8ZoYR4+zz7SP2VOlotrtd0PZYQ=
-    X-Received: by 2002:a17:90a:2f05:b0:29b:2268:3349 with SMTP id s5-20020a17090a2f0500b0029b22683349mr2184697pjd.18.1711622312765; Thu, 28 Mar 2024 03:38:32 -0700 (PDT)
+    X-Received: by 2002:a17:90a:2f05:b0:29b:2268:3349 with SMTP id s5-20020a17090a2f0500b0029b22683349mr2184697pjd.18.1711622312765; Thu, 28 Mar 2025 03:38:32 -0700 (PDT)
     `,
   html: ``,
   message: "sendgridCallback",
@@ -1274,7 +1274,7 @@ const removeEmailAddress = {
     the administrator of that system for details.
     
     Content preview:  Forwarded message --------- From: Finess Clinic Date: Tue,
-       Mar 26, 2024 at 11:04 AM Subject: Finess Clinic Appointment Confirmation
+       Mar 26, 2025 at 11:04 AM Subject: Finess Clinic Appointment Confirmation
        To: Email having a bad hair day? Click here to view it in your browser <https://www.treatwell.co.uk/email/r35abc3c0-d978-497d-9bce-197baa779003.x607CA89B/>
        Finess Clinic [image: Your booking is confirmed] 
     
@@ -1311,20 +1311,20 @@ const deleteAccount = {
   from: `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
   headers: `Content-Type: multipart/alternative; boundary="0000000000000f12e420614b61f6a"
     DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;        d=gmail.com; s=20230601; t=1711622313; x=1712227113; darn=fwd2cal.com;        h=to:subject:message-id:date:from:in-reply-to:references:mime-version         :from:to:cc:subject:date:message-id:reply-to;        bh=VcrjtrpPYi9Bt/kfjz9uIRySn0GCXUGae6f3/u6YmhI=;        b=UAjLPWTrzxT/kaJJERTco1Ps5zHK3d3mZX7MOaj7LqdFyjtVFwNOrSGy3e2LE9UvVS         iTESq02/mVB1pTvZqwsaI/K0YSaGjui9619nxi5dwaO/QySHvOSZ3SarmWuTSBs/XVw0         KRuXvEJ5CZ0sQRzfXO9nSVBMvDdobBPybTlgFuKQMHbtLiluAxZCz+wZvyLkMP9NYl8J         YzuaChshk6OHxDAYw2HoW7BdCEVRtqWRPUm1+hCV80lLxnrlWuzjOTgbrqPpiEohabYg         vT5MvWg2zSN4USlQqL80m035Y1Spa8le53KtHHHr/FquQhsp4jlMPUDVZEoovUaPpjWA         TYHA==
-    Date: Thu, 28 Mar 2024 10:38:21 +0000
+    Date: Thu, 28 Mar 2025 10:38:21 +0000
     From: Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>
     In-Reply-To: <0102018e7a6e84ed-c41fff4f-700a-4606-bbcb-c4051ba055cd-000000@eu-west-1.amazonses.com>
     MIME-Version: 1.0
     Message-ID: <CAA4swFcWNQJRndNXq0u3Gcs-0U7kBXmMxNh6gS6qtXk7V4KqXw@mail.gmail.com>
-    Received: from mail-pj1-f44.google.com (mxd [209.85.216.44]) by mx.sendgrid.net with ESMTP id dXoUcqmOSqe8hO0WFt6vsQ for <calendar@fwd2cal.com>; Thu, 28 Mar 2024 10:38:33.988 +0000 (UTC)
-    Received: by mail-pj1-f44.google.com with SMTP id 98e67ed59e1d1-29dfad24f36so634763a91.0        for <calendar@fwd2cal.com>; Thu, 28 Mar 2024 03:38:33 -0700 (PDT)
+    Received: from mail-pj1-f44.google.com (mxd [209.85.216.44]) by mx.sendgrid.net with ESMTP id dXoUcqmOSqe8hO0WFt6vsQ for <calendar@fwd2cal.com>; Thu, 28 Mar 2025 10:38:33.988 +0000 (UTC)
+    Received: by mail-pj1-f44.google.com with SMTP id 98e67ed59e1d1-29dfad24f36so634763a91.0        for <calendar@fwd2cal.com>; Thu, 28 Mar 2025 03:38:33 -0700 (PDT)
     References: <0102018e7a6e84ed-c41fff4f-700a-4606-bbcb-c4051ba055cd-000000@eu-west-1.amazonses.com>
     Subject: delete account
     To: calendar@fwd2cal.com
     X-Gm-Message-State: AOJu0Yx7KViB979IYYeK6S1QzIqMpgqyMQFTmhFh89Jg3XX2iXvPfY/5	RnWgjTG8A2xecs85V/6ty7ISvvVLOrz8fMAQqdZE17/m3rr0Dqk73v9RbX5dRte4jF6X1RRoh9G	8xCNTy3c+uBs6oTF2QQdJHaZrTAJatc3tQkI=
     X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;        d=1e100.net; s=20230601; t=1711622313; x=1712227113;        h=to:subject:message-id:date:from:in-reply-to:references:mime-version         :x-gm-message-state:from:to:cc:subject:date:message-id:reply-to;        bh=VcrjtrpPYi9Bt/kfjz9uIRySn0GCXUGae6f3/u6YmhI=;        b=YoacecYc7qtyCtYDV6Rf9d+6xvgsq2C8JHLhbweKI6/DFu1Aqplgp2vmuyNxuZM3hR         IIe0p+J3kUmAnIRG6N+XFvU7j0XwrKtZt2EY1SG5wUiahi5q+SKCbYa6/6diT8RDklNx         5Ut6nRP9sF+EZxHnZwq4JM9vGPPIpB0XziUK6Nra7PFnhWOpDYgVKkG6/qvaRD84LRHh         yN6E7ENIvaOYdHIy8HGJy4zlkOKt264LgXh0Qh02reGfDr2Ng8hv3e1A64jtS93ne8yx         XfPJxX4iPWbBGTIncCuinZFf0+Yn5o3TYH5JFf7cmbSOMEMvBavIq2af0q8HqbhRBiuV         sW2A==
     X-Google-Smtp-Source: AGHT+IEc9vMa5b3wFzeMcFWyXKWFNGIXAsPg7hA/o63o4JEOr4urEW2JNXs9XJ9FH8ZoYR4+zz7SP2VOlotrtd0PZYQ=
-    X-Received: by 2002:a17:90a:2f05:b0:29b:2268:3349 with SMTP id s5-20020a17090a2f0500b0029b22683349mr2184697pjd.18.1711622312765; Thu, 28 Mar 2024 03:38:32 -0700 (PDT)
+    X-Received: by 2002:a17:90a:2f05:b0:29b:2268:3349 with SMTP id s5-20020a17090a2f0500b0029b22683349mr2184697pjd.18.1711622312765; Thu, 28 Mar 2025 03:38:32 -0700 (PDT)
     `,
   html: ``,
   message: "sendgridCallback",
@@ -1336,7 +1336,7 @@ const deleteAccount = {
     the administrator of that system for details.
     
     Content preview:  Forwarded message --------- From: Finess Clinic Date: Tue,
-       Mar 26, 2024 at 11:04 AM Subject: Finess Clinic Appointment Confirmation
+       Mar 26, 2025 at 11:04 AM Subject: Finess Clinic Appointment Confirmation
        To: Email having a bad hair day? Click here to view it in your browser <https://www.treatwell.co.uk/email/r35abc3c0-d978-497d-9bce-197baa779003.x607CA89B/>
        Finess Clinic [image: Your booking is confirmed] 
     
@@ -1374,20 +1374,20 @@ const emailWithICSAttachment = {
   "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
   "headers": `Content-Type: multipart/alternative; boundary="0000000000000f12e420614b61f6a"
     DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;        d=gmail.com; s=20230601; t=1711622313; x=1712227113; darn=fwd2cal.com;        h=to:subject:message-id:date:from:in-reply-to:references:mime-version         :from:to:cc:subject:date:message-id:reply-to;        bh=VcrjtrpPYi9Bt/kfjz9uIRySn0GCXUGae6f3/u6YmhI=;        b=UAjLPWTrzxT/kaJJERTco1Ps5zHK3d3mZX7MOaj7LqdFyjtVFwNOrSGy3e2LE9UvVS         iTESq02/mVB1pTvZqwsaI/K0YSaGjui9619nxi5dwaO/QySHvOSZ3SarmWuTSBs/XVw0         KRuXvEJ5CZ0sQRzfXO9nSVBMvDdobBPybTlgFuKQMHbtLiluAxZCz+wZvyLkMP9NYl8J         YzuaChshk6OHxDAYw2HoW7BdCEVRtqWRPUm1+hCV80lLxnrlWuzjOTgbrqPpiEohabYg         vT5MvWg2zSN4USlQqL80m035Y1Spa8le53KtHHHr/FquQhsp4jlMPUDVZEoovUaPpjWA         TYHA==
-    Date: Thu, 28 Mar 2024 10:38:21 +0000
+    Date: Thu, 28 Mar 2025 10:38:21 +0000
     From: Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>
     In-Reply-To: <0102018e7a6e84ed-c41fff4f-700a-4606-bbcb-c4051ba055cd-000000@eu-west-1.amazonses.com>
     MIME-Version: 1.0
     Message-ID: <CAA4swFcWNQJRndNXq0u3Gcs-0U7kBXmMxNh6gS6qtXk7V4KqXw@mail.gmail.com>
-    Received: from mail-pj1-f44.google.com (mxd [209.85.216.44]) by mx.sendgrid.net with ESMTP id dXoUcqmOSqe8hO0WFt6vsQ for <calendar@fwd2cal.com>; Thu, 28 Mar 2024 10:38:33.988 +0000 (UTC)
-    Received: by mail-pj1-f44.google.com with SMTP id 98e67ed59e1d1-29dfad24f36so634763a91.0        for <calendar@fwd2cal.com>; Thu, 28 Mar 2024 03:38:33 -0700 (PDT)
+    Received: from mail-pj1-f44.google.com (mxd [209.85.216.44]) by mx.sendgrid.net with ESMTP id dXoUcqmOSqe8hO0WFt6vsQ for <calendar@fwd2cal.com>; Thu, 28 Mar 2025 10:38:33.988 +0000 (UTC)
+    Received: by mail-pj1-f44.google.com with SMTP id 98e67ed59e1d1-29dfad24f36so634763a91.0        for <calendar@fwd2cal.com>; Thu, 28 Mar 2025 03:38:33 -0700 (PDT)
     References: <0102018e7a6e84ed-c41fff4f-700a-4606-bbcb-c4051ba055cd-000000@eu-west-1.amazonses.com>
     Subject: email with ics attachment
     To: calendar@fwd2cal.com
     X-Gm-Message-State: AOJu0Yx7KViB979IYYeK6S1QzIqMpgqyMQFTmhFh89Jg3XX2iXvPfY/5	RnWgjTG8A2xecs85V/6ty7ISvvVLOrz8fMAQqdZE17/m3rr0Dqk73v9RbX5dRte4jF6X1RRoh9G	8xCNTy3c+uBs6oTF2QQdJHaZrTAJatc3tQkI=
     X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;        d=1e100.net; s=20230601; t=1711622313; x=1712227113;        h=to:subject:message-id:date:from:in-reply-to:references:mime-version         :x-gm-message-state:from:to:cc:subject:date:message-id:reply-to;        bh=VcrjtrpPYi9Bt/kfjz9uIRySn0GCXUGae6f3/u6YmhI=;        b=YoacecYc7qtyCtYDV6Rf9d+6xvgsq2C8JHLhbweKI6/DFu1Aqplgp2vmuyNxuZM3hR         IIe0p+J3kUmAnIRG6N+XFvU7j0XwrKtZt2EY1SG5wUiahi5q+SKCbYa6/6diT8RDklNx         5Ut6nRP9sF+EZxHnZwq4JM9vGPPIpB0XziUK6Nra7PFnhWOpDYgVKkG6/qvaRD84LRHh         yN6E7ENIvaOYdHIy8HGJy4zlkOKt264LgXh0Qh02reGfDr2Ng8hv3e1A64jtS93ne8yx         XfPJxX4iPWbBGTIncCuinZFf0+Yn5o3TYH5JFf7cmbSOMEMvBavIq2af0q8HqbhRBiuV         sW2A==
     X-Google-Smtp-Source: AGHT+IEc9vMa5b3wFzeMcFWyXKWFNGIXAsPg7hA/o63o4JEOr4urEW2JNXs9XJ9FH8ZoYR4+zz7SP2VOlotrtd0PZYQ=
-    X-Received: by 2002:a17:90a:2f05:b0:29b:2268:3349 with SMTP id s5-20020a17090a2f0500b0029b22683349mr2184697pjd.18.1711622312765; Thu, 28 Mar 2024 03:38:32 -0700 (PDT)
+    X-Received: by 2002:a17:90a:2f05:b0:29b:2268:3349 with SMTP id s5-20020a17090a2f0500b0029b22683349mr2184697pjd.18.1711622312765; Thu, 28 Mar 2025 03:38:32 -0700 (PDT)
     `,
   "html": `here is the ics`,
   "message": "sendgridCallback",

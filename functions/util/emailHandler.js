@@ -197,11 +197,12 @@ async function deleteUserAccount(email, sender, uid, files = [], emailService = 
 async function removeEmailAddressFromUser(email, sender, uid, files = [], emailService = "sendgrid") {
   // TODO: Make sure sender is the main account? Let's see if this goes wrong.
   const subject = email.subject;
-  const emailRegex = /^remove\s+([a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6})$/;
+  const emailRegex = /^remove\s+([a-zA-Z0-9._+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6})$/;
   const match = subject.match(emailRegex);
   if (!match) {
     logger.log(`Email that starts with 'remove' but doesn't 
       have a valid email address after it.`);
+    logger.log(`Subject: ${email.subject}`);
     return await eventHandler(email, sender, uid, files, emailService);
   }
   const emailAddressToRemove = match[1];
@@ -237,7 +238,7 @@ async function removeEmailAddressFromUser(email, sender, uid, files = [], emailS
 async function addEmailAddressToUser(email, sender, uid, files = [], emailService = "sendgrid") {
   // TODO: Make sure sender is the main account? Let's see if this goes wrong.
   const subject = email.subject;
-  const emailRegex = /^add\s+([a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6})$/;
+  const emailRegex = /^add\s+([a-zA-Z0-9._+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6})$/;
   const match = subject.match(emailRegex);
   if (!match) {
     logger.log(`Email that starts with 'add' but doesn't 

@@ -36,8 +36,8 @@ async function sendEmail({to, from, subject, text, html = "", headers = {}}) {
   }
 
   try {
-    if (ENVIRONMENT) {
-    // if (ENVIRONMENT === "production") {
+    // if (ENVIRONMENT) {
+    if (ENVIRONMENT === "production") {
       // Extract domain from sender email for Mailgun domain
       const domain = from.split("@")[1] || "fwd2cal.com";
       logger.log(`Attempting to send via Mailgun using domain: ${domain}`);
