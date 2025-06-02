@@ -34,6 +34,7 @@ const ENVIRONMENT = functions.config().environment.name;
 const {oauthCronJob,
   signupCallbackHandler,
   verifyAdditionalEmail} = require("./util/authHandler");
+const {testEmailHandler} = require("./util/testEmail");
 
 // For debugging before we start inviting others to our events.
 const ONLY_INVITE_HOST = true;
@@ -319,3 +320,7 @@ exports.refreshTokensScheduled = functions.pubsub.schedule("0 * * * *")
           await oauthCronJob();
         }),
     );
+
+exports.testEmail = functions.https.onRequest(
+    wrapAndReport(testEmailHandler)
+);
