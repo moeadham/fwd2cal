@@ -6,7 +6,7 @@ const TESTER_PRIMARY_GOOGLE_ACCT = process.env.TESTER_PRIMARY_GOOGLE_ACCT;
 const TESTER_SECONDARY_EMAIL_ACCT = process.env.TESTER_SECONDARY_EMAIL_ACCT;
 
 const emailFromMain = {
-  "recipient": "calendar@test.fwd2cal.com",
+  "recipient": "calendar@fwd2cal.com",
   "sender": TESTER_PRIMARY_GOOGLE_ACCT,
   "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
   "subject": "Fwd: Finess Clinic Appointment Confirmation",
@@ -51,14 +51,14 @@ Amount to pay at the salon
 Finess Clinic
 Suite 1, Beatty House, Admirals Way, Canary Wharf, London, UK, E14 9UF`,
   "stripped-html": `<p><strong>Your booking is confirmed</strong></p><p>Order reference: W1503268392</p><p><strong>Your appointment</strong></p><p>Wednesday, 26 March 2025, 11:15 AM</p><p>Acupuncture<br>30 minutes session</p><p>Amount to pay at the salon<br>£45.00</p><p>Finess Clinic<br>Suite 1, Beatty House, Admirals Way, Canary Wharf, London, UK, E14 9UF</p>`,
-  "message-headers": `[["X-Mailgun-Spf","Pass"],["X-Mailgun-Dkim-Check-Result","Pass"],["From","Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>"],["Date","Tue, 26 Mar 2024 12:38:21 +0000"],["Subject","Fwd: Finess Clinic Appointment Confirmation"],["To","calendar@test.fwd2cal.com"],["Content-Type","multipart/alternative; boundary=\\"00000000000000ec3306364540e0\\""]]`,
+  "message-headers": `[["X-Mailgun-Spf","Pass"],["X-Mailgun-Dkim-Check-Result","Pass"],["From","Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>"],["Date","Tue, 26 Mar 2024 12:38:21 +0000"],["Subject","Fwd: Finess Clinic Appointment Confirmation"],["To","calendar@fwd2cal.com"],["Content-Type","multipart/alternative; boundary=\\"00000000000000ec3306364540e0\\""]]`,
   "timestamp": "1711454301",
   "token": "dummy_mailgun_token_for_testing_purposes_only",
   "signature": "dummy_mailgun_signature_for_testing_purposes_only",
 };
 
 const addEmailAddress = {
-  "recipient": "calendar@test.fwd2cal.com",
+  "recipient": "calendar@fwd2cal.com",
   "sender": TESTER_PRIMARY_GOOGLE_ACCT,
   "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
   "subject": `add ${TESTER_SECONDARY_EMAIL_ACCT}`,
@@ -66,14 +66,14 @@ const addEmailAddress = {
   "body-html": `<div dir="ltr">add ${TESTER_SECONDARY_EMAIL_ACCT}</div>`,
   "stripped-text": `add ${TESTER_SECONDARY_EMAIL_ACCT}`,
   "stripped-html": `<div dir="ltr">add ${TESTER_SECONDARY_EMAIL_ACCT}</div>`,
-  "message-headers": `[["X-Mailgun-Spf","Pass"],["X-Mailgun-Dkim-Check-Result","Pass"],["From","Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>"],["Date","Thu, 28 Mar 2025 10:38:21 +0000"],["Subject","add ${TESTER_SECONDARY_EMAIL_ACCT}"],["To","calendar@test.fwd2cal.com"],["Content-Type","multipart/alternative; boundary=\\"boundary123\\""]]`,
+  "message-headers": `[["X-Mailgun-Spf","Pass"],["X-Mailgun-Dkim-Check-Result","Pass"],["From","Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>"],["Date","Thu, 28 Mar 2025 10:38:21 +0000"],["Subject","add ${TESTER_SECONDARY_EMAIL_ACCT}"],["To","calendar@fwd2cal.com"],["Content-Type","multipart/alternative; boundary=\\"boundary123\\""]]`,
   "timestamp": "1711622301",
   "token": "dummy_mailgun_token_for_testing_purposes_only",
   "signature": "dummy_mailgun_signature_for_testing_purposes_only",
 };
 
 const eventEmailFromSecondEmail = {
-  "recipient": "calendar@test.fwd2cal.com",
+  "recipient": "calendar@fwd2cal.com",
   "sender": TESTER_SECONDARY_EMAIL_ACCT,
   "from": `Jon Doe <${TESTER_SECONDARY_EMAIL_ACCT}>`,
   "subject": "Fwd: Tottenham Hotspur v Arsenal Premier League Match",
@@ -107,14 +107,14 @@ Your tickets will remain valid for this fixture.
 
 Tottenham Hotspur Stadium`,
   "stripped-html": `<p><strong>TOTTENHAM HOTSPUR V ARSENAL</strong></p><p>Premier League</p><p>Sunday 28 April 2025</p><p>Kick-off: 2pm</p><p>Your tickets will remain valid for this fixture.</p><p>Tottenham Hotspur Stadium</p>`,
-  "message-headers": `[["X-Mailgun-Spf","Pass"],["X-Mailgun-Dkim-Check-Result","Pass"],["From","Jon Doe <${TESTER_SECONDARY_EMAIL_ACCT}>"],["Date","Thu, 25 Apr 2025 14:30:00 +0000"],["Subject","Fwd: Tottenham Hotspur v Arsenal Premier League Match"],["To","calendar@test.fwd2cal.com"],["Content-Type","multipart/alternative; boundary=\\"boundary456\\""]]`,
+  "message-headers": `[["X-Mailgun-Spf","Pass"],["X-Mailgun-Dkim-Check-Result","Pass"],["From","Jon Doe <${TESTER_SECONDARY_EMAIL_ACCT}>"],["Date","Thu, 25 Apr 2025 14:30:00 +0000"],["Subject","Fwd: Tottenham Hotspur v Arsenal Premier League Match"],["To","calendar@fwd2cal.com"],["Content-Type","multipart/alternative; boundary=\\"boundary456\\""]]`,
   "timestamp": "1714056600",
   "token": "dummy_mailgun_token_for_testing_purposes_only",
   "signature": "dummy_mailgun_signature_for_testing_purposes_only",
 };
 
 const basicDetailedEmail = {
-  "recipient": "calendar@test.fwd2cal.com",
+  "recipient": "calendar@fwd2cal.com",
   "sender": TESTER_PRIMARY_GOOGLE_ACCT,
   "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
   "subject": "Fwd: Meet Jimmy for coffee",
@@ -138,14 +138,14 @@ Let's meet for coffee at Starbucks on Friday April 4th at 1pm.
 Thanks,
 Jimmy`,
   "stripped-html": `<p>Hey!</p><p>Let's meet for coffee at Starbucks on Friday April 4th at 1pm.</p><p>Thanks,<br>Jimmy</p>`,
-  "message-headers": `[["X-Mailgun-Spf","Pass"],["X-Mailgun-Dkim-Check-Result","Pass"],["From","Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>"],["Date","Thu, 4 Apr 2025 10:00:00 +0000"],["Subject","Fwd: Meet Jimmy for coffee"],["To","calendar@test.fwd2cal.com"],["Content-Type","multipart/alternative; boundary=\\"boundary789\\""]]`,
+  "message-headers": `[["X-Mailgun-Spf","Pass"],["X-Mailgun-Dkim-Check-Result","Pass"],["From","Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>"],["Date","Thu, 4 Apr 2025 10:00:00 +0000"],["Subject","Fwd: Meet Jimmy for coffee"],["To","calendar@fwd2cal.com"],["Content-Type","multipart/alternative; boundary=\\"boundary789\\""]]`,
   "timestamp": "1712318400",
   "token": "dummy_mailgun_token_for_testing_purposes_only",
   "signature": "dummy_mailgun_signature_for_testing_purposes_only",
 };
 
 const basicEmailFuture = {
-  "recipient": "calendar@test.fwd2cal.com",
+  "recipient": "calendar@fwd2cal.com",
   "sender": TESTER_PRIMARY_GOOGLE_ACCT,
   "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
   "subject": "Meet Jimmy for Coffee",
@@ -164,14 +164,14 @@ const basicEmailFuture = {
 
 Gill.`,
   "stripped-html": `<p>Hey Jon, lets both meet at starbucks, 12pm %DATE_IN_THE_FUTURE%</p><p>Gill.</p>`,
-  "message-headers": `[["X-Mailgun-Spf","Pass"],["X-Mailgun-Dkim-Check-Result","Pass"],["From","Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>"],["Date","Fri, 30 May 2025 10:00:00 +0000"],["Subject","Meet Jimmy for Coffee"],["To","calendar@test.fwd2cal.com"],["Content-Type","multipart/alternative; boundary=\\"boundary012\\""]]`,
+  "message-headers": `[["X-Mailgun-Spf","Pass"],["X-Mailgun-Dkim-Check-Result","Pass"],["From","Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>"],["Date","Fri, 30 May 2025 10:00:00 +0000"],["Subject","Meet Jimmy for Coffee"],["To","calendar@fwd2cal.com"],["Content-Type","multipart/alternative; boundary=\\"boundary012\\""]]`,
   "timestamp": "1748579200",
   "token": "dummy_mailgun_token_for_testing_purposes_only",
   "signature": "dummy_mailgun_signature_for_testing_purposes_only",
 };
 
 const removeEmailAddress = {
-  "recipient": "calendar@test.fwd2cal.com",
+  "recipient": "calendar@fwd2cal.com",
   "sender": TESTER_PRIMARY_GOOGLE_ACCT,
   "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
   "subject": `remove ${TESTER_SECONDARY_EMAIL_ACCT}`,
@@ -179,14 +179,14 @@ const removeEmailAddress = {
   "body-html": `<div dir="ltr">remove ${TESTER_SECONDARY_EMAIL_ACCT}</div>`,
   "stripped-text": `remove ${TESTER_SECONDARY_EMAIL_ACCT}`,
   "stripped-html": `<div dir="ltr">remove ${TESTER_SECONDARY_EMAIL_ACCT}</div>`,
-  "message-headers": `[["X-Mailgun-Spf","Pass"],["X-Mailgun-Dkim-Check-Result","Pass"],["From","Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>"],["Date","Fri, 30 May 2025 11:00:00 +0000"],["Subject","remove ${TESTER_SECONDARY_EMAIL_ACCT}"],["To","calendar@test.fwd2cal.com"],["Content-Type","multipart/alternative; boundary=\\"boundary345\\""]]`,
+  "message-headers": `[["X-Mailgun-Spf","Pass"],["X-Mailgun-Dkim-Check-Result","Pass"],["From","Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>"],["Date","Fri, 30 May 2025 11:00:00 +0000"],["Subject","remove ${TESTER_SECONDARY_EMAIL_ACCT}"],["To","calendar@fwd2cal.com"],["Content-Type","multipart/alternative; boundary=\\"boundary345\\""]]`,
   "timestamp": "1748582800",
   "token": "dummy_mailgun_token_for_testing_purposes_only",
   "signature": "dummy_mailgun_signature_for_testing_purposes_only",
 };
 
 const deleteAccount = {
-  "recipient": "calendar@test.fwd2cal.com",
+  "recipient": "calendar@fwd2cal.com",
   "sender": TESTER_PRIMARY_GOOGLE_ACCT,
   "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
   "subject": "delete account",
@@ -194,14 +194,14 @@ const deleteAccount = {
   "body-html": "",
   "stripped-text": "",
   "stripped-html": "",
-  "message-headers": `[["X-Mailgun-Spf","Pass"],["X-Mailgun-Dkim-Check-Result","Pass"],["From","Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>"],["Date","Fri, 30 May 2025 12:00:00 +0000"],["Subject","delete account"],["To","calendar@test.fwd2cal.com"],["Content-Type","multipart/alternative; boundary=\\"boundary678\\""]]`,
+  "message-headers": `[["X-Mailgun-Spf","Pass"],["X-Mailgun-Dkim-Check-Result","Pass"],["From","Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>"],["Date","Fri, 30 May 2025 12:00:00 +0000"],["Subject","delete account"],["To","calendar@fwd2cal.com"],["Content-Type","multipart/alternative; boundary=\\"boundary678\\""]]`,
   "timestamp": "1748586400",
   "token": "dummy_mailgun_token_for_testing_purposes_only",
   "signature": "dummy_mailgun_signature_for_testing_purposes_only",
 };
 
 const emailWithICSAttachment = {
-  "recipient": "calendar@test.fwd2cal.com",
+  "recipient": "calendar@fwd2cal.com",
   "sender": TESTER_PRIMARY_GOOGLE_ACCT,
   "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
   "subject": "email with ics attachment",
@@ -209,7 +209,7 @@ const emailWithICSAttachment = {
   "body-html": "<p>here is the ics</p>",
   "stripped-text": "here is the ics",
   "stripped-html": "<p>here is the ics</p>",
-  "message-headers": `[["X-Mailgun-Spf","Pass"],["X-Mailgun-Dkim-Check-Result","Pass"],["From","Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>"],["Date","Thu, 28 Mar 2025 10:38:21 +0000"],["Subject","email with ics attachment"],["To","calendar@test.fwd2cal.com"],["Content-Type","multipart/mixed; boundary=\\"----mailgun-boundary-123\\""]]`,
+  "message-headers": `[["X-Mailgun-Spf","Pass"],["X-Mailgun-Dkim-Check-Result","Pass"],["From","Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>"],["Date","Thu, 28 Mar 2025 10:38:21 +0000"],["Subject","email with ics attachment"],["To","calendar@fwd2cal.com"],["Content-Type","multipart/mixed; boundary=\\"----mailgun-boundary-123\\""]]`,
   "timestamp": "1711622313",
   "token": "dummy_mailgun_token_for_testing_purposes_only",
   "signature": "dummy_mailgun_signature_for_testing_purposes_only",
@@ -217,7 +217,7 @@ const emailWithICSAttachment = {
 };
 
 const multipleEventsEmail = {
-  "recipient": "calendar@test.fwd2cal.com",
+  "recipient": "calendar@fwd2cal.com",
   "sender": TESTER_PRIMARY_GOOGLE_ACCT,
   "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
   "subject": "Fwd: Schedule for next week",
@@ -253,7 +253,7 @@ Please make sure to prepare for the client meeting.
 Best,
 Sarah`,
   "stripped-html": `<p>Hi Jon,</p><p>Here's your schedule for next week:</p><p>Monday June 8th - Team standup at 9:30 AM in Conference Room A<br>Tuesday June 9th - Client meeting at 2:00 PM to 3:30 PM (virtual on Zoom)<br>Thursday June 11th - Project review at 11:00 AM for 1 hour with the full team</p><p>Please make sure to prepare for the client meeting.</p><p>Best,<br>Sarah</p>`,
-  "message-headers": `[["X-Mailgun-Spf","Pass"],["X-Mailgun-Dkim-Check-Result","Pass"],["From","Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>"],["Date","Mon, 1 Jun 2025 09:00:00 +0000"],["Subject","Fwd: Schedule for next week"],["To","calendar@test.fwd2cal.com"],["Content-Type","multipart/alternative; boundary=\\"boundary901\\""]]`,
+  "message-headers": `[["X-Mailgun-Spf","Pass"],["X-Mailgun-Dkim-Check-Result","Pass"],["From","Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>"],["Date","Mon, 1 Jun 2025 09:00:00 +0000"],["Subject","Fwd: Schedule for next week"],["To","calendar@fwd2cal.com"],["Content-Type","multipart/alternative; boundary=\\"boundary901\\""]]`,
   "timestamp": "1748854800",
   "token": "dummy_mailgun_token_for_testing_purposes_only",
   "signature": "dummy_mailgun_signature_for_testing_purposes_only",
