@@ -12,7 +12,7 @@ const CREDENTIALS = JSON.parse(
 
 const ENVIRONMENT = functions.config().environment.name;
 const REDIRECT_URI_INDEX = ENVIRONMENT === "production" ? 2 : 1;
-const MAIN_EMAIL_ADDRESS = "calendar@test.fwd2cal.com";
+const MAIN_EMAIL_ADDRESS = "calendar@fwd2cal.com";
 
 const OPENAI_API_KEY = functions.config().environment.openai_api_key;
 const SENDGRID_API_KEY = functions.config().environment.sendgrid_api_key;
