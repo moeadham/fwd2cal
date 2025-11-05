@@ -11,8 +11,8 @@ const {processEmail} = require("./openai");
 const {addEvent, eventFromICS} = require("./calendarHelper");
 const {sendEmail: sendEmailSendgrid} = require("./sendgrid");
 const {sendEmail: sendEmailMailgun} = require("./mailgun");
-const {MAIN_EMAIL_ADDRESS,
-  API_URL} = require("./credentials");
+const {MAIN_EMAIL_ADDRESS, getApiUrl} = require("./credentials");
+const {ENVIRONMENT_NAME} = require("./config");
 const handleAsync = require("./handleAsync");
 const {mailTemplates} = require("./mailTemplates");
 const moment = require("moment-timezone");
@@ -459,7 +459,8 @@ async function addEventsAndSendResponse(oauth2Client, events, uid, sender, email
           uid: uid,
           attendees: event.attendees,
         };
-        eventObject.inviteOthersLink = `${API_URL}inviteAdditionalAttendees?${qs.stringify(params)}`;
+        const apiUrl = getApiUrl(ENVIRONMENT_NAME.value());
+        eventObject.inviteOthersLink = `${apiUrl}inviteAdditionalAttendees?${qs.stringify(params)}`;
       }
       successfulEvents.push(eventObject);
     }
@@ -528,7 +529,8 @@ async function addEventsAndSendResponse(oauth2Client, events, uid, sender, email
         uid: uid,
         attendees: eventObject.attendees.map((a) => a.email),
       };
-      const inviteLink = `${API_URL}inviteAdditionalAttendees?${qs.stringify(params)}`;
+      const apiUrl = getApiUrl(ENVIRONMENT_NAME.value());
+      const inviteLink = `${apiUrl}inviteAdditionalAttendees?${qs.stringify(params)}`;
       const inviteesWithoutHost = eventObject.attendees.filter((attendee) => attendee.email !== eventObject.organizer.email);
 
       response = {

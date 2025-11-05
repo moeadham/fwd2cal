@@ -1,12 +1,12 @@
 /* eslint-disable max-len */
 /* eslint-disable require-jsdoc */
 const axios = require("axios");
-const {GA_MEASUREMENT, GA_SECRET, ENVIRONMENT} = require("./credentials");
+const {GA_MEASUREMENT, GA_SECRET, ENVIRONMENT_NAME} = require("./config");
 const {logger} = require("firebase-functions");
 
 async function sendEvent(uid, eventName, eventParams = {}) {
-  const url = `https://www.google-analytics.com/mp/collect?measurement_id=${GA_MEASUREMENT}&api_secret=${GA_SECRET}`;
-  if (ENVIRONMENT !== "production") {
+  const url = `https://www.google-analytics.com/mp/collect?measurement_id=${GA_MEASUREMENT.value()}&api_secret=${GA_SECRET.value()}`;
+  if (ENVIRONMENT_NAME.value() !== "production") {
     eventParams.traffic_type = "internal";// Marking the event as debug mode
   }
   const eventData = {

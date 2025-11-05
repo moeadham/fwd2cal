@@ -1,7 +1,7 @@
 /* eslint-disable require-jsdoc */
 // const {logger} = require("firebase-functions");
 const {getFirestore} = require("firebase-admin/firestore");
-const {ENVIRONMENT} = require("./credentials");
+const {ENVIRONMENT_NAME} = require("./config");
 const {v4: uuidv4} = require("uuid");
 // const {logger} = require("firebase-functions");
 async function getUserFromUID(uid) {
@@ -26,7 +26,7 @@ async function findUsersWithExpiringTokens() {
   const now = new Date();
   const twoHoursLater = new Date(now.getTime() + (2 * 60 * 60 * 1000));
   let querySnapshot;
-  if (ENVIRONMENT === "production") {
+  if (ENVIRONMENT_NAME.value() === "production") {
     querySnapshot =
       await usersRef.where("expiry_date", "<=", twoHoursLater).get();
   } else {

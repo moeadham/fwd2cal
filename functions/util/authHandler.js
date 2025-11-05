@@ -7,9 +7,8 @@ const {getUserFromUID,
   getPendingEmailAddressByCode,
 } = require("./firestoreHandler");
 const {google} = require("googleapis");
-const {CREDENTIALS,
-  REDIRECT_URI_INDEX,
-} = require("./credentials");
+const {CREDENTIALS, getRedirectUriIndex} = require("./credentials");
+const {ENVIRONMENT_NAME} = require("./config");
 const {getAuth} = require("firebase-admin/auth");
 const {logger} = require("firebase-functions");
 const {isUUID} = require("validator");
@@ -44,10 +43,11 @@ async function refreshAccessToken(oauth2Client) {
 
 async function getOauthClient(uid) {
   const userData = await getUserFromUID(uid);
+  const redirectUriIndex = getRedirectUriIndex(ENVIRONMENT_NAME.value());
   const oauth2Client = new google.auth.OAuth2(
       CREDENTIALS.web.client_id,
       CREDENTIALS.web.client_secret,
-      CREDENTIALS.web.redirect_uris[REDIRECT_URI_INDEX],
+      CREDENTIALS.web.redirect_uris[redirectUriIndex],
   );
   oauth2Client.setCredentials({
     access_token: userData.access_token,
@@ -82,10 +82,11 @@ async function deleteAccount(uid) {
 
 async function signupCallbackHandler(query) {
   logger.log("oauthCallback", query);
+  const redirectUriIndex = getRedirectUriIndex(ENVIRONMENT_NAME.value());
   const oauth2Client = new google.auth.OAuth2(
       CREDENTIALS.web.client_id,
       CREDENTIALS.web.client_secret,
-      CREDENTIALS.web.redirect_uris[REDIRECT_URI_INDEX],
+      CREDENTIALS.web.redirect_uris[redirectUriIndex],
   );
   try {
     const {tokens} = await oauth2Client.getToken(query);

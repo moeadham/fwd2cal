@@ -4,16 +4,26 @@ const OpenAI = require("openai");
 const {logger} = require("firebase-functions");
 const tokenHelper = require("./tokenHelper");
 const {prompts, schemas} = require("./prompts");
-const {OPENAI_API_KEY} = require("./credentials");
-// const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const {OPENAI_API_KEY} = require("./config");
 
 const DEFAULT_TEMP = 0.1;
 const DEFAULT_MAX_TOKENS = 4096;
 const DEFAULT_MODEL = "gpt-4.1-mini-2025-04-14";// "gpt-4o-mini-2024-07-18";
 
-const openai = new OpenAI({
-  apiKey: OPENAI_API_KEY,
-});
+// Lazy initialization of OpenAI client
+let openai = null;
+const getOpenAIClient = () => {
+  if (!openai) {
+    const apiKey = OPENAI_API_KEY.value();
+    if (!apiKey) {
+      throw new Error("OpenAI API key not configured");
+    }
+    openai = new OpenAI({
+      apiKey: apiKey,
+    });
+  }
+  return openai;
+};
 
 async function defaultCompletion(messages, temperature = DEFAULT_TEMP, schema = null) {
   logger.debug(`OpenAI request with ${tokenHelper.countTokens(JSON.stringify(messages))} prompt tokens`);
@@ -35,7 +45,7 @@ async function defaultCompletion(messages, temperature = DEFAULT_TEMP, schema = 
     };
   }
 
-  const completion = await openai.chat.completions.create(requestOptions);
+  const completion = await getOpenAIClient().chat.completions.create(requestOptions);
 
   if (schema) {
     return parseJsonFromOpenAIResponse(completion);
