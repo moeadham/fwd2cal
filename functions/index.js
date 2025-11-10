@@ -10,7 +10,6 @@ const CREDENTIALS_PATH = path.join(
     "auth",
     "v2-google-auth-credentials.json",
 );
-const handleAsync = require("./util/handleAsync");
 const CREDENTIALS = JSON.parse(
     fs.readFileSync(CREDENTIALS_PATH, {encoding: "utf-8"}),
 );
@@ -22,12 +21,13 @@ const {onRequest} = require("firebase-functions/v2/https");
 const {onSchedule} = require("firebase-functions/v2/scheduler");
 const {getFirestore} = require("firebase-admin/firestore");
 const admin = require("firebase-admin");
-const busboy = require("busboy");
 const prompts = require("./util/prompts");
 const {handleEmail} = require("./util/emailHandler");
 const {inviteAdditionalAttendees} = require("./util/calendarHelper");
 const {time} = require("console");
-const {ENVIRONMENT_NAME} = require("./util/config");
+const {ENVIRONMENT_NAME, RESEND_API_KEY, RESEND_SIGNING_SECRET} = require("./util/config");
+const {Resend} = require("resend");
+const {getMockResendClient, setMockData} = require("./util/resendMock");
 
 admin.initializeApp();
 const db = getFirestore();
@@ -54,244 +54,181 @@ exports.v2signup = onRequest({cors: true}, wrapAndReport(async (req, res) => {
 }));
 
 exports.v2oauthCallback = onRequest({cors: true}, async (req, res) => {
-  const [err, userRecord] = await handleAsync(() => signupCallbackHandler(req.query));
-  if (err) {
+  try {
+    await signupCallbackHandler(req.query);
+  } catch (err) {
     logger.warn("Error in oauthCallback", err);
-    res.status(err.code).send(err.message);
+    res.status(err.code || 500).send(err.message);
     return;
   }
   res.redirect(302, "https://www.fwd2cal.com/thanks");
 });
 
-const v2sendgridCallback = onRequest(wrapAndReport(async (req, res) => {
-  if (req.method !== "POST") {
-    res.status(405).end();
-    return;
-  }
-  const bb = busboy({headers: req.headers});
-  const result = {};
-  const files = [];
-
-  bb.on("field", (fieldname, val) => {
-    result[fieldname] = val;
-  });
-
-  bb.on("file", (fieldname, file, filename, encoding, mimetype) => {
-    const fileChunks = [];
-    file.on("data", (data) => {
-      fileChunks.push(data);
-    });
-    file.on("end", () => {
-      files.push({
-        fieldname,
-        file: Buffer.concat(fileChunks),
-        filename,
-        encoding,
-        mimetype,
-      });
-    });
-  });
-
-  bb.on("finish", async () => {
-    const outcome = await handleEmail(result, files, "sendgrid");
-    res.json({message: "thanks", data: outcome});
-  });
-
-  bb.end(req.rawBody);
-}));
-
-// Export with static name for v2 compatibility
-exports.v2sendgridCallback = v2sendgridCallback;
-
-const v2mailgunCallback = onRequest(wrapAndReport(async (req, res) => {
+exports.v2resendInboundCallback = onRequest({cors: true}, wrapAndReport(async (req, res) => {
   if (req.method !== "POST") {
     res.status(405).end();
     return;
   }
 
-  // Check spam filtering headers from Mailgun
-  const spamFlag = req.headers["x-mailgun-sflag"];
-  const spamScore = parseFloat(req.headers["x-mailgun-sscore"] || "0");
+  try {
+    // Use mock client in test mode, real client in production
+    const isTestMode = ENVIRONMENT_NAME.value() === "local" || ENVIRONMENT_NAME.value() === "test";
+    const resend = isTestMode ? getMockResendClient() : new Resend(RESEND_API_KEY.value());
 
-  // Reject obvious spam (SFlag: Yes or high spam score > 0.5)
-  if (spamFlag === "Yes" || spamScore > 0.5) {
-    logger.warn(`Rejected spam email - SFlag: ${spamFlag}, SScore: ${spamScore}`);
-    res.status(200).json({message: "rejected spam"});
-    return;
-  }
+    // In test mode, set up mock data from the request
+    if (isTestMode && req.body.mockData) {
+      const emailId = req.body.data.email_id;
+      setMockData(emailId, req.body.mockData.emailContent, req.body.mockData.attachments || {});
+    }
 
-  const bb = busboy({headers: req.headers});
-  const result = {};
-  const files = [];
+    // Verify webhook signature
+    const signature = req.headers["svix-signature"];
+    const svixId = req.headers["svix-id"];
+    const svixTimestamp = req.headers["svix-timestamp"];
 
-  bb.on("field", (fieldname, val) => {
-    result[fieldname] = val;
-  });
+    if (!signature || !svixId || !svixTimestamp) {
+      logger.error("Missing Resend webhook headers");
+      res.status(401).json({error: "Unauthorized"});
+      return;
+    }
 
-  bb.on("file", (fieldname, file, filename, encoding, mimetype) => {
-    const fileChunks = [];
-    file.on("data", (data) => {
-      fileChunks.push(data);
+    // Verify the webhook signature
+    const isValid = await resend.webhooks.verify({
+      payload: JSON.stringify(req.body),
+      headers: {
+        "svix-id": svixId,
+        "svix-timestamp": svixTimestamp,
+        "svix-signature": signature,
+      },
+      secret: RESEND_SIGNING_SECRET.value(),
     });
-    file.on("end", () => {
-      files.push({
-        fieldname,
-        file: Buffer.concat(fileChunks),
-        filename,
-        encoding,
-        mimetype,
+
+    if (!isValid) {
+      logger.error("Invalid Resend webhook signature");
+      res.status(401).json({error: "Invalid signature"});
+      return;
+    }
+
+    // Extract email data from webhook
+    const webhookData = req.body;
+
+    // Only process email.received events
+    if (webhookData.type !== "email.received") {
+      logger.info("Ignoring non-email.received event", {type: webhookData.type});
+      res.status(200).json({message: "ok"});
+      return;
+    }
+
+    const {email_id, from, to, subject, attachments} = webhookData.data;
+
+    logger.info("Processing Resend email", {
+      email_id,
+      from,
+      to,
+      subject,
+      attachmentCount: attachments ? attachments.length : 0,
+    });
+
+    // Fetch full email content from Resend API
+    let emailData;
+    try {
+      emailData = await resend.emails.get(email_id);
+    } catch (emailError) {
+      logger.error("Failed to fetch email content from Resend", {
+        error: emailError.message,
+        email_id,
       });
-    });
-  });
+      res.status(500).json({error: "Failed to fetch email content"});
+      return;
+    }
 
-  bb.on("finish", async () => {
-    // Transform Mailgun format to match SendGrid format expected by handleEmail
-    const transformedEmail = transformMailgunToSendGrid(result);
+    // Extract SPF and DKIM results from authentication-results header
+    const authResults = emailData.headers?.["authentication-results"] || "";
+    const spfResult = authResults.includes("spf=pass") ? "pass" : "fail";
+    const dkimResult = authResults.includes("dkim=pass") ?
+        (authResults.match(/dkim=pass header\.i=(@[^\s;]+)/) || [null, "@unknown"])[1] + " : pass" :
+        "fail";
+
+    // Convert headers object to multiline string format
+    const headersString = Object.entries(emailData.headers || {})
+        .map(([key, value]) => `${key}: ${value}`)
+        .join("\n");
+
+    // Transform Resend format to internal format expected by handleEmail
+    const transformedEmail = {
+      subject: emailData.subject,
+      text: emailData.text || "",
+      html: emailData.html || "",
+      from: emailData.from,
+      to: Array.isArray(emailData.to) ? emailData.to.join(", ") : emailData.to,
+      headers: headersString,
+      envelope: JSON.stringify({
+        from: emailData.from,
+        to: emailData.to,
+      }),
+      SPF: spfResult,
+      dkim: `{${dkimResult}}`,
+    };
+
+    // Handle attachments if present (only ICS files)
+    const files = [];
+    if (attachments && attachments.length > 0) {
+      const icsAttachments = attachments.filter(
+          (att) => att.filename && att.filename.toLowerCase().endsWith(".ics")
+      );
+
+      for (const attachment of icsAttachments) {
+        try {
+          const attachContent = await resend.emails.getAttachment(email_id, attachment.id);
+          files.push({
+            fieldname: "attachment",
+            file: Buffer.from(attachContent),
+            filename: {filename: attachment.filename},
+            encoding: "7bit",
+            mimetype: attachment.content_type || "text/calendar",
+          });
+          logger.info("Downloaded ICS attachment", {
+            filename: attachment.filename,
+            size: attachContent.length,
+          });
+        } catch (attachError) {
+          logger.error("Failed to download attachment", {
+            error: attachError.message,
+            attachmentId: attachment.id,
+          });
+        }
+      }
+    }
 
     if (ENVIRONMENT_NAME.value() !== "production") {
-      logger.log("FULL MAILGUN EMAIL BELOW");
-      logger.log(result);
-      logger.log("TRANSFORMED EMAIL");
-      logger.log(transformedEmail);
-      logger.log(files);
+      logger.log("RESEND WEBHOOK DATA", webhookData);
+      logger.log("FETCHED EMAIL DATA", emailData);
+      logger.log("TRANSFORMED EMAIL", transformedEmail);
+      logger.log("FILES", files);
     }
 
-    const outcome = await handleEmail(transformedEmail, files, "mailgun");
-    res.json({message: "thanks", data: outcome});
-  });
-
-  bb.end(req.rawBody);
+    // Process the email
+    const outcome = await handleEmail(transformedEmail, files);
+    res.status(200).json({message: "thanks", data: outcome});
+  } catch (error) {
+    logger.error("Error processing Resend webhook", {error: error.message});
+    res.status(500).json({error: "Internal server error"});
+  }
 }));
 
-function transformMailgunToSendGrid(mailgunData) {
-  // Transform Mailgun forward webhook format to match what handleEmail expects from SendGrid
-  return {
-    // Basic email content using exact Mailgun field names
-    subject: mailgunData.subject || "",
-    text: mailgunData["body-plain"] || "",
-    html: mailgunData["body-html"] || "",
-    from: mailgunData.from || "",
-    to: mailgunData.recipient || "",
-
-    // Headers - Mailgun sends message-headers as JSON string
-    headers: constructHeadersFromMailgun(mailgunData),
-
-    // Envelope information (construct from Mailgun fields)
-    envelope: JSON.stringify({
-      from: mailgunData.sender || "",
-      to: [mailgunData.recipient || ""],
-    }),
-
-    // Spam filtering - use Mailgun DKIM/SPF if available, otherwise pass
-    SPF: getMailgunSpfResult(mailgunData),
-    dkim: getMailgunDkimResult(mailgunData),
-
-    // Additional Mailgun-specific fields for debugging
-    mailgun_timestamp: mailgunData.timestamp,
-    mailgun_signature: mailgunData.signature,
-    mailgun_token: mailgunData.token,
-    mailgun_stripped_text: mailgunData["stripped-text"],
-    mailgun_stripped_html: mailgunData["stripped-html"],
-  };
-}
-
-function constructHeadersFromMailgun(mailgunData) {
-  // Construct headers string from Mailgun's message-headers field
-  let headers = "";
-  let messageId = null;
-  let existingReferences = null;
-
-  // Parse message-headers if available (Mailgun sends this as JSON string)
-  if (mailgunData["message-headers"]) {
-    try {
-      const messageHeaders = JSON.parse(mailgunData["message-headers"]);
-      messageHeaders.forEach(([key, value]) => {
-        headers += `${key}: ${value}\n`;
-
-        // Extract Message-Id for threading
-        if (key === "Message-Id") {
-          messageId = value;
-        }
-        // Extract existing References chain
-        if (key === "References") {
-          existingReferences = value;
-        }
-      });
-    } catch (error) {
-      logger.warn("Error parsing message-headers", error);
-    }
-  }
-
-  // Fallback to individual fields if message-headers not available or failed to parse
-  if (!headers) {
-    if (mailgunData.timestamp) {
-      const date = new Date(parseInt(mailgunData.timestamp) * 1000).toUTCString();
-      headers += `Date: ${date}\n`;
-    }
-    if (mailgunData.subject) headers += `Subject: ${mailgunData.subject}\n`;
-    if (mailgunData.from) headers += `From: ${mailgunData.from}\n`;
-    if (mailgunData.recipient) headers += `To: ${mailgunData.recipient}\n`;
-  }
-
-  // Add threading headers for responses if we have a Message-Id
-  if (messageId) {
-    // For threading, our reply should have:
-    // In-Reply-To: the original Message-Id
-    // References: existing References + original Message-Id
-    headers += `In-Reply-To: ${messageId}\n`;
-
-    if (existingReferences) {
-      headers += `References: ${existingReferences} ${messageId}\n`;
-    } else {
-      headers += `References: ${messageId}\n`;
-    }
-  }
-
-  return headers;
-}
-
-function getMailgunSpfResult(mailgunData) {
-  // Check message-headers for X-Mailgun-Spf
-  if (mailgunData["message-headers"]) {
-    try {
-      const messageHeaders = JSON.parse(mailgunData["message-headers"]);
-      const spfHeader = messageHeaders.find(([key]) => key === "X-Mailgun-Spf");
-      return spfHeader && spfHeader[1] === "Pass" ? "pass" : "pass"; // Default to pass
-    } catch (error) {
-      logger.warn("Error parsing SPF from message-headers", error);
-    }
-  }
-  return "pass"; // Default to pass since we filtered spam at header level
-}
-
-function getMailgunDkimResult(mailgunData) {
-  // Check message-headers for X-Mailgun-Dkim-Check-Result
-  if (mailgunData["message-headers"]) {
-    try {
-      const messageHeaders = JSON.parse(mailgunData["message-headers"]);
-      const dkimHeader = messageHeaders.find(([key]) => key === "X-Mailgun-Dkim-Check-Result");
-      return dkimHeader && dkimHeader[1] === "Pass" ? "pass" : "pass"; // Default to pass
-    } catch (error) {
-      logger.warn("Error parsing DKIM from message-headers", error);
-    }
-  }
-  return "pass"; // Default to pass since we filtered spam at header level
-}
-
-// Export with static name for v2 compatibility
-exports.v2mailgunCallback = v2mailgunCallback;
-
 exports.v2verifyAdditionalEmail = onRequest({cors: true}, wrapAndReport(async (req, res) => {
-  const [err, addUserRecord] = await handleAsync(() => verifyAdditionalEmail(req, res));
-  if (err) {
+  try {
+    await verifyAdditionalEmail(req, res);
+  } catch (err) {
     logger.warn("Error in addUserRecord", err);
     return res.redirect(302, "https://www.fwd2cal.com/404");
   }
 }));
 
 exports.v2inviteAdditionalAttendees = onRequest({cors: true}, wrapAndReport(async (req, res) => {
-  const [err, addUserRecord] = await handleAsync(() => inviteAdditionalAttendees(req, res));
-  if (err) {
+  try {
+    await inviteAdditionalAttendees(req, res);
+  } catch (err) {
     logger.warn("Error in inviteAdditionalAttendees", err);
     return res.redirect(302, "https://www.fwd2cal.com/404");
   }

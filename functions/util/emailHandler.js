@@ -9,8 +9,7 @@ const {getOauthClient,
   deleteAccount} = require("./authHandler");
 const {processEmail} = require("./openai");
 const {addEvent, eventFromICS} = require("./calendarHelper");
-const {sendEmail: sendEmailSendgrid} = require("./sendgrid");
-const {sendEmail: sendEmailMailgun} = require("./mailgun");
+const sendEmailResend = require("./resend");
 const {MAIN_EMAIL_ADDRESS, getApiUrl} = require("./credentials");
 const {ENVIRONMENT_NAME} = require("./config");
 const handleAsync = require("./handleAsync");
@@ -96,11 +95,7 @@ const EMAIL_RESPONSES = {
   },
 };
 
-function getSendEmailFunction(emailService) {
-  return emailService === "mailgun" ? sendEmailMailgun : sendEmailSendgrid;
-}
-
-async function handleEmail(email, files, emailService = "sendgrid") {
+async function handleEmail(email, files) {
   // Do we know this user?
   const sender = getSenderFromRawEmail(email);
   // Is the email sender verified?
@@ -112,7 +107,7 @@ async function handleEmail(email, files, emailService = "sendgrid") {
         FROM_EMAIL: sender,
       },
     };
-    await sendEmailResponse(sender, email, response, true, emailService);
+    await sendEmailResponse(sender, email, response, true);
     return {error: "Unverified email address"};
   }
   // Is this a support email?
@@ -120,7 +115,7 @@ async function handleEmail(email, files, emailService = "sendgrid") {
   if (to.includes("support@fwd2cal.com") ||
       to.includes("admin@fwd2cal.com") ||
       email.subject.toLowerCase().startsWith("verify your email address")) { // To handle google account creation.
-    return await sendToSupport(sender, email, emailService);
+    return await sendToSupport(sender, email);
   }
 
   const uid = await getUserFromEmail(sender);
@@ -132,7 +127,7 @@ async function handleEmail(email, files, emailService = "sendgrid") {
         FROM_EMAIL: sender,
       },
     };
-    await sendEmailResponse(sender, email, response, true, emailService);
+    await sendEmailResponse(sender, email, response, true);
     return {result: `${sender} has been invited to signup`};
   }
   const subjectAction = understandSubject(email.subject);
@@ -140,30 +135,30 @@ async function handleEmail(email, files, emailService = "sendgrid") {
   sendEvent(uid, subjectAction);
   switch (subjectAction) {
     case "addUser":
-      return await addEmailAddressToUser(email, sender, uid, files, emailService);
+      return await addEmailAddressToUser(email, sender, uid, files);
     case "removeEmail":
-      return await removeEmailAddressFromUser(email, sender, uid, files, emailService);
+      return await removeEmailAddressFromUser(email, sender, uid, files);
     case "deleteAccount":
-      return await deleteUserAccount(email, sender, uid, files, emailService);
+      return await deleteUserAccount(email, sender, uid, files);
     case "addEvent":
-      return await eventHandler(email, sender, uid, files, emailService);
+      return await eventHandler(email, sender, uid, files);
     default:
-      return await eventHandler(email, sender, uid, files, emailService);
+      return await eventHandler(email, sender, uid, files);
   }
 }
 
-async function sendToSupport(sender, email, emailService = "sendgrid") {
+async function sendToSupport(sender, email) {
   logger.log(`Support email received from ${sender}`);
   logger.log(email.subject);
   logger.log(email.text);
   const content = `From: ${sender} <br><br> Subject: ${email.subject} <br><br> ${email.html}`;
-  const sendEmail = getSendEmailFunction(emailService);
-  await sendEmail({
-    to: "fwd2cal@googlegroups.com",
-    from: MAIN_EMAIL_ADDRESS,
-    subject: email.subject,
-    html: content,
-  });
+  await sendEmailResend(
+    "fwd2cal@googlegroups.com",
+    MAIN_EMAIL_ADDRESS,
+    email.subject,
+    content,
+    content,
+  );
   return {result: `email forwarded to support group.`};
 }
 
@@ -182,19 +177,19 @@ function understandSubject(subject) {
   }
 }
 
-async function deleteUserAccount(email, sender, uid, files = [], emailService = "sendgrid") {
+async function deleteUserAccount(email, sender, uid, files = []) {
   await deleteUser(uid);
   await deleteAccount(uid);
   const response = {
     ...EMAIL_RESPONSES.userDeleted,
     replace: {},
   };
-  await sendEmailResponse(sender, email, response, true, emailService);
+  await sendEmailResponse(sender, email, response, true);
   return `${uid} account deleted.`;
 }
 
 
-async function removeEmailAddressFromUser(email, sender, uid, files = [], emailService = "sendgrid") {
+async function removeEmailAddressFromUser(email, sender, uid, files = []) {
   // TODO: Make sure sender is the main account? Let's see if this goes wrong.
   const subject = email.subject;
   const emailRegex = /^remove\s+([a-zA-Z0-9._+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6})$/;
@@ -203,7 +198,7 @@ async function removeEmailAddressFromUser(email, sender, uid, files = [], emailS
     logger.log(`Email that starts with 'remove' but doesn't 
       have a valid email address after it.`);
     logger.log(`Subject: ${email.subject}`);
-    return await eventHandler(email, sender, uid, files, emailService);
+    return await eventHandler(email, sender, uid, files);
   }
   const emailAddressToRemove = match[1];
   // Check if the email address is already added.
@@ -219,7 +214,7 @@ async function removeEmailAddressFromUser(email, sender, uid, files = [], emailS
       },
     };
     logger.log(`Sending email additionalEmailInUse to ${sender}`);
-    return await sendEmailResponse(sender, email, response, true, emailService);
+    return await sendEmailResponse(sender, email, response, true);
   } else {
     await removeEmailAddress(emailAddressToRemove);
     logger.log(`${uid} to removed
@@ -230,12 +225,12 @@ async function removeEmailAddressFromUser(email, sender, uid, files = [], emailS
         EMAIL_TO_REMOVE: emailAddressToRemove,
       },
     };
-    await sendEmailResponse(sender, email, response, true, emailService);
+    await sendEmailResponse(sender, email, response, true);
     return `${emailAddressToRemove} removed.`;
   }
 }
 
-async function addEmailAddressToUser(email, sender, uid, files = [], emailService = "sendgrid") {
+async function addEmailAddressToUser(email, sender, uid, files = []) {
   // TODO: Make sure sender is the main account? Let's see if this goes wrong.
   const subject = email.subject;
   const emailRegex = /^add\s+([a-zA-Z0-9._+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6})$/;
@@ -243,7 +238,7 @@ async function addEmailAddressToUser(email, sender, uid, files = [], emailServic
   if (!match) {
     logger.log(`Email that starts with 'add' but doesn't 
       have a valid email address after it.`);
-    return await eventHandler(email, sender, uid, files, emailService);
+    return await eventHandler(email, sender, uid, files);
   }
   const emailAddressToAdd = match[1];
   // Check if the email address is already added.
@@ -259,7 +254,7 @@ async function addEmailAddressToUser(email, sender, uid, files = [], emailServic
       },
     };
     logger.log(`Sending email additionalEmailInUse to ${sender}`);
-    return await sendEmailResponse(sender, email, response, true, emailService);
+    return await sendEmailResponse(sender, email, response, true);
   }
   const verificationCode = await addPendingEmailAddress(uid, emailAddressToAdd);
   // Send email to the user with the verification code.
@@ -273,18 +268,18 @@ async function addEmailAddressToUser(email, sender, uid, files = [], emailServic
   logger.log(
       // eslint-disable-next-line max-len
       `Sending email addAdditionalEmailAddress ${emailAddressToAdd} to pending list for ${uid}`);
-  await sendEmailResponse(emailAddressToAdd, email, response, false, emailService);
+  await sendEmailResponse(emailAddressToAdd, email, response, false);
   return {verificationCode};
 }
 
-async function eventHandler(email, sender, uid, files = [], emailService = "sendgrid") {
+async function eventHandler(email, sender, uid, files = []) {
   // logger.log("User ID: ", uid);
 
   // Can we authenticate with their calendar?
   const [oauthErr, oauth2Client] = await handleAsync(() => getOauthClient(uid));
   if (oauthErr) {
     logger.warn("Error getting OAuth client: ", oauthErr);
-    await sendEmailResponse(sender, email, EMAIL_RESPONSES.oauthFailed, true, emailService);
+    await sendEmailResponse(sender, email, EMAIL_RESPONSES.oauthFailed, true);
     sendEvent(uid, "addEvent", {result: "oauthFailed"});
     return;
   }
@@ -309,11 +304,11 @@ async function eventHandler(email, sender, uid, files = [], emailService = "send
 
   if (!event) {
     // Can we get event details from the thread with AI?
-    const headers = getEmailHeaders(email.headers, ["Date", "Subject", "From"]);
+    const headers = getEmailHeaders(email.headers, ["date", "subject", "from"]);
     const [processEmailErr, aiEvent] = await handleAsync(() => processEmail(email, headers));
     if (processEmailErr) {
       logger.warn("OpenAI error: ", processEmailErr);
-      await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true, emailService);
+      await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true);
       sendEvent(uid, "addEvent", {result: "aiUnableToParse"});
       return;
     }
@@ -326,7 +321,7 @@ async function eventHandler(email, sender, uid, files = [], emailService = "send
         },
       };
       logger.warn("Error in email contents: ", aiEvent);
-      await sendEmailResponse(sender, email, response, true, emailService);
+      await sendEmailResponse(sender, email, response, true);
       sendEvent(uid, "addEvent", {result: "aiUnableToParse"});
       return aiEvent;
     } else {
@@ -334,7 +329,7 @@ async function eventHandler(email, sender, uid, files = [], emailService = "send
       if (aiEvent.events && Array.isArray(aiEvent.events)) {
         if (aiEvent.events.length === 0) {
           logger.warn("No events found in email");
-          await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true, emailService);
+          await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true);
           sendEvent(uid, "addEvent", {result: "aiUnableToParse"});
           return;
         }
@@ -357,13 +352,13 @@ async function eventHandler(email, sender, uid, files = [], emailService = "send
 
         if (aiEvent.events.length === 0) {
           logger.warn("All events had invalid times");
-          await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true, emailService);
+          await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true);
           sendEvent(uid, "addEvent", {result: "aiUnableToParse"});
           return;
         }
 
         // Process multiple events
-        return addEventsAndSendResponse(oauth2Client, aiEvent.events, uid, sender, email, emailService);
+        return addEventsAndSendResponse(oauth2Client, aiEvent.events, uid, sender, email);
       } else {
         // Old single event format (backward compatibility)
         event = aiEvent;
@@ -372,19 +367,19 @@ async function eventHandler(email, sender, uid, files = [], emailService = "send
         const timeValidation = validateEventTimes(event);
         if (!timeValidation.isValid) {
           logger.warn(`Invalid event times from AI: ${timeValidation.error}`);
-          await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true, emailService);
+          await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true);
           sendEvent(uid, "addEvent", {result: "aiUnableToParse"});
           return;
         }
 
         // Convert to array format
-        return addEventsAndSendResponse(oauth2Client, [event], uid, sender, email, emailService);
+        return addEventsAndSendResponse(oauth2Client, [event], uid, sender, email);
       }
     }
   }
 
   // Handle ICS event (convert to array format)
-  return addEventsAndSendResponse(oauth2Client, [event], uid, sender, email, emailService);
+  return addEventsAndSendResponse(oauth2Client, [event], uid, sender, email);
 }
 
 function validateEventTimes(event) {
@@ -425,7 +420,7 @@ function isValidEmail(email) {
   return emailRegex.test(email);
 }
 
-async function addEventsAndSendResponse(oauth2Client, events, uid, sender, email, emailService = "sendgrid") {
+async function addEventsAndSendResponse(oauth2Client, events, uid, sender, email) {
   const successfulEvents = [];
   const failedEvents = [];
 
@@ -468,7 +463,7 @@ async function addEventsAndSendResponse(oauth2Client, events, uid, sender, email
 
   // If all events failed, send oauth failed response
   if (successfulEvents.length === 0) {
-    await sendEmailResponse(sender, email, EMAIL_RESPONSES.oauthFailed, true, emailService);
+    await sendEmailResponse(sender, email, EMAIL_RESPONSES.oauthFailed, true);
     return;
   }
 
@@ -557,7 +552,7 @@ async function addEventsAndSendResponse(oauth2Client, events, uid, sender, email
       };
     }
 
-    await sendEmailResponse(sender, email, response, true, emailService);
+    await sendEmailResponse(sender, email, response, true);
   } else {
     // Multiple events - send custom HTML email
     const customHtml = `
@@ -566,14 +561,14 @@ ${responseHtml}
 <br><br>You can always ask for help: <a href="mailto:support@fwd2cal.com">support@fwd2cal.com</a><br>
     `;
 
-    const sendEmail = getSendEmailFunction(emailService);
-    await sendEmail({
-      to: sender,
-      from: MAIN_EMAIL_ADDRESS,
-      subject: `Re: ${email.subject}`,
-      html: threadEmailHtml(email, customHtml),
-      headers: getEmailThreadHeaders(email.headers),
-    });
+    await sendEmailResend(
+      sender,
+      MAIN_EMAIL_ADDRESS,
+      `Re: ${email.subject}`,
+      customHtml, // text version
+      threadEmailHtml(email, customHtml), // html version
+      getEmailThreadHeaders(email.headers),
+    );
   }
 
   // Return single event for backward compatibility, array for multiple
@@ -693,8 +688,7 @@ function getSubject(messageType) {
 async function sendEmailResponse(sender,
     originalEmail,
     messageType,
-    includeThread,
-    emailService = "sendgrid") {
+    includeThread) {
   let html = getHtml(messageType);
   let subject = originalEmail.subject;
   if (messageType.subject) {
@@ -703,14 +697,14 @@ async function sendEmailResponse(sender,
   if (includeThread) {
     html = threadEmailHtml(originalEmail, html);
   }
-  const sendEmail = getSendEmailFunction(emailService);
-  await sendEmail({
-    to: sender,
-    from: MAIN_EMAIL_ADDRESS,
-    subject: subject,
-    html: html,
-    headers: getEmailThreadHeaders(originalEmail.headers),
-  });
+  await sendEmailResend(
+    sender,
+    MAIN_EMAIL_ADDRESS,
+    subject,
+    html,
+    html,
+    getEmailThreadHeaders(originalEmail.headers)
+  );
 }
 
 function verifyEmail(email) {

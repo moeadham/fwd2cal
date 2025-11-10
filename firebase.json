@@ -80,12 +80,8 @@
         "function": "v2signup"
       },
       {
-        "source": "/v2/mailgunCallback",
-        "function": "v2mailgunCallback"
-      },
-      {
-        "source": "/v2/sendgridCallback",
-        "function": "v2sendgridCallback"
+        "source": "/v2/resendInboundCallback",
+        "function": "v2resendInboundCallback"
       }
     ]
   }

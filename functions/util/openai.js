@@ -87,9 +87,9 @@ function parseJsonFromOpenAIResponse(completion) {
 
 async function processEmail(email, headers) {
   const text = `
-  Date: ${headers.Date}
-  Subject: ${headers.Subject}
-  From: ${headers.From}
+  Date: ${headers.date}
+  Subject: ${headers.subject}
+  From: ${headers.from}
   ${email.text}`;
 
   // logger.log(text);
