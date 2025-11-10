@@ -3,7 +3,7 @@ const path = require("path");
 
 const CREDENTIALS_PATH = path.join(
     "auth",
-    "google-auth-credentials.json",
+    "v2-google-auth-credentials.json",
 );
 
 const CREDENTIALS = JSON.parse(
@@ -19,8 +19,8 @@ const getRedirectUriIndex = (environment) => {
 
 const getApiUrl = (environment) => {
   return environment === "production" ?
-      "https://app.fwd2cal.com/auth/" :
-      "http://127.0.0.1:5001/fwd2cal/us-central1/";
+      "https://app.fwd2cal.com/v2/" :
+      "http://127.0.0.1:5002/v2/";
 };
 
 module.exports = {

@@ -14,10 +14,10 @@ const bindings = EMAIL_SERVICE === "mailgun" ?
 
 chai.use(chaiHttp);
 const expect = chai.expect;
-const apiURL = "http://127.0.0.1:5001/fwd2cal/us-central1"; // URL of your Vercel dev server
+const apiURL = "http://127.0.0.1:5002"; // URL of your Vercel dev server
 
 // Dynamic endpoint and attachment field based on email service
-const CALLBACK_ENDPOINT = EMAIL_SERVICE === "mailgun" ? "/mailgunCallback" : "/sendgridCallback";
+const CALLBACK_ENDPOINT = EMAIL_SERVICE === "mailgun" ? "/v2/mailgunCallback" : "/v2/sendgridCallback";
 const ATTACHMENT_FIELD = EMAIL_SERVICE === "mailgun" ? "attachment-1" : "attachment";
 
 const TESTER_PRIMARY_GOOGLE_ACCT = process.env.TESTER_PRIMARY_GOOGLE_ACCT;
@@ -26,7 +26,7 @@ const TESTER_SECONDARY_EMAIL_ACCT = process.env.TESTER_SECONDARY_EMAIL_ACCT;
 describe(`fwd2cal (${EMAIL_SERVICE.toUpperCase()})`, () => {
   it("UT00 get login URL and wait for tester to create account", (done) => {
     chai.request(apiURL)
-        .get("/signup")
+        .get("/v2/signup")
         .redirects(0) // Prevent automatic following of redirects
         .end((err, res) => {
           expect(res).to.have.status(302); // Check that the status is 302
@@ -102,7 +102,7 @@ describe(`fwd2cal (${EMAIL_SERVICE.toUpperCase()})`, () => {
     });
   });
   it("UT04 approve new email address via request", (done) => {
-    const req = chai.request(apiURL).post("/verifyAdditionalEmail").query({uuid: verificationCode});
+    const req = chai.request(apiURL).post("/v2/verifyAdditionalEmail").query({uuid: verificationCode});
     req.end((err, res) => {
       expect(err).to.be.null;
       expect(res).to.have.status(200);

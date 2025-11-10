@@ -8,7 +8,7 @@ const fs = require("fs");
 const path = require("path");
 const CREDENTIALS_PATH = path.join(
     "auth",
-    "google-auth-credentials.json",
+    "v2-google-auth-credentials.json",
 );
 const handleAsync = require("./util/handleAsync");
 const CREDENTIALS = JSON.parse(
@@ -47,13 +47,13 @@ const DEFAULT_EVENT_LENGTH = 30;
 // endpoint names are no longer supported. Use URL rewriting in firebase.json
 // or a proxy to achieve endpoint obfuscation if needed.
 
-exports.signup = onRequest({cors: true}, wrapAndReport(async (req, res) => {
+exports.v2signup = onRequest({cors: true}, wrapAndReport(async (req, res) => {
   const redirectUriIndex = ENVIRONMENT_NAME.value() === "production" ? 2 : 1;
   const signupUrl = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${CREDENTIALS.web.client_id}&redirect_uri=${CREDENTIALS.web.redirect_uris[redirectUriIndex]}&scope=https://www.googleapis.com/auth/calendar+https://www.googleapis.com/auth/userinfo.email+https://www.googleapis.com/auth/userinfo.profile+openid&access_type=offline&prompt=consent`;
   res.redirect(302, signupUrl);
 }));
 
-exports.oauthCallback = onRequest({cors: true}, async (req, res) => {
+exports.v2oauthCallback = onRequest({cors: true}, async (req, res) => {
   const [err, userRecord] = await handleAsync(() => signupCallbackHandler(req.query));
   if (err) {
     logger.warn("Error in oauthCallback", err);
@@ -63,7 +63,7 @@ exports.oauthCallback = onRequest({cors: true}, async (req, res) => {
   res.redirect(302, "https://www.fwd2cal.com/thanks");
 });
 
-const sendgridCallback = onRequest(wrapAndReport(async (req, res) => {
+const v2sendgridCallback = onRequest(wrapAndReport(async (req, res) => {
   if (req.method !== "POST") {
     res.status(405).end();
     return;
@@ -101,9 +101,9 @@ const sendgridCallback = onRequest(wrapAndReport(async (req, res) => {
 }));
 
 // Export with static name for v2 compatibility
-exports.sendgridCallback = sendgridCallback;
+exports.v2sendgridCallback = v2sendgridCallback;
 
-const mailgunCallback = onRequest(wrapAndReport(async (req, res) => {
+const v2mailgunCallback = onRequest(wrapAndReport(async (req, res) => {
   if (req.method !== "POST") {
     res.status(405).end();
     return;
@@ -279,9 +279,9 @@ function getMailgunDkimResult(mailgunData) {
 }
 
 // Export with static name for v2 compatibility
-exports.mailgunCallback = mailgunCallback;
+exports.v2mailgunCallback = v2mailgunCallback;
 
-exports.verifyAdditionalEmail = onRequest({cors: true}, wrapAndReport(async (req, res) => {
+exports.v2verifyAdditionalEmail = onRequest({cors: true}, wrapAndReport(async (req, res) => {
   const [err, addUserRecord] = await handleAsync(() => verifyAdditionalEmail(req, res));
   if (err) {
     logger.warn("Error in addUserRecord", err);
@@ -289,7 +289,7 @@ exports.verifyAdditionalEmail = onRequest({cors: true}, wrapAndReport(async (req
   }
 }));
 
-exports.inviteAdditionalAttendees = onRequest({cors: true}, wrapAndReport(async (req, res) => {
+exports.v2inviteAdditionalAttendees = onRequest({cors: true}, wrapAndReport(async (req, res) => {
   const [err, addUserRecord] = await handleAsync(() => inviteAdditionalAttendees(req, res));
   if (err) {
     logger.warn("Error in inviteAdditionalAttendees", err);
@@ -297,7 +297,7 @@ exports.inviteAdditionalAttendees = onRequest({cors: true}, wrapAndReport(async 
   }
 }));
 
-exports.refreshTokensScheduled = onSchedule({
+exports.v2refreshTokensScheduled = onSchedule({
   schedule: "0 * * * *",
   timeZone: "America/New_York", // Users can choose timezone - default is America/Los_Angeles
 }, wrapAndReport(async (context) => {
