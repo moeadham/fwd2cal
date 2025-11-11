@@ -11,6 +11,7 @@ const ENVIRONMENT_NAME = defineString("ENVIRONMENT_NAME", {
 });
 
 const OPENAI_API_KEY = defineString("OPENAI_API_KEY");
+const OPENROUTER_API_KEY = defineString("OPENROUTER_API_KEY");
 const SENTRY_DSN = defineString("SENTRY_DSN");
 const GA_MEASUREMENT = defineString("GA_MEASUREMENT");
 const GA_SECRET = defineString("GA_SECRET");
@@ -23,6 +24,7 @@ const MAIN_EMAIL_ADDRESS = "calendar@fwd2cal.com";
 module.exports = {
   ENVIRONMENT_NAME,
   OPENAI_API_KEY,
+  OPENROUTER_API_KEY,
   SENTRY_DSN,
   GA_MEASUREMENT,
   GA_SECRET,

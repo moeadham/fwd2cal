@@ -1,31 +1,34 @@
 /* eslint-disable require-jsdoc */
 /* eslint-disable max-len */
 const OpenAI = require("openai");
+const {zodResponseFormat} = require("openai/helpers/zod");
 const {logger} = require("firebase-functions");
 const tokenHelper = require("./tokenHelper");
-const {prompts, schemas} = require("./prompts");
-const {OPENAI_API_KEY} = require("./config");
+const {prompts} = require("./prompts");
+const {EventDataSchema, TimezoneSchema, ICSParserSchema} = require("./schemas.zod");
+const {OPENROUTER_API_KEY} = require("./config");
 
 const DEFAULT_TEMP = 0.1;
 const DEFAULT_MAX_TOKENS = 4096;
-const DEFAULT_MODEL = "gpt-4.1-mini-2025-04-14";// "gpt-4o-mini-2024-07-18";
+const DEFAULT_MODEL = "openai/gpt-4.1-mini";
 
-// Lazy initialization of OpenAI client
+// Lazy initialization of OpenAI client configured for OpenRouter
 let openai = null;
 const getOpenAIClient = () => {
   if (!openai) {
-    const apiKey = OPENAI_API_KEY.value();
+    const apiKey = OPENROUTER_API_KEY.value();
     if (!apiKey) {
-      throw new Error("OpenAI API key not configured");
+      throw new Error("OpenRouter API key not configured");
     }
     openai = new OpenAI({
       apiKey: apiKey,
+      baseURL: "https://openrouter.ai/api/v1",
     });
   }
   return openai;
 };
 
-async function defaultCompletion(messages, temperature = DEFAULT_TEMP, schema = null) {
+async function defaultCompletion(messages, temperature = DEFAULT_TEMP, zodSchema = null) {
   logger.debug(`OpenAI request with ${tokenHelper.countTokens(JSON.stringify(messages))} prompt tokens`);
 
   const requestOptions = {
@@ -35,54 +38,33 @@ async function defaultCompletion(messages, temperature = DEFAULT_TEMP, schema = 
     max_tokens: DEFAULT_MAX_TOKENS,
   };
 
-  if (schema) {
-    requestOptions.response_format = {
-      type: "json_schema",
-      json_schema: {
-        name: "response",
-        schema: schema,
-      },
-    };
-  }
+  if (zodSchema) {
+    // Use structured output with Zod schema
+    requestOptions.response_format = zodResponseFormat(zodSchema, "response");
+    const completion = await getOpenAIClient().chat.completions.parse(requestOptions);
 
-  const completion = await getOpenAIClient().chat.completions.create(requestOptions);
+    if (!completion) {
+      logger.error("Completion is null");
+      throw new Error("Completion is null");
+    }
+    if (!completion.choices || !completion.choices[0]) {
+      logger.error("No choices in completion");
+      logger.error(JSON.stringify(completion, null, 2));
+      throw new Error("No choices in completion");
+    }
+    if (completion.choices[0].finish_reason !== "stop") {
+      logger.error(`Unexpected finish reason: ${completion.choices[0].finish_reason}`);
+      logger.error(JSON.stringify(completion, null, 2));
+      throw new Error(`Unexpected finish reason: ${completion.choices[0].finish_reason}`);
+    }
 
-  if (schema) {
-    return parseJsonFromOpenAIResponse(completion);
+    logger.debug(`OpenAI tokens used: ${completion.usage.total_tokens}`);
+    return completion.choices[0].message.parsed;
   } else {
+    // Regular text completion without structured output
+    const completion = await getOpenAIClient().chat.completions.create(requestOptions);
     return completion.choices[0].message.content;
   }
-}
-
-function parseJsonFromOpenAIResponse(completion) {
-  let response;
-  if (!completion) {
-    logger.warn(`Completion is null`);
-    logger.warn(JSON.stringify(completion, null, 2));
-    throw new Error("Completion is null");
-  }
-  if (!completion.choices || !completion.choices[0]) {
-    logger.error(`No choices in completion`);
-    logger.error(JSON.stringify(completion, null, 2));
-    throw new Error("No choices in completion");
-  }
-  if (completion.choices[0].finish_reason !== "stop") {
-    logger.error(`Unexpected finish reason: ${completion.choices[0].finish_reason}`);
-    logger.error(JSON.stringify(completion, null, 2));
-    throw new Error(`Unexpected finish reason: ${completion.choices[0].finish_reason}`);
-  }
-  if (!completion.choices[0].message || !completion.choices[0].message.content) {
-    logger.error(`No content in completion message`);
-    logger.error(JSON.stringify(completion, null, 2));
-    throw new Error("No content in completion message");
-  }
-  try {
-    response = JSON.parse(completion.choices[0].message.content);
-  } catch (error) {
-    throw new Error("Non JSON response received. Try again.");
-  }
-  logger.debug(`OpenAI tokens used: ${completion.usage.total_tokens}`);
-  return response;
 }
 
 async function processEmail(email, headers) {
@@ -109,8 +91,8 @@ async function processEmail(email, headers) {
   ];
 
   const [eventResponse, timezoneResponse] = await Promise.all([
-    defaultCompletion(eventMessages, DEFAULT_TEMP, schemas.eventData),
-    defaultCompletion(timezoneMessages, DEFAULT_TEMP, schemas.timezone),
+    defaultCompletion(eventMessages, DEFAULT_TEMP, EventDataSchema),
+    defaultCompletion(timezoneMessages, DEFAULT_TEMP, TimezoneSchema),
   ]);
 
   // Clean up undefined values
@@ -163,7 +145,7 @@ async function parseICS(ics) {
     },
     {role: "user", content: ics},
   ];
-  return await defaultCompletion(messages, DEFAULT_TEMP, schemas.icsParser);
+  return await defaultCompletion(messages, DEFAULT_TEMP, ICSParserSchema);
 }
 
 module.exports = {

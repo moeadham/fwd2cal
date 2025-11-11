@@ -29,7 +29,8 @@
     "resend": "^4.0.0",
     "underscore": "^1.13.6",
     "uuid": "^9.0.1",
-    "validator": "^13.11.0"
+    "validator": "^13.11.0",
+    "zod": "^4.1.12"
   },
   "devDependencies": {
     "@google-cloud/pubsub": "^4.3.3",
