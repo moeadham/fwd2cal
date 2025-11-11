@@ -199,6 +199,7 @@ describe(`fwd2cal (${EMAIL_SERVICE.toUpperCase()})`, () => {
           expect(err).to.be.null;
           expect(res).to.have.status(200);
           console.log(res.body.data);
+          console.log(res.body.sentEmail);
           // Should get added to owners calendar.
           expect(res.body).to.be.an("object");
           expect(res.body.data).to.be.an("object");
@@ -211,6 +212,10 @@ describe(`fwd2cal (${EMAIL_SERVICE.toUpperCase()})`, () => {
           expect(res.body.sentEmail).to.be.an("object");
           expect(res.body.sentEmail.headers["In-Reply-To"]).to.equal("<original-message-7>");
           expect(res.body.sentEmail.headers["References"]).to.equal("<original-message-7>");
+
+          // Verify sent email HTML contains invite link
+          expect(res.body.sentEmail.html).to.be.a("string");
+          expect(res.body.sentEmail.html).to.include("/v2/inviteAdditionalAttendees");
 
           done();
         });

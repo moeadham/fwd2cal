@@ -455,6 +455,7 @@ async function addEventsAndSendResponse(oauth2Client, events, uid, sender, email
         };
         const apiUrl = getApiUrl(ENVIRONMENT_NAME.value());
         eventObject.inviteOthersLink = `${apiUrl}inviteAdditionalAttendees?${qs.stringify(params)}`;
+        eventObject.inviteOthersAttendees = event.attendees;
       }
       successfulEvents.push(eventObject);
     }
@@ -516,16 +517,8 @@ async function addEventsAndSendResponse(oauth2Client, events, uid, sender, email
     const eventObject = successfulEvents[0];
     let response;
 
-    if (eventObject.attendees && eventObject.attendees.length > 1) {
-      const params = {
-        eventId: eventObject.id,
-        calendarId: eventObject.calendarId,
-        uid: uid,
-        attendees: eventObject.attendees.map((a) => a.email),
-      };
-      const apiUrl = getApiUrl(ENVIRONMENT_NAME.value());
-      const inviteLink = `${apiUrl}inviteAdditionalAttendees?${qs.stringify(params)}`;
-      const inviteesWithoutHost = eventObject.attendees.filter((attendee) => attendee.email !== eventObject.organizer.email);
+    if (eventObject.inviteOthersLink) {
+      const inviteesWithoutHost = eventObject.inviteOthersAttendees.filter((email) => email !== eventObject.organizer.email);
 
       response = {
         ...EMAIL_RESPONSES.eventAddedAttendees,
@@ -534,8 +527,8 @@ async function addEventsAndSendResponse(oauth2Client, events, uid, sender, email
           EVENT_DATE: moment(eventObject.start.dateTime)
               .tz(eventObject.start.timeZone)
               .format("dddd, MMMM Do [at] h:mm A z"),
-          INVITE_LINK: inviteLink,
-          EVENT_ATTENDEES: inviteesWithoutHost.map((a) => a.email).join(", "),
+          INVITE_LINK: eventObject.inviteOthersLink,
+          EVENT_ATTENDEES: inviteesWithoutHost.join(", "),
         },
       };
     } else {
