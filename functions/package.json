@@ -23,7 +23,7 @@
     "googleapis": "^134.0.0",
     "js-tiktoken": "^1.0.10",
     "moment-timezone": "^0.5.45",
-    "node-ical": "^0.18.0",
+    "node-ical": "^0.22.1",
     "openai": "^6.8.0",
     "qs": "^6.12.1",
     "resend": "^4.0.0",
