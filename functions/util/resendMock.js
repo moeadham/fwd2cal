@@ -6,6 +6,7 @@
 class MockResend {
   constructor() {
     this.testData = {};
+    this.sentEmails = {}; // Store sent emails for verification
   }
 
   // Set test data for a specific email ID
@@ -19,6 +20,12 @@ class MockResend {
   // Clear all test data
   clearTestData() {
     this.testData = {};
+    this.sentEmails = {};
+  }
+
+  // Get the last sent email to a specific recipient
+  getLastSentEmail(to) {
+    return this.sentEmails[to] || null;
   }
 
   // Mock webhooks.verify - always returns true in test mode
@@ -62,7 +69,18 @@ class MockResend {
     },
 
     send: async (message) => {
-      // Mock email sending - just return success
+      // Store the complete email data for test verification
+      const recipient = Array.isArray(message.to) ? message.to[0] : message.to;
+      this.sentEmails[recipient] = {
+        to: message.to,
+        from: message.from,
+        subject: message.subject,
+        text: message.text,
+        html: message.html,
+        headers: message.headers || {},
+      };
+
+      // Mock email sending - return success
       return {
         id: `mock-email-${Date.now()}`,
         from: message.from,
@@ -94,9 +112,15 @@ function clearMockData() {
   mock.clearTestData();
 }
 
+function getLastSentEmail(to) {
+  const mock = getMockResendClient();
+  return mock.getLastSentEmail(to);
+}
+
 module.exports = {
   MockResend,
   getMockResendClient,
   setMockData,
   clearMockData,
+  getLastSentEmail,
 };

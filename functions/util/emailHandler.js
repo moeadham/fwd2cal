@@ -152,13 +152,12 @@ async function sendToSupport(sender, email) {
   logger.log(email.subject);
   logger.log(email.text);
   const content = `From: ${sender} <br><br> Subject: ${email.subject} <br><br> ${email.html}`;
-  await sendEmailResend(
-    "fwd2cal@googlegroups.com",
-    MAIN_EMAIL_ADDRESS,
-    email.subject,
-    content,
-    content,
-  );
+  await sendEmailResend({
+    to: "fwd2cal@googlegroups.com",
+    from: MAIN_EMAIL_ADDRESS,
+    subject: email.subject,
+    html: content,
+  });
   return {result: `email forwarded to support group.`};
 }
 
@@ -561,14 +560,13 @@ ${responseHtml}
 <br><br>You can always ask for help: <a href="mailto:support@fwd2cal.com">support@fwd2cal.com</a><br>
     `;
 
-    await sendEmailResend(
-      sender,
-      MAIN_EMAIL_ADDRESS,
-      `Re: ${email.subject}`,
-      customHtml, // text version
-      threadEmailHtml(email, customHtml), // html version
-      getEmailThreadHeaders(email.headers),
-    );
+    await sendEmailResend({
+      to: sender,
+      from: MAIN_EMAIL_ADDRESS,
+      subject: `Re: ${email.subject}`,
+      html: threadEmailHtml(email, customHtml),
+      headers: getEmailThreadHeaders(email.headers),
+    });
   }
 
   // Return single event for backward compatibility, array for multiple
@@ -576,79 +574,41 @@ ${responseHtml}
 }
 
 function getSenderFromRawEmail(email) {
-  let sender;
-  try {
-    const envelope = JSON.parse(email.envelope);
-    sender = envelope.from.toLowerCase();
-  } catch (error) {
-    logger.warn("Error parsing envelope", error);
-  }
-  return sender;
+  return email.from ? email.from.toLowerCase() : undefined;
 }
 
 function getRecipientsFromRawEmail(email) {
-  let to;
-  try {
-    const envelope = JSON.parse(email.envelope);
-    to = envelope.to;
-    to = to.map((email) => email.toLowerCase());
-  } catch (error) {
-    logger.warn("Error parsing envelope", error);
-  }
-  return to;
+  const to = email.to || [];
+  return Array.isArray(to) ? to.map((email) => email.toLowerCase()) : [to.toLowerCase()];
 }
 
-// eslint-disable-next-line no-unused-vars
-function getDateFromHeader(header) {
-  let date;
-  try {
-    const datePattern = /Date: (.*)/g;
-    const matches = datePattern.exec(header);
-    if (matches && matches[1]) {
-      // Thu, 28 Mar 2024 10:38:21 +0000
-      date = moment(matches[1].trim(), "ddd, DD MMM YYYY HH:mm:ss ZZ").toDate();
-    }
-  } catch (error) {
-    logger.warn("Error extracting date with moment from header", error);
-  }
-  return date;
+function getEmailThreadHeaders(headers) {
+  return getEmailHeaders(headers, ["In-Reply-To", "References"]);
 }
 
-function getEmailThreadHeaders(header) {
-  const headers = {};
+function getEmailHeaders(headers, items) {
+  const result = {};
   try {
-    const inreplyPattern = /In-Reply-To: (.*)/g;
-    let matches = inreplyPattern.exec(header);
-    if (matches && matches[1]) {
-      // Thu, 28 Mar 2024 10:38:21 +0000
-      headers["In-Reply-To"] = matches[1].trim();
+    // Handle if headers is not an object
+    if (!headers || typeof headers !== "object") {
+      return result;
     }
-    const referncesPattern = /References: (.*)/g;
-    matches = referncesPattern.exec(header);
-    if (matches && matches[1]) {
-      // Thu, 28 Mar 2024 10:38:21 +0000
-      headers["References"] = matches[1].trim();
-    }
-  } catch (error) {
-    logger.warn("Error extracting date with moment from header", error);
-  }
-  return headers;
-}
 
-function getEmailHeaders(header, items) {
-  const headers = {};
-  try {
     items.forEach((item) => {
-      const pattern = new RegExp(`${item}: (.*)`, "g");
-      const matches = pattern.exec(header);
-      if (matches && matches[1]) {
-        headers[item] = matches[1].trim();
+      // Case-insensitive key lookup
+      const key = Object.keys(headers).find((k) =>
+        k.toLowerCase() === item.toLowerCase(),
+      );
+      if (key && headers[key]) {
+        // Trim if it's a string, otherwise return as-is
+        result[item] = typeof headers[key] === "string" ?
+            headers[key].trim() : headers[key];
       }
     });
   } catch (error) {
     logger.warn("Error extracting headers", error);
   }
-  return headers;
+  return result;
 }
 
 function threadEmailHtml(original, html) {
@@ -697,14 +657,13 @@ async function sendEmailResponse(sender,
   if (includeThread) {
     html = threadEmailHtml(originalEmail, html);
   }
-  await sendEmailResend(
-    sender,
-    MAIN_EMAIL_ADDRESS,
-    subject,
-    html,
-    html,
-    getEmailThreadHeaders(originalEmail.headers)
-  );
+  await sendEmailResend({
+    to: sender,
+    from: MAIN_EMAIL_ADDRESS,
+    subject: subject,
+    html: html,
+    headers: getEmailThreadHeaders(originalEmail.headers),
+  });
 }
 
 function verifyEmail(email) {

@@ -83,6 +83,17 @@ describe(`fwd2cal (${EMAIL_SERVICE.toUpperCase()})`, () => {
           // We should get an event
           expect(res.body.data).to.not.have.property("error");
           expect(res.body.data.kind).to.equal("calendar#event");
+
+          // Verify sent email (confirmation email sent back to user)
+          expect(res.body.sentEmail).to.be.an("object");
+          expect(res.body.sentEmail.html).to.be.a("string");
+          expect(res.body.sentEmail.html).to.include("Event added");
+
+          // Verify threading headers
+          expect(res.body.sentEmail.headers).to.be.an("object");
+          expect(res.body.sentEmail.headers["In-Reply-To"]).to.equal("<original-message-1>");
+          expect(res.body.sentEmail.headers["References"]).to.equal("<original-message-1>");
+
           done();
         });
   });
@@ -135,6 +146,12 @@ describe(`fwd2cal (${EMAIL_SERVICE.toUpperCase()})`, () => {
           console.log(res.body);
           // Should get added to owners calendar.
           expect(res.body).to.be.an("object");
+
+          // Verify sent email and threading headers
+          expect(res.body.sentEmail).to.be.an("object");
+          expect(res.body.sentEmail.headers["In-Reply-To"]).to.equal("<original-message-5>");
+          expect(res.body.sentEmail.headers["References"]).to.equal("<original-message-5>");
+
           done();
         });
   });
@@ -150,6 +167,12 @@ describe(`fwd2cal (${EMAIL_SERVICE.toUpperCase()})`, () => {
           expect(res.body.data).to.be.an("object");
           expect(res.body.data).to.not.have.property("error");
           expect(res.body.data.kind).to.equal("calendar#event");
+
+          // Verify sent email and threading headers
+          expect(res.body.sentEmail).to.be.an("object");
+          expect(res.body.sentEmail.headers["In-Reply-To"]).to.equal("<original-message-6>");
+          expect(res.body.sentEmail.headers["References"]).to.equal("<original-message-6>");
+
           done();
         });
   });
@@ -183,6 +206,12 @@ describe(`fwd2cal (${EMAIL_SERVICE.toUpperCase()})`, () => {
           expect(res.body.data.kind).to.equal("calendar#event");
           expect(res.body.data.inviteOthersLink).to.be.an("string");
           inviationLink = res.body.data.inviteOthersLink;
+
+          // Verify sent email and threading headers
+          expect(res.body.sentEmail).to.be.an("object");
+          expect(res.body.sentEmail.headers["In-Reply-To"]).to.equal("<original-message-7>");
+          expect(res.body.sentEmail.headers["References"]).to.equal("<original-message-7>");
+
           done();
         });
   });
@@ -208,6 +237,12 @@ describe(`fwd2cal (${EMAIL_SERVICE.toUpperCase()})`, () => {
           // We should get an event
           expect(res.body.data).to.not.have.property("error");
           expect(res.body.data.kind).to.equal("calendar#event");
+
+          // Verify sent email and threading headers
+          expect(res.body.sentEmail).to.be.an("object");
+          expect(res.body.sentEmail.headers["In-Reply-To"]).to.equal("<original-message-8>");
+          expect(res.body.sentEmail.headers["References"]).to.equal("<original-message-8>");
+
           done();
         });
   });
@@ -241,6 +276,12 @@ describe(`fwd2cal (${EMAIL_SERVICE.toUpperCase()})`, () => {
             expect(event).to.have.property("start");
             expect(event).to.have.property("end");
           });
+
+          // Verify sent email and threading headers
+          expect(res.body.sentEmail).to.be.an("object");
+          expect(res.body.sentEmail.headers["In-Reply-To"]).to.equal("<original-message-9>");
+          expect(res.body.sentEmail.headers["References"]).to.equal("<original-message-9>");
+
           done();
         });
   });

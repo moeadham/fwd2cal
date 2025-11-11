@@ -1,6 +1,7 @@
 /* eslint-disable no-irregular-whitespace */
 /* eslint-disable no-tabs */
 /* eslint-disable max-len */
+/* eslint-disable require-jsdoc */
 
 const TESTER_PRIMARY_GOOGLE_ACCT = process.env.TESTER_PRIMARY_GOOGLE_ACCT;
 const TESTER_SECONDARY_EMAIL_ACCT = process.env.TESTER_SECONDARY_EMAIL_ACCT;
@@ -72,6 +73,8 @@ Suite 1, Beatty House, Admirals Way, Canary Wharf, London, UK, E14 9UF`,
         "subject": "Fwd: Finess Clinic Appointment Confirmation",
         "date": "Tue, 26 Mar 2024 12:38:21 +0000",
         "message-id": `<test-1-${Date.now()}@mail.gmail.com>`,
+        "in-reply-to": "<original-message-1>",
+        "references": "<original-message-1>",
       },
     },
 );
@@ -107,6 +110,8 @@ const addEmailAddress = createResendTestData(
         "subject": `add ${TESTER_SECONDARY_EMAIL_ACCT}`,
         "date": "Thu, 28 Mar 2025 10:38:21 +0000",
         "message-id": `<test-2-${Date.now()}@mail.gmail.com>`,
+        "in-reply-to": "<original-message-2>",
+        "references": "<original-message-2>",
       },
     },
 );
@@ -142,6 +147,8 @@ const removeEmailAddress = createResendTestData(
         "subject": `remove ${TESTER_SECONDARY_EMAIL_ACCT}`,
         "date": "Fri, 30 May 2025 11:00:00 +0000",
         "message-id": `<test-3-${Date.now()}@mail.gmail.com>`,
+        "in-reply-to": "<original-message-3>",
+        "references": "<original-message-3>",
       },
     },
 );
@@ -177,6 +184,8 @@ const deleteAccount = createResendTestData(
         "subject": "delete account",
         "date": "Fri, 30 May 2025 12:00:00 +0000",
         "message-id": `<test-4-${Date.now()}@mail.gmail.com>`,
+        "in-reply-to": "<original-message-4>",
+        "references": "<original-message-4>",
       },
     },
 );
@@ -228,6 +237,8 @@ Tottenham Hotspur Stadium`,
         "subject": "Fwd: Tottenham Hotspur v Arsenal Premier League Match",
         "date": "Thu, 25 Apr 2025 14:30:00 +0000",
         "message-id": `<test-5-${Date.now()}@mail.gmail.com>`,
+        "in-reply-to": "<original-message-5>",
+        "references": "<original-message-5>",
       },
     },
 );
@@ -274,6 +285,8 @@ Jimmy`,
         "subject": "Fwd: Meet Jimmy for coffee",
         "date": "Thu, 4 Apr 2025 10:00:00 +0000",
         "message-id": `<test-6-${Date.now()}@mail.gmail.com>`,
+        "in-reply-to": "<original-message-6>",
+        "references": "<original-message-6>",
       },
     },
 );
@@ -317,6 +330,8 @@ const basicEmailFuture = createResendTestData(
         "subject": "Meet Jimmy for Coffee",
         "date": "Fri, 30 May 2025 10:00:00 +0000",
         "message-id": `<test-7-${Date.now()}@mail.gmail.com>`,
+        "in-reply-to": "<original-message-7>",
+        "references": "<original-message-7>",
       },
     },
 );
@@ -361,6 +376,8 @@ const emailWithICSAttachment = createResendTestData(
         "subject": "email with ics attachment",
         "date": "Thu, 28 Mar 2025 10:38:21 +0000",
         "message-id": `<test-8-${Date.now()}@mail.gmail.com>`,
+        "in-reply-to": "<original-message-8>",
+        "references": "<original-message-8>",
       },
       attachments: [
         {
@@ -423,6 +440,8 @@ Sarah`,
         "subject": "Fwd: Schedule for next week",
         "date": "Mon, 1 Jun 2025 09:00:00 +0000",
         "message-id": `<test-9-${Date.now()}@mail.gmail.com>`,
+        "in-reply-to": "<original-message-9>",
+        "references": "<original-message-9>",
       },
     },
 );

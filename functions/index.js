@@ -27,7 +27,7 @@ const {inviteAdditionalAttendees} = require("./util/calendarHelper");
 const {time} = require("console");
 const {ENVIRONMENT_NAME, RESEND_API_KEY, RESEND_SIGNING_SECRET} = require("./util/config");
 const {Resend} = require("resend");
-const {getMockResendClient, setMockData} = require("./util/resendMock");
+const {getMockResendClient, setMockData, getLastSentEmail} = require("./util/resendMock");
 
 admin.initializeApp();
 const db = getFirestore();
@@ -149,23 +149,14 @@ exports.v2resendInboundCallback = onRequest({cors: true}, wrapAndReport(async (r
         (authResults.match(/dkim=pass header\.i=(@[^\s;]+)/) || [null, "@unknown"])[1] + " : pass" :
         "fail";
 
-    // Convert headers object to multiline string format
-    const headersString = Object.entries(emailData.headers || {})
-        .map(([key, value]) => `${key}: ${value}`)
-        .join("\n");
-
     // Transform Resend format to internal format expected by handleEmail
     const transformedEmail = {
       subject: emailData.subject,
       text: emailData.text || "",
       html: emailData.html || "",
       from: emailData.from,
-      to: Array.isArray(emailData.to) ? emailData.to.join(", ") : emailData.to,
-      headers: headersString,
-      envelope: JSON.stringify({
-        from: emailData.from,
-        to: emailData.to,
-      }),
+      to: Array.isArray(emailData.to) ? emailData.to : [emailData.to],
+      headers: emailData.headers || {},
       SPF: spfResult,
       dkim: `{${dkimResult}}`,
     };
@@ -174,7 +165,7 @@ exports.v2resendInboundCallback = onRequest({cors: true}, wrapAndReport(async (r
     const files = [];
     if (attachments && attachments.length > 0) {
       const icsAttachments = attachments.filter(
-          (att) => att.filename && att.filename.toLowerCase().endsWith(".ics")
+          (att) => att.filename && att.filename.toLowerCase().endsWith(".ics"),
       );
 
       for (const attachment of icsAttachments) {
@@ -209,7 +200,18 @@ exports.v2resendInboundCallback = onRequest({cors: true}, wrapAndReport(async (r
 
     // Process the email
     const outcome = await handleEmail(transformedEmail, files);
-    res.status(200).json({message: "thanks", data: outcome});
+
+    // Get the sent email data from mock for testing (non-production only)
+    let sentEmail = null;
+    if (ENVIRONMENT_NAME.value() !== "production") {
+      sentEmail = getLastSentEmail(transformedEmail.from);
+    }
+
+    res.status(200).json({
+      message: "thanks",
+      data: outcome,
+      sentEmail: sentEmail,
+    });
   } catch (error) {
     logger.error("Error processing Resend webhook", {error: error.message});
     res.status(500).json({error: "Internal server error"});

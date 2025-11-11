@@ -1,13 +1,25 @@
+/* eslint-disable require-jsdoc */
+
 const {Resend} = require("resend");
 const {logger} = require("firebase-functions");
 const {RESEND_API_KEY, ENVIRONMENT_NAME} = require("./config");
+const {getMockResendClient} = require("./resendMock");
 
 let resend = null;
 
 /**
  * Initialize Resend client (lazy initialization)
+ * @return {Resend} Resend client or mock
  */
 function getResendClient() {
+  // Use mock client in test/local mode (same as index.js)
+  const isTestMode = ENVIRONMENT_NAME.value() === "local" ||
+      ENVIRONMENT_NAME.value() === "test";
+  if (isTestMode) {
+    return getMockResendClient(); // Returns singleton mock instance
+  }
+
+  // Production mode - use real Resend client
   if (!resend) {
     const apiKey = RESEND_API_KEY.value();
     if (!apiKey) {
@@ -21,26 +33,16 @@ function getResendClient() {
 
 /**
  * Send email via Resend
- * @param {string} to - Recipient email address
- * @param {string} from - Sender email address
- * @param {string} subject - Email subject
- * @param {string} text - Plain text content
- * @param {string} html - HTML content
- * @param {Object} headers - Optional headers for threading
+ * @param {Object} options - Email options
+ * @param {string} options.to - Recipient email address
+ * @param {string} options.from - Sender email address
+ * @param {string} options.subject - Email subject
+ * @param {string} options.text - Plain text content
+ * @param {string} options.html - HTML content
+ * @param {Object} options.headers - Optional headers for threading
  * @return {Promise<Object>} Response from Resend API
  */
-async function sendEmailResend(to, from, subject, text, html, headers = {}) {
-  // Skip sending in non-production environments
-  if (ENVIRONMENT_NAME.value() !== "production") {
-    logger.info("Skipping email send in non-production environment", {
-      to,
-      from,
-      subject,
-      environment: ENVIRONMENT_NAME.value(),
-    });
-    return {success: true, skipped: true};
-  }
-
+async function sendEmailResend({to, from, subject, text, html, headers = {}}) {
   try {
     const client = getResendClient();
     if (!client) {
