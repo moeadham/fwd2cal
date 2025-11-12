@@ -1,3 +1,6 @@
+/* eslint-disable require-jsdoc */
+/* eslint-disable max-len */
+
 /**
  * Mock Resend client for testing
  * Returns test data instead of making real API calls

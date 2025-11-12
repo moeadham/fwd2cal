@@ -14,7 +14,6 @@ const CREDENTIALS = JSON.parse(
     fs.readFileSync(CREDENTIALS_PATH, {encoding: "utf-8"}),
 );
 const {getAuth} = require("firebase-admin/auth");
-const {wrapAndReport} = require("./util/sentry");
 const {google} = require("googleapis");
 const {logger} = require("firebase-functions/v2");
 const {onRequest} = require("firebase-functions/v2/https");
@@ -37,6 +36,9 @@ const {oauthCronJob,
   signupCallbackHandler,
   verifyAdditionalEmail} = require("./util/authHandler");
 
+// Global configuration for onRequest functions
+const onRequestConfig = {cors: true, memory: "512MiB"};
+
 // For debugging before we start inviting others to our events.
 const ONLY_INVITE_HOST = true;
 const DEFAULT_EVENT_LENGTH = 30;
@@ -47,13 +49,13 @@ const DEFAULT_EVENT_LENGTH = 30;
 // endpoint names are no longer supported. Use URL rewriting in firebase.json
 // or a proxy to achieve endpoint obfuscation if needed.
 
-exports.v2signup = onRequest({cors: true}, wrapAndReport(async (req, res) => {
+exports.v2signup = onRequest(onRequestConfig, async (req, res) => {
   const redirectUriIndex = ENVIRONMENT_NAME.value() === "production" ? 2 : 1;
   const signupUrl = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${CREDENTIALS.web.client_id}&redirect_uri=${CREDENTIALS.web.redirect_uris[redirectUriIndex]}&scope=https://www.googleapis.com/auth/calendar+https://www.googleapis.com/auth/userinfo.email+https://www.googleapis.com/auth/userinfo.profile+openid&access_type=offline&prompt=consent`;
   res.redirect(302, signupUrl);
-}));
+});
 
-exports.v2oauthCallback = onRequest({cors: true}, async (req, res) => {
+exports.v2oauthCallback = onRequest(onRequestConfig, async (req, res) => {
   try {
     await signupCallbackHandler(req.query);
   } catch (err) {
@@ -64,7 +66,7 @@ exports.v2oauthCallback = onRequest({cors: true}, async (req, res) => {
   res.redirect(302, "https://www.fwd2cal.com/thanks");
 });
 
-exports.v2resendInboundCallback = onRequest({cors: true}, wrapAndReport(async (req, res) => {
+exports.v2resendInboundCallback = onRequest(onRequestConfig, async (req, res) => {
   if (req.method !== "POST") {
     res.status(405).end();
     return;
@@ -96,11 +98,11 @@ exports.v2resendInboundCallback = onRequest({cors: true}, wrapAndReport(async (r
     const isValid = await resend.webhooks.verify({
       payload: JSON.stringify(req.body),
       headers: {
-        "svix-id": svixId,
-        "svix-timestamp": svixTimestamp,
-        "svix-signature": signature,
+        id: svixId,
+        timestamp: svixTimestamp,
+        signature: signature,
       },
-      secret: RESEND_SIGNING_SECRET.value(),
+      webhookSecret: RESEND_SIGNING_SECRET.value(),
     });
 
     if (!isValid) {
@@ -216,29 +218,29 @@ exports.v2resendInboundCallback = onRequest({cors: true}, wrapAndReport(async (r
     logger.error("Error processing Resend webhook", {error: error.message});
     res.status(500).json({error: "Internal server error"});
   }
-}));
+});
 
-exports.v2verifyAdditionalEmail = onRequest({cors: true}, wrapAndReport(async (req, res) => {
+exports.v2verifyAdditionalEmail = onRequest(onRequestConfig, async (req, res) => {
   try {
     await verifyAdditionalEmail(req, res);
   } catch (err) {
     logger.warn("Error in addUserRecord", err);
     return res.redirect(302, "https://www.fwd2cal.com/404");
   }
-}));
+});
 
-exports.v2inviteAdditionalAttendees = onRequest({cors: true}, wrapAndReport(async (req, res) => {
+exports.v2inviteAdditionalAttendees = onRequest(onRequestConfig, async (req, res) => {
   try {
     await inviteAdditionalAttendees(req, res);
   } catch (err) {
     logger.warn("Error in inviteAdditionalAttendees", err);
     return res.redirect(302, "https://www.fwd2cal.com/404");
   }
-}));
+});
 
-exports.v2refreshTokensScheduled = onSchedule({
-  schedule: "0 * * * *",
-  timeZone: "America/New_York", // Users can choose timezone - default is America/Los_Angeles
-}, wrapAndReport(async (context) => {
-  await oauthCronJob();
-}));
+// exports.v2refreshTokensScheduled = onSchedule({
+//   schedule: "0 * * * *",
+//   timeZone: "America/New_York", // Users can choose timezone - default is America/Los_Angeles
+// }, async (context) => {
+//   await oauthCronJob();
+// });
