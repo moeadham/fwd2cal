@@ -23,6 +23,7 @@
     "moment-timezone": "^0.5.45",
     "node-ical": "^0.22.1",
     "openai": "^6.8.0",
+    "posthog-node": "5.11.2",
     "qs": "^6.12.1",
     "resend": "^6.4.2",
     "underscore": "^1.13.6",
