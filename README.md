@@ -17,7 +17,10 @@ You can self host - it runs on firebase functions.
 ## Features:
 
 - Signup with an email: just email calendar@fwd2cal.com and you'll be sent a google auth link.
-- Send from multiple email addresses: send `add myworkemail@address.com` to calendar@fwd2cal.com, and then you can add events to your google calendar from another email address
+- Send from multiple email addresses: send `add myworkemail@address.com` in the subject line to calendar@fwd2cal.com, and then you can add events to your google calendar from another email address
+- ICS attachment support: Forward emails with .ics calendar attachments to automatically add them to your calendar
+- Multi-event extraction: Extract and add multiple events from a single email
+- Email threading: Replies appear in the same email thread for better organization
 - Completely private: No logging, or storage of any emails. All that is stored are your email addresses.
 - That's it. The goal is to just do one thing correctly and stay out of the way of the user.
 
@@ -25,45 +28,49 @@ You can self host - it runs on firebase functions.
 
 You will need:
 1. a firebase project
-2. an openAI API key with gpt4 access
-3. a mailgun account setup with a domain to receive emails (recommended) OR a sendgrid account (legacy support)
+2. an OpenRouter API key (for LLM access)
+3. a Resend account for sending and receiving emails
 
-```
-firebase functions:config:set environment.name="production"
-firebase functions:config:set environment.openai_api_key="sk-YOUR_API_KEY"
-firebase functions:config:set environment.sendgrid_api_key="YOUR_API_KEY"
-firebase functions:config:set environment.sendgrid_endpoint="very_hard_to_guess_endpoint"
-firebase functions:config:set environment.mailgun_api_key="YOUR_API_KEY"
-firebase functions:config:set environment.mailgun_endpoint="very_hard_to_guess_endpoint"
-firebase functions:config:set environment.sentry_dsn="your sentry dsn"
-firebase functions:config:set environment.ga_secret="GA measurement protocol 4 api key"
-firebase functions:config:set environment.ga_measurement="GA measurement ID"
-```
+When you deploy or run the emulator `firebase emulators:start`, Firebase will prompt you to set the required parameters:
+- `OPENROUTER_API_KEY` - Your OpenRouter API key
+- `RESEND_API_KEY` - Your Resend API key
+- `RESEND_SIGNING_SECRET` - Resend webhook signing secret
+- `GA_MEASUREMENT` - (Optional) Google Analytics measurement ID
+- `GA_SECRET` - (Optional) Google Analytics API secret
+- `ENVIRONMENT_NAME` - (Optional) Defaults to "production"
 
-Make sure you then set the secret URL as your parse URL in mailgun (or sendgrid for legacy setups).
+Configure Resend to forward incoming emails to your Firebase Functions webhook:
+- In your Resend dashboard, set up email forwarding to: `https://{your project name}.web.app/v2/resendInboundCallback`
+- be sure to copy the RESEND_SIGNING_SECRET after you set your callback url
+- Make sure to configure your domain's DNS records in Resend to receive emails
 
 ## Local setup
 
-For local, edit .runtimeconfig.json
-```
-{
-  "environment": {
-    "name": "local",
-    "openai_api_key": "sk-YOUR_API_KEY",
-    "mailgun_api_key": "your-mailgun-api-key",
-    "sendgrid_api_key": "your-sendgrid-api-key"
-  }
-}
+Create a `functions/.env` file with your local development credentials:
+```bash
+# Environment Configuration
+ENVIRONMENT_NAME=local
+
+# API Keys
+OPENROUTER_API_KEY=sk-or-v1-YOUR_API_KEY
+
+# Resend
+RESEND_API_KEY=re_YOUR_API_KEY
+RESEND_SIGNING_SECRET=whsec_YOUR_SECRET
+
+# Google Analytics (optional)
+GA_MEASUREMENT=G-YOUR_MEASUREMENT_ID
+GA_SECRET=YOUR_GA_SECRET
 ```
 
-Also - you're probably going to want to save your credentials from https://console.cloud.google.com/apis/credentials to: `functions/auth/google-auth-credentials.json`.
+Also - you're probably going to want to save your credentials from https://console.cloud.google.com/apis/credentials to: `functions/auth/v2-google-auth-credentials.json`.
 
-You want to make sure your `redirect_uris` are setup correctly. It is a list, [0] should be the default from firebase, [1] should be `http://localhost:5001/yourappname/your-region/oauthCallback`, and [2] should be the prod url.
+You want to make sure your `redirect_uris` are setup correctly. It is a list, [0] should be the default from firebase, [1] should be `http://127.0.0.1:5002/v2/oauthCallback` for local development, and [2] should be the prod url.
 
 
 ## Testing
 
-```
+```bash
 export TESTER_PRIMARY_GOOGLE_ACCT="your@gmail.com"
 export TESTER_SECONDARY_EMAIL_ACCT="anotherEmailAddressThatYouUse@anything.com"
 cd functions
@@ -71,12 +78,13 @@ npm test
 ```
 Make sure you authorize your google account in 30 seconds after starting the test so the tests can run.
 
-To test pubsub cron jobs:
-```
+The test suite uses a mock Resend client to simulate email sending and receiving without making actual API calls.
+
+To test scheduled functions (note: token refresh is currently disabled):
+```bash
 firebase functions:shell
-refreshTokensScheduled()
+v2refreshTokensScheduled()
 ```
-If you know how to make a test script properly send a pubsub message on the firebase emulator, a PR would be appreciated.
 
 ## Contributing
 
@@ -84,13 +92,11 @@ All contributions are welcome. I will do by best to keep `main` stable.
 
 ### Where you can help:
 
-- `functions/util/prompts.js` - Prompt engineers can help here, if you notice fwd2cal fail to add your event correctly, think of adding an example to the prompt that teaches gpt4
-- Timezones - I find the current prompt is bad at understanding timezones; likely worth adding another prompt only to detect the timezone.
-- Multiple calendars: right now all events are added to the default calendar - but GPT4 can likely understand the context of all the users calendar and select an appropriate one.
-- Get rid of all the hard coded references to fwd2cal.com so it can be self hosted easier.
-- Find a way to add a test for the oAuth refresh tokens. I didn't bother
-- Upgrade to firebase functions v2
+- `functions/util/prompts.js` - Prompt engineers can help here. If you notice fwd2cal fail to add your event correctly, consider adding examples to the prompts to improve the AI's understanding.
+- Timezones - The current timezone detection could be improved for better accuracy across different formats and locations.
+- Multiple calendars: Right now all events are added to the default calendar - the AI could potentially understand context and select an appropriate calendar.
+- Find a way to add a test for the oAuth refresh tokens.
 
 ## Author
 
-This was written by [@moeadham](https://twitter.com/moeadham) to get familiar with firebase and webstudio - training for a much larger project I'm working on.
+This was written by [@moeadham](https://twitter.com/moeadham) to get familiar with firebase and structured data from LLMs - training for a much larger project I'm working on.
