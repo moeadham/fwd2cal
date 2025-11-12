@@ -38,37 +38,31 @@ class MockResend {
     },
   };
 
-  // Mock emails.get - returns test data
+  // Mock emails.receiving - matches Resend's receiving API structure
   emails = {
-    get: async (emailId) => {
-      const data = this.testData[emailId];
-      if (!data) {
-        // Return a default structure if no test data is set
-        return {
-          id: emailId,
-          subject: "Test Email",
-          from: "test@example.com",
-          to: ["calendar@fwd2cal.com"],
-          text: "Test email content",
-          html: "<p>Test email content</p>",
-          headers: {
-            "authentication-results": "amazonses.com; spf=pass; dkim=pass header.i=@example.com; dmarc=pass",
-            "from": "test@example.com",
-            "to": "calendar@fwd2cal.com",
-            "subject": "Test Email",
-            "message-id": `<${emailId}@example.com>`,
-          },
-        };
-      }
-      return data.emailContent;
-    },
-
-    getAttachment: async (emailId, attachmentId) => {
-      const data = this.testData[emailId];
-      if (!data || !data.attachments || !data.attachments[attachmentId]) {
-        return Buffer.from("Mock attachment content");
-      }
-      return data.attachments[attachmentId];
+    receiving: {
+      get: async (emailId) => {
+        const data = this.testData[emailId];
+        if (!data) {
+          // Return a default structure if no test data is set
+          return {
+            id: emailId,
+            subject: "Test Email",
+            from: "test@example.com",
+            to: ["calendar@fwd2cal.com"],
+            text: "Test email content",
+            html: "<p>Test email content</p>",
+            headers: {
+              "authentication-results": "amazonses.com; spf=pass; dkim=pass header.i=@example.com; dmarc=pass",
+              "from": "test@example.com",
+              "to": "calendar@fwd2cal.com",
+              "subject": "Test Email",
+              "message-id": `<${emailId}@example.com>`,
+            },
+          };
+        }
+        return data.emailContent;
+      },
     },
 
     send: async (message) => {
@@ -91,6 +85,19 @@ class MockResend {
         subject: message.subject,
         created_at: new Date().toISOString(),
       };
+    },
+  };
+
+  // Mock attachments.receiving
+  attachments = {
+    receiving: {
+      get: async ({id, emailId}) => {
+        const data = this.testData[emailId];
+        if (!data || !data.attachments || !data.attachments[id]) {
+          return Buffer.from("Mock attachment content");
+        }
+        return data.attachments[id];
+      },
     },
   };
 }

@@ -10,8 +10,8 @@ const {getOauthClient,
 const {processEmail} = require("./openai");
 const {addEvent, eventFromICS} = require("./calendarHelper");
 const sendEmailResend = require("./resend");
-const {MAIN_EMAIL_ADDRESS, getApiUrl} = require("./credentials");
-const {ENVIRONMENT_NAME} = require("./config");
+const {getApiUrl} = require("./credentials");
+const {ENVIRONMENT_NAME, MAIN_EMAIL_ADDRESS} = require("./config");
 const handleAsync = require("./handleAsync");
 const {mailTemplates} = require("./mailTemplates");
 const moment = require("moment-timezone");
@@ -660,16 +660,40 @@ async function sendEmailResponse(sender,
 }
 
 function verifyEmail(email) {
+  // Log incoming email verification data
+  logger.info("Email verification check", {
+    from: email.from,
+    SPF: email.SPF,
+    dkim: email.dkim,
+  });
+
   if (email.SPF !== "pass") {
+    logger.warn("Email verification failed: SPF check failed", {
+      from: email.from,
+      SPF: email.SPF,
+      expected: "pass",
+    });
     return false;
   }
+
   if (email.dkim.indexOf("pass") === -1 ) {
+    logger.warn("Email verification failed: DKIM check failed", {
+      from: email.from,
+      dkim: email.dkim,
+      containsPass: email.dkim.indexOf("pass") !== -1,
+    });
     return false;
   }
+
   // WARN: This IP might change, disable for now.
   //   if (email.sender_ip !== "209.85.216.44" && ENVIRONMENT==="production") {
   //     return false;
   //   }
+
+  logger.info("Email verification passed", {
+    from: email.from,
+  });
+
   return true;
 }
 

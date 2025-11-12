@@ -131,10 +131,19 @@ exports.v2resendInboundCallback = onRequest(onRequestConfig, async (req, res) =>
       attachmentCount: attachments ? attachments.length : 0,
     });
 
-    // Fetch full email content from Resend API
+    // Fetch full email content from Resend API (receiving endpoint)
     let emailData;
     try {
-      emailData = await resend.emails.get(email_id);
+      const {data, error} = await resend.emails.receiving.get(email_id);
+      emailData = data;
+      if (error) {
+        logger.error("Failed to fetch email content from Resend", {
+          error: error.message,
+          email_id,
+        });
+        res.status(500).json({error: "Failed to fetch email content"});
+        return;
+      }
     } catch (emailError) {
       logger.error("Failed to fetch email content from Resend", {
         error: emailError.message,
@@ -144,12 +153,23 @@ exports.v2resendInboundCallback = onRequest(onRequestConfig, async (req, res) =>
       return;
     }
 
+    // Log FULL emailData as JSON for debugging
+    logger.info("Full emailData JSON response", emailData);
+
     // Extract SPF and DKIM results from authentication-results header
     const authResults = emailData.headers?.["authentication-results"] || "";
     const spfResult = authResults.includes("spf=pass") ? "pass" : "fail";
     const dkimResult = authResults.includes("dkim=pass") ?
         (authResults.match(/dkim=pass header\.i=(@[^\s;]+)/) || [null, "@unknown"])[1] + " : pass" :
         "fail";
+
+    // Log SPF/DKIM extraction results
+    logger.info("SPF/DKIM extraction results", {
+      authResultsRaw: authResults || "EMPTY",
+      spfResult,
+      dkimResultRaw: dkimResult,
+      dkimFinal: `{${dkimResult}}`,
+    });
 
     // Transform Resend format to internal format expected by handleEmail
     const transformedEmail = {
@@ -163,6 +183,18 @@ exports.v2resendInboundCallback = onRequest(onRequestConfig, async (req, res) =>
       dkim: `{${dkimResult}}`,
     };
 
+    // Log transformed email object for debugging
+    logger.info("Transformed email object", {
+      from: transformedEmail.from,
+      to: transformedEmail.to,
+      subject: transformedEmail.subject,
+      SPF: transformedEmail.SPF,
+      dkim: transformedEmail.dkim,
+      textLength: transformedEmail.text?.length || 0,
+      htmlLength: transformedEmail.html?.length || 0,
+      headerCount: Object.keys(transformedEmail.headers).length,
+    });
+
     // Handle attachments if present (only ICS files)
     const files = [];
     if (attachments && attachments.length > 0) {
@@ -172,7 +204,18 @@ exports.v2resendInboundCallback = onRequest(onRequestConfig, async (req, res) =>
 
       for (const attachment of icsAttachments) {
         try {
-          const attachContent = await resend.emails.getAttachment(email_id, attachment.id);
+          const {data, error} = await resend.attachments.receiving.get({
+            id: attachment.id,
+            emailId: email_id,
+          });
+          if (error) {
+            logger.error("Failed to download attachment", {
+              error: error.message,
+              attachmentId: attachment.id,
+            });
+            continue;
+          }
+          const attachContent = data;
           files.push({
             fieldname: "attachment",
             file: Buffer.from(attachContent),

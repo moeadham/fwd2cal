@@ -10,8 +10,6 @@ const CREDENTIALS = JSON.parse(
     fs.readFileSync(CREDENTIALS_PATH, {encoding: "utf-8"}),
 );
 
-const MAIN_EMAIL_ADDRESS = "calendar@fwd2cal.com";
-
 // Helper functions that take environment param value
 const getRedirectUriIndex = (environment) => {
   return environment === "production" ? 2 : 1;
@@ -25,7 +23,6 @@ const getApiUrl = (environment) => {
 
 module.exports = {
   CREDENTIALS,
-  MAIN_EMAIL_ADDRESS,
   getRedirectUriIndex,
   getApiUrl,
 };

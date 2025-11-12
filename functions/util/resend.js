@@ -49,6 +49,15 @@ async function sendEmailResend({to, from, subject, text, html, headers = {}}) {
       throw new Error("Resend client not initialized");
     }
 
+    // Log client type for debugging
+    const isTestMode = ENVIRONMENT_NAME.value() === "local" ||
+        ENVIRONMENT_NAME.value() === "test";
+    logger.info("Resend client info", {
+      clientType: isTestMode ? "MOCK" : "REAL",
+      environment: ENVIRONMENT_NAME.value(),
+      hasApiKey: !!RESEND_API_KEY.value(),
+    });
+
     const message = {
       from: from,
       to: to,
@@ -67,21 +76,47 @@ async function sendEmailResend({to, from, subject, text, html, headers = {}}) {
       from,
       subject,
       hasHeaders: !!message.headers,
+      textLength: text?.length || 0,
+      htmlLength: html?.length || 0,
+      messageKeys: Object.keys(message),
     });
 
     const response = await client.emails.send(message);
 
+    // Log full response details
+    logger.info("Raw Resend API response", {
+      responseKeys: Object.keys(response || {}),
+      responseId: response?.id || "MISSING",
+      responseData: response?.data || "MISSING",
+      fullResponse: JSON.stringify(response),
+    });
+
+    // Check if Resend returned an error
+    // (they don't throw, they return {data, error})
+    if (response.error) {
+      logger.error("Resend API returned error", {
+        error: response.error,
+        to,
+        from,
+        subject,
+      });
+      /* eslint-disable-next-line max-len */
+      throw new Error(`Resend API error: ${response.error.message || JSON.stringify(response.error)}`);
+    }
+
     logger.info("Email sent successfully via Resend", {
-      id: response.id,
+      id: response.id || response.data?.id,
       to,
       from,
       subject,
+      hasId: !!(response.id || response.data?.id),
     });
 
     return response;
   } catch (error) {
     logger.error("Failed to send email via Resend", {
       error: error.message,
+      errorStack: error.stack,
       to,
       from,
       subject,
