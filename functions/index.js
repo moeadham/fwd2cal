@@ -141,7 +141,7 @@ exports.v2resendInboundCallback = onRequest(onRequestConfig, async (req, res) =>
           error: error.message,
           email_id,
         });
-        res.status(500).json({error: "Failed to fetch email content"});
+        res.status(200).json({error: "Failed to fetch email content"});
         return;
       }
     } catch (emailError) {
@@ -149,7 +149,7 @@ exports.v2resendInboundCallback = onRequest(onRequestConfig, async (req, res) =>
         error: emailError.message,
         email_id,
       });
-      res.status(500).json({error: "Failed to fetch email content"});
+      res.status(200).json({error: "Failed to fetch email content"});
       return;
     }
 
@@ -259,7 +259,7 @@ exports.v2resendInboundCallback = onRequest(onRequestConfig, async (req, res) =>
     });
   } catch (error) {
     logger.error("Error processing Resend webhook", {error: error.message});
-    res.status(500).json({error: "Internal server error"});
+    res.status(200).json({message: "Something went wrong, but we're not going to tell you what."});
   }
 });
 
