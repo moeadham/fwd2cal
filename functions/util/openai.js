@@ -7,6 +7,7 @@ const tokenHelper = require("./tokenHelper");
 const {prompts} = require("./prompts");
 const {EventDataSchema, TimezoneSchema, ICSParserSchema} = require("./schemas.zod");
 const {OPENROUTER_API_KEY} = require("./config");
+const {sendEvent} = require("./analytics");
 
 const DEFAULT_TEMP = 0.1;
 const DEFAULT_MAX_TOKENS = 4096;
@@ -28,7 +29,7 @@ const getOpenAIClient = () => {
   return openai;
 };
 
-async function defaultCompletion(messages, temperature = DEFAULT_TEMP, zodSchema = null) {
+async function defaultCompletion(messages, temperature = DEFAULT_TEMP, zodSchema = null, uid = null) {
   logger.debug(`OpenAI request with ${tokenHelper.countTokens(JSON.stringify(messages))} prompt tokens`);
 
   const requestOptions = {
@@ -45,16 +46,19 @@ async function defaultCompletion(messages, temperature = DEFAULT_TEMP, zodSchema
 
     if (!completion) {
       logger.error("Completion is null");
+      if (uid) sendEvent(uid, "aiError", {reason: "invalid_response", detail: "completion_null"});
       throw new Error("Completion is null");
     }
     if (!completion.choices || !completion.choices[0]) {
       logger.error("No choices in completion");
       logger.error(JSON.stringify(completion, null, 2));
+      if (uid) sendEvent(uid, "aiError", {reason: "invalid_response", detail: "no_choices"});
       throw new Error("No choices in completion");
     }
     if (completion.choices[0].finish_reason !== "stop") {
       logger.error(`Unexpected finish reason: ${completion.choices[0].finish_reason}`);
       logger.error(JSON.stringify(completion, null, 2));
+      if (uid) sendEvent(uid, "aiError", {reason: "invalid_response", detail: completion.choices[0].finish_reason});
       throw new Error(`Unexpected finish reason: ${completion.choices[0].finish_reason}`);
     }
 
@@ -67,7 +71,7 @@ async function defaultCompletion(messages, temperature = DEFAULT_TEMP, zodSchema
   }
 }
 
-async function processEmail(email, headers) {
+async function processEmail(email, headers, uid = null) {
   const text = `
   Date: ${headers.date}
   Subject: ${headers.subject}
@@ -91,8 +95,8 @@ async function processEmail(email, headers) {
   ];
 
   const [eventResponse, timezoneResponse] = await Promise.all([
-    defaultCompletion(eventMessages, DEFAULT_TEMP, EventDataSchema),
-    defaultCompletion(timezoneMessages, DEFAULT_TEMP, TimezoneSchema),
+    defaultCompletion(eventMessages, DEFAULT_TEMP, EventDataSchema, uid),
+    defaultCompletion(timezoneMessages, DEFAULT_TEMP, TimezoneSchema, uid),
   ]);
 
   // Clean up undefined values

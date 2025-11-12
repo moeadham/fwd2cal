@@ -62,7 +62,12 @@ async function oauthCronJob() {
     logger.log("Refreshing tokens for Users with expiring tokens ",
         users.length);
     for (const user of users) {
-      await refreshOAuthTokens(user.id);
+      try {
+        await refreshOAuthTokens(user.id);
+      } catch (error) {
+        logger.warn(`Failed to refresh tokens for user ${user.id}:`, error);
+        sendEvent(user.id, "tokenRefreshFailed");
+      }
     }
   } catch (error) {
     logger.warn("Error refreshing tokens:", error);
@@ -159,6 +164,7 @@ async function verifyAdditionalEmail(req, res) {
     default: false,
   }]);
   logger.log(`added ${pendingEmail.id} to user account ${mainUser.uid}`);
+  sendEvent(mainUser.uid, "addUserConfirmed");
   return res.send({data: mainUser.email});
 }
 

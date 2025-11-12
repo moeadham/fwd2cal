@@ -128,11 +128,13 @@ async function handleEmail(email, files) {
       },
     };
     await sendEmailResponse(sender, email, response, true);
+    sendEvent(sender, "userInvited");
     return {result: `${sender} has been invited to signup`};
   }
   const subjectAction = understandSubject(email.subject);
   logger.log(`Request from ${sender} to ${subjectAction}`);
-  sendEvent(uid, subjectAction);
+  // Track all received emails with the action type
+  sendEvent(uid, "emailReceived", {action: subjectAction});
   switch (subjectAction) {
     case "addUser":
       return await addEmailAddressToUser(email, sender, uid, files);
@@ -184,6 +186,7 @@ async function deleteUserAccount(email, sender, uid, files = []) {
     replace: {},
   };
   await sendEmailResponse(sender, email, response, true);
+  sendEvent(uid, "deleteAccount");
   return `${uid} account deleted.`;
 }
 
@@ -204,7 +207,7 @@ async function removeEmailAddressFromUser(email, sender, uid, files = []) {
   // If not, add it to the pending email address list.
   const existingUid = await getUserFromEmail(emailAddressToRemove);
   if (existingUid !== uid) {
-    logger.warn(`${uid} attempted to remove 
+    logger.warn(`${uid} attempted to remove
       ${emailAddressToRemove}, but registered to ${existingUid}`);
     const response = {
       ...EMAIL_RESPONSES.removalEmailInUse,
@@ -213,6 +216,7 @@ async function removeEmailAddressFromUser(email, sender, uid, files = []) {
       },
     };
     logger.log(`Sending email additionalEmailInUse to ${sender}`);
+    sendEvent(uid, "removeEmailFailed", {reason: "not_owned"});
     return await sendEmailResponse(sender, email, response, true);
   } else {
     await removeEmailAddress(emailAddressToRemove);
@@ -225,6 +229,7 @@ async function removeEmailAddressFromUser(email, sender, uid, files = []) {
       },
     };
     await sendEmailResponse(sender, email, response, true);
+    sendEvent(uid, "removeEmail");
     return `${emailAddressToRemove} removed.`;
   }
 }
@@ -244,7 +249,7 @@ async function addEmailAddressToUser(email, sender, uid, files = []) {
   // If not, add it to the pending email address list.
   const existingUid = await getUserFromEmail(emailAddressToAdd);
   if (existingUid) {
-    logger.warn(`${uid} attempted to add 
+    logger.warn(`${uid} attempted to add
       ${emailAddressToAdd}, but already registered to ${existingUid}`);
     const response = {
       ...EMAIL_RESPONSES.additionalEmailInUse,
@@ -253,6 +258,7 @@ async function addEmailAddressToUser(email, sender, uid, files = []) {
       },
     };
     logger.log(`Sending email additionalEmailInUse to ${sender}`);
+    sendEvent(uid, "addUserFailed", {reason: "email_in_use"});
     return await sendEmailResponse(sender, email, response, true);
   }
   const verificationCode = await addPendingEmailAddress(uid, emailAddressToAdd);
@@ -268,6 +274,7 @@ async function addEmailAddressToUser(email, sender, uid, files = []) {
       // eslint-disable-next-line max-len
       `Sending email addAdditionalEmailAddress ${emailAddressToAdd} to pending list for ${uid}`);
   await sendEmailResponse(emailAddressToAdd, email, response, false);
+  sendEvent(uid, "addUserRequest");
   return {verificationCode};
 }
 
@@ -293,6 +300,7 @@ async function eventHandler(email, sender, uid, files = []) {
       const [icsErr, icsEvent] = await handleAsync(() => eventFromICS(icsFile));
       if (icsErr) {
         logger.warn("ICS error: ", icsErr);
+        sendEvent(uid, "icsProcessingFailed", {reason: "parse_failed"});
       } else {
         event = icsEvent;
       }
@@ -304,7 +312,7 @@ async function eventHandler(email, sender, uid, files = []) {
   if (!event) {
     // Can we get event details from the thread with AI?
     const headers = getEmailHeaders(email.headers, ["date", "subject", "from"]);
-    const [processEmailErr, aiEvent] = await handleAsync(() => processEmail(email, headers));
+    const [processEmailErr, aiEvent] = await handleAsync(() => processEmail(email, headers, uid));
     if (processEmailErr) {
       logger.warn("OpenAI error: ", processEmailErr);
       await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true);
@@ -504,6 +512,7 @@ async function addEventsAndSendResponse(oauth2Client, events, uid, sender, email
 
   // Add failed events info if any
   if (failedEvents.length > 0) {
+    sendEvent(uid, "addEventPartialFailure");
     responseHtml += `<p><strong>Failed to add ${failedEvents.length} event(s):</strong><br>`;
     for (const failed of failedEvents) {
       responseHtml += `- ${failed.event.summary}: ${failed.error}<br>`;
@@ -694,6 +703,7 @@ function verifyEmail(email) {
       SPF: email.SPF,
       expected: "pass",
     });
+    sendEvent(email.from, "emailRejected", {reason: "spf_failed"});
     return false;
   }
 
@@ -703,6 +713,7 @@ function verifyEmail(email) {
       dkim: email.dkim,
       containsPass: email.dkim.indexOf("pass") !== -1,
     });
+    sendEvent(email.from, "emailRejected", {reason: "dkim_failed"});
     return false;
   }
 

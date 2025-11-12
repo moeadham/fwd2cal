@@ -4,6 +4,7 @@ const {Resend} = require("resend");
 const {logger} = require("firebase-functions");
 const {RESEND_API_KEY, ENVIRONMENT_NAME} = require("./config");
 const {getMockResendClient} = require("./resendMock");
+const {sendEvent} = require("./analytics");
 
 let resend = null;
 
@@ -100,6 +101,8 @@ async function sendEmailResend({to, from, subject, text, html, headers = {}}) {
         from,
         subject,
       });
+      sendEvent("email_service", "emailSendFailed",
+          {reason: "resend_api_error"});
       /* eslint-disable-next-line max-len */
       throw new Error(`Resend API error: ${response.error.message || JSON.stringify(response.error)}`);
     }
@@ -121,6 +124,7 @@ async function sendEmailResend({to, from, subject, text, html, headers = {}}) {
       from,
       subject,
     });
+    sendEvent("email_service", "emailSendFailed", {reason: "exception"});
     throw new Error(`Failed to send email: ${error.message}`);
   }
 }

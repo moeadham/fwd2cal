@@ -14,7 +14,7 @@ const {sendEvent} = require("./analytics");
 const DEFAULT_EVENT_LENGTH = 30;
 const ONLY_INVITE_HOST = true;
 
-function generateTimeObject(event, primaryCalendar) {
+function generateTimeObject(event, primaryCalendar, uid) {
   // logger.log("event", event);
   const timezone = primaryCalendar.timeZone;
   let eventTimeZone = event.timeZone;
@@ -22,6 +22,7 @@ function generateTimeObject(event, primaryCalendar) {
   if (!Intl.DateTimeFormat(undefined, {timeZone: eventTimeZone})
       .resolvedOptions().timeZone) {
     console.error("Invalid Time Zone in event object:", eventTimeZone);
+    sendEvent(uid, "dataQualityIssue", {reason: "invalid_timezone"});
     // Fallback to primary calendar's timezone if event's timezone is invalid
     eventTimeZone = timezone;
   }
@@ -38,6 +39,7 @@ function generateTimeObject(event, primaryCalendar) {
         throw new Error("Invalid end time");
       }
     } catch (error) {
+      sendEvent(uid, "dataQualityIssue", {reason: "invalid_end_time"});
       // Default 30 minutes to start_time
       endDate = new Date(startDate.getTime() + (DEFAULT_EVENT_LENGTH * 60000));
     }
@@ -64,9 +66,10 @@ async function addEvent(oauth2Client, event, uid) {
   const primaryCalendar = calendarList.data.items
       .find((calendar) => calendar.primary);
   if (!primaryCalendar) {
+    sendEvent(uid, "calendarError", {reason: "no_primary_calendar"});
     throw new Error("Primary calendar not found");
   }
-  const times = generateTimeObject(event, primaryCalendar);
+  const times = generateTimeObject(event, primaryCalendar, uid);
   if (event.description === undefined || event.description === "undefined") {
     event.description = "";
   }
@@ -124,6 +127,13 @@ async function addEvent(oauth2Client, event, uid) {
         await new Promise((resolve) => setTimeout(resolve, retryDelay));
       } else {
         logger.error("Calendar API error (final attempt):", error.message);
+        if (isRetriableError) {
+          // Network/timeout error that failed after retries
+          sendEvent(uid, "calendarError", {reason: "api_error", error_type: error.code || "unknown"});
+        } else {
+          // Validation or other non-retriable error
+          sendEvent(uid, "calendarError", {reason: "validation_error"});
+        }
         throw error; // Re-throw the error after max retries or non-retriable error
       }
     }
