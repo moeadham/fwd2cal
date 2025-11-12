@@ -91,8 +91,9 @@ describe(`fwd2cal (${EMAIL_SERVICE.toUpperCase()})`, () => {
 
           // Verify threading headers
           expect(res.body.sentEmail.headers).to.be.an("object");
-          expect(res.body.sentEmail.headers["In-Reply-To"]).to.equal("<original-message-1>");
-          expect(res.body.sentEmail.headers["References"]).to.equal("<original-message-1>");
+          const incomingMessageId = testMessage.emailContent.headers["message-id"];
+          expect(res.body.sentEmail.headers["In-Reply-To"]).to.equal(incomingMessageId);
+          expect(res.body.sentEmail.headers["References"]).to.equal(`<original-message-1> ${incomingMessageId}`);
 
           done();
         });
@@ -149,8 +150,9 @@ describe(`fwd2cal (${EMAIL_SERVICE.toUpperCase()})`, () => {
 
           // Verify sent email and threading headers
           expect(res.body.sentEmail).to.be.an("object");
-          expect(res.body.sentEmail.headers["In-Reply-To"]).to.equal("<original-message-5>");
-          expect(res.body.sentEmail.headers["References"]).to.equal("<original-message-5>");
+          const incomingMessageId = testMessage.emailContent.headers["message-id"];
+          expect(res.body.sentEmail.headers["In-Reply-To"]).to.equal(incomingMessageId);
+          expect(res.body.sentEmail.headers["References"]).to.equal(`<original-message-5> ${incomingMessageId}`);
 
           done();
         });
@@ -170,8 +172,9 @@ describe(`fwd2cal (${EMAIL_SERVICE.toUpperCase()})`, () => {
 
           // Verify sent email and threading headers
           expect(res.body.sentEmail).to.be.an("object");
-          expect(res.body.sentEmail.headers["In-Reply-To"]).to.equal("<original-message-6>");
-          expect(res.body.sentEmail.headers["References"]).to.equal("<original-message-6>");
+          const incomingMessageId = testMessage.emailContent.headers["message-id"];
+          expect(res.body.sentEmail.headers["In-Reply-To"]).to.equal(incomingMessageId);
+          expect(res.body.sentEmail.headers["References"]).to.equal(`<original-message-6> ${incomingMessageId}`);
 
           done();
         });
@@ -210,8 +213,9 @@ describe(`fwd2cal (${EMAIL_SERVICE.toUpperCase()})`, () => {
 
           // Verify sent email and threading headers
           expect(res.body.sentEmail).to.be.an("object");
-          expect(res.body.sentEmail.headers["In-Reply-To"]).to.equal("<original-message-7>");
-          expect(res.body.sentEmail.headers["References"]).to.equal("<original-message-7>");
+          const incomingMessageId = testMessage.emailContent.headers["message-id"];
+          expect(res.body.sentEmail.headers["In-Reply-To"]).to.equal(incomingMessageId);
+          expect(res.body.sentEmail.headers["References"]).to.equal(`<original-message-7> ${incomingMessageId}`);
 
           // Verify sent email HTML contains invite link
           expect(res.body.sentEmail.html).to.be.a("string");
@@ -245,8 +249,9 @@ describe(`fwd2cal (${EMAIL_SERVICE.toUpperCase()})`, () => {
 
           // Verify sent email and threading headers
           expect(res.body.sentEmail).to.be.an("object");
-          expect(res.body.sentEmail.headers["In-Reply-To"]).to.equal("<original-message-8>");
-          expect(res.body.sentEmail.headers["References"]).to.equal("<original-message-8>");
+          const incomingMessageId = testMessage.emailContent.headers["message-id"];
+          expect(res.body.sentEmail.headers["In-Reply-To"]).to.equal(incomingMessageId);
+          expect(res.body.sentEmail.headers["References"]).to.equal(`<original-message-8> ${incomingMessageId}`);
 
           done();
         });
@@ -284,8 +289,9 @@ describe(`fwd2cal (${EMAIL_SERVICE.toUpperCase()})`, () => {
 
           // Verify sent email and threading headers
           expect(res.body.sentEmail).to.be.an("object");
-          expect(res.body.sentEmail.headers["In-Reply-To"]).to.equal("<original-message-9>");
-          expect(res.body.sentEmail.headers["References"]).to.equal("<original-message-9>");
+          const incomingMessageId = testMessage.emailContent.headers["message-id"];
+          expect(res.body.sentEmail.headers["In-Reply-To"]).to.equal(incomingMessageId);
+          expect(res.body.sentEmail.headers["References"]).to.equal(`<original-message-9> ${incomingMessageId}`);
 
           done();
         });

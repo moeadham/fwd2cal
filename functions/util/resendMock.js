@@ -42,26 +42,32 @@ class MockResend {
   emails = {
     receiving: {
       get: async (emailId) => {
-        const data = this.testData[emailId];
-        if (!data) {
+        const testData = this.testData[emailId];
+        if (!testData) {
           // Return a default structure if no test data is set
           return {
-            id: emailId,
-            subject: "Test Email",
-            from: "test@example.com",
-            to: ["calendar@fwd2cal.com"],
-            text: "Test email content",
-            html: "<p>Test email content</p>",
-            headers: {
-              "authentication-results": "amazonses.com; spf=pass; dkim=pass header.i=@example.com; dmarc=pass",
-              "from": "test@example.com",
-              "to": "calendar@fwd2cal.com",
-              "subject": "Test Email",
-              "message-id": `<${emailId}@example.com>`,
+            data: {
+              id: emailId,
+              subject: "Test Email",
+              from: "test@example.com",
+              to: ["calendar@fwd2cal.com"],
+              text: "Test email content",
+              html: "<p>Test email content</p>",
+              headers: {
+                "authentication-results": "amazonses.com; spf=pass; dkim=pass header.i=@example.com; dmarc=pass",
+                "from": "test@example.com",
+                "to": "calendar@fwd2cal.com",
+                "subject": "Test Email",
+                "message-id": `<${emailId}@example.com>`,
+              },
             },
+            error: null,
           };
         }
-        return data.emailContent;
+        return {
+          data: testData.emailContent,
+          error: null,
+        };
       },
     },
 
@@ -77,13 +83,16 @@ class MockResend {
         headers: message.headers || {},
       };
 
-      // Mock email sending - return success
+      // Mock email sending - return success in {data, error} format
       return {
-        id: `mock-email-${Date.now()}`,
-        from: message.from,
-        to: message.to,
-        subject: message.subject,
-        created_at: new Date().toISOString(),
+        data: {
+          id: `mock-email-${Date.now()}`,
+          from: message.from,
+          to: message.to,
+          subject: message.subject,
+          created_at: new Date().toISOString(),
+        },
+        error: null,
       };
     },
   };
@@ -92,11 +101,17 @@ class MockResend {
   attachments = {
     receiving: {
       get: async ({id, emailId}) => {
-        const data = this.testData[emailId];
-        if (!data || !data.attachments || !data.attachments[id]) {
-          return Buffer.from("Mock attachment content");
+        const testData = this.testData[emailId];
+        if (!testData || !testData.attachments || !testData.attachments[id]) {
+          return {
+            data: Buffer.from("Mock attachment content"),
+            error: null,
+          };
         }
-        return data.attachments[id];
+        return {
+          data: testData.attachments[id],
+          error: null,
+        };
       },
     },
   };

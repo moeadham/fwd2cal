@@ -576,7 +576,28 @@ function getRecipientsFromRawEmail(email) {
 }
 
 function getEmailThreadHeaders(headers) {
-  return getEmailHeaders(headers, ["In-Reply-To", "References"]);
+  // Extract incoming Message-ID and existing References from the email
+  const extracted = getEmailHeaders(headers, ["Message-ID", "References"]);
+
+  const messageId = extracted["Message-ID"];
+  const existingReferences = extracted["References"];
+
+  const threadHeaders = {};
+
+  // Build proper threading headers for the reply
+  if (messageId) {
+    // Set In-Reply-To to the incoming message's ID
+    threadHeaders["In-Reply-To"] = messageId;
+
+    // Build References chain: existing references + incoming message ID
+    if (existingReferences) {
+      threadHeaders["References"] = `${existingReferences} ${messageId}`;
+    } else {
+      threadHeaders["References"] = messageId;
+    }
+  }
+
+  return threadHeaders;
 }
 
 function getEmailHeaders(headers, items) {
