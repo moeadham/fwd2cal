@@ -635,19 +635,52 @@ function getEmailHeaders(headers, items) {
 }
 
 function threadEmailHtml(original, html) {
-  // const date = getDateFromHeader(original.header);
-  // const formattedDate = moment(date).format("MMM DD, YYYY");
-  // const formattedTime = moment(date).format("h:mm A");
-  // const senderFull = original.from;
-  // const threadLine =
-  //   `On Tue, ${formattedDate} at ${formattedTime} ${senderFull} wrote:`;
-  // return `${html}
-  // <div class="gmail_quote">
-  // <div dir="ltr" class="gmail_attr">
-  // ${threadLine}
-  // ${original.html}
-  // </div>
-  // </div>`;
+  try {
+    // Parse sender information from headers
+    let senderDisplay = original.from;
+    if (original.headers && original.headers.from) {
+      // Remove outer quotes if present: "\"Name\" <email>" -> "Name" <email>
+      const fromHeader = original.headers.from.replace(/^"(.*)"$/, "$1");
+      // Extract name and email from format: "Name <email>" or just "email"
+      const match = fromHeader.match(/^(.+?)\s*<(.+?)>$/);
+      if (match) {
+        senderDisplay = `${match[1].replace(/^"|"$/g, "")} <${match[2]}>`;
+      } else {
+        senderDisplay = fromHeader;
+      }
+    }
+
+    // Parse date from headers
+    let formattedDate = "";
+    let formattedTime = "";
+    if (original.headers && original.headers.date) {
+      // Remove outer quotes if present: "\"2025-11-10T06:47:51.000Z\"" -> ISO date
+      const dateString = original.headers.date.replace(/^"(.*)"$/, "$1");
+      const dateMoment = moment(dateString);
+      if (dateMoment.isValid()) {
+        formattedDate = dateMoment.utc().format("ddd, MMM D, YYYY");
+        formattedTime = dateMoment.utc().format("h:mm A") + " UTC";
+      }
+    }
+
+    // If we successfully parsed date and sender, create Gmail-style threading
+    if (formattedDate && formattedTime) {
+      const threadLine = `On ${formattedDate}, at ${formattedTime}, ${senderDisplay} wrote:`;
+      return `${html}
+<div class="gmail_quote">
+<div dir="ltr" class="gmail_attr">
+${threadLine}<br>
+</div>
+<blockquote class="gmail_quote" style="margin:0px 0px 0px 0.8ex;border-left-width:1px;border-left-style:solid;padding-left:1ex;border-left-color:rgb(204,204,204)">
+${original.html}
+</blockquote>
+</div>`;
+    }
+  } catch (error) {
+    logger.warn("Error threading email HTML", error);
+  }
+
+  // Fallback to simple concatenation if anything fails
   return `${html}${original.html}`;
 }
 
