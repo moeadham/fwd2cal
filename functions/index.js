@@ -37,7 +37,7 @@ const {oauthCronJob,
   verifyAdditionalEmail} = require("./util/authHandler");
 
 // Global configuration for onRequest functions
-const onRequestConfig = {cors: true, memory: "512MiB"};
+const onRequestConfig = {cors: true, memory: "512MiB", timeoutSeconds: 540};
 
 // For debugging before we start inviting others to our events.
 const ONLY_INVITE_HOST = true;
