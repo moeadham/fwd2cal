@@ -9,10 +9,9 @@ const {getOauthClient,
   deleteAccount} = require("./authHandler");
 const {processEmail} = require("./openai");
 const {addEvent, eventFromICS} = require("./calendarHelper");
-const {sendEmail: sendEmailSendgrid} = require("./sendgrid");
-const {sendEmail: sendEmailMailgun} = require("./mailgun");
-const {MAIN_EMAIL_ADDRESS,
-  API_URL} = require("./credentials");
+const sendEmailResend = require("./resend");
+const {getApiUrl} = require("./credentials");
+const {ENVIRONMENT_NAME, MAIN_EMAIL_ADDRESS} = require("./config");
 const handleAsync = require("./handleAsync");
 const {mailTemplates} = require("./mailTemplates");
 const moment = require("moment-timezone");
@@ -96,11 +95,7 @@ const EMAIL_RESPONSES = {
   },
 };
 
-function getSendEmailFunction(emailService) {
-  return emailService === "mailgun" ? sendEmailMailgun : sendEmailSendgrid;
-}
-
-async function handleEmail(email, files, emailService = "sendgrid") {
+async function handleEmail(email, files) {
   // Do we know this user?
   const sender = getSenderFromRawEmail(email);
   // Is the email sender verified?
@@ -112,7 +107,7 @@ async function handleEmail(email, files, emailService = "sendgrid") {
         FROM_EMAIL: sender,
       },
     };
-    await sendEmailResponse(sender, email, response, true, emailService);
+    await sendEmailResponse(sender, email, response, true);
     return {error: "Unverified email address"};
   }
   // Is this a support email?
@@ -120,7 +115,7 @@ async function handleEmail(email, files, emailService = "sendgrid") {
   if (to.includes("support@fwd2cal.com") ||
       to.includes("admin@fwd2cal.com") ||
       email.subject.toLowerCase().startsWith("verify your email address")) { // To handle google account creation.
-    return await sendToSupport(sender, email, emailService);
+    return await sendToSupport(sender, email);
   }
 
   const uid = await getUserFromEmail(sender);
@@ -132,33 +127,34 @@ async function handleEmail(email, files, emailService = "sendgrid") {
         FROM_EMAIL: sender,
       },
     };
-    await sendEmailResponse(sender, email, response, true, emailService);
+    await sendEmailResponse(sender, email, response, true);
+    sendEvent(sender, "userInvited");
     return {result: `${sender} has been invited to signup`};
   }
   const subjectAction = understandSubject(email.subject);
   logger.log(`Request from ${sender} to ${subjectAction}`);
-  sendEvent(uid, subjectAction);
+  // Track all received emails with the action type
+  sendEvent(uid, "emailReceived", {action: subjectAction});
   switch (subjectAction) {
     case "addUser":
-      return await addEmailAddressToUser(email, sender, uid, files, emailService);
+      return await addEmailAddressToUser(email, sender, uid, files);
     case "removeEmail":
-      return await removeEmailAddressFromUser(email, sender, uid, files, emailService);
+      return await removeEmailAddressFromUser(email, sender, uid, files);
     case "deleteAccount":
-      return await deleteUserAccount(email, sender, uid, files, emailService);
+      return await deleteUserAccount(email, sender, uid, files);
     case "addEvent":
-      return await eventHandler(email, sender, uid, files, emailService);
+      return await eventHandler(email, sender, uid, files);
     default:
-      return await eventHandler(email, sender, uid, files, emailService);
+      return await eventHandler(email, sender, uid, files);
   }
 }
 
-async function sendToSupport(sender, email, emailService = "sendgrid") {
+async function sendToSupport(sender, email) {
   logger.log(`Support email received from ${sender}`);
   logger.log(email.subject);
   logger.log(email.text);
   const content = `From: ${sender} <br><br> Subject: ${email.subject} <br><br> ${email.html}`;
-  const sendEmail = getSendEmailFunction(emailService);
-  await sendEmail({
+  await sendEmailResend({
     to: "fwd2cal@googlegroups.com",
     from: MAIN_EMAIL_ADDRESS,
     subject: email.subject,
@@ -182,19 +178,20 @@ function understandSubject(subject) {
   }
 }
 
-async function deleteUserAccount(email, sender, uid, files = [], emailService = "sendgrid") {
+async function deleteUserAccount(email, sender, uid, files = []) {
   await deleteUser(uid);
   await deleteAccount(uid);
   const response = {
     ...EMAIL_RESPONSES.userDeleted,
     replace: {},
   };
-  await sendEmailResponse(sender, email, response, true, emailService);
+  await sendEmailResponse(sender, email, response, true);
+  sendEvent(uid, "deleteAccount");
   return `${uid} account deleted.`;
 }
 
 
-async function removeEmailAddressFromUser(email, sender, uid, files = [], emailService = "sendgrid") {
+async function removeEmailAddressFromUser(email, sender, uid, files = []) {
   // TODO: Make sure sender is the main account? Let's see if this goes wrong.
   const subject = email.subject;
   const emailRegex = /^remove\s+([a-zA-Z0-9._+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6})$/;
@@ -203,14 +200,14 @@ async function removeEmailAddressFromUser(email, sender, uid, files = [], emailS
     logger.log(`Email that starts with 'remove' but doesn't 
       have a valid email address after it.`);
     logger.log(`Subject: ${email.subject}`);
-    return await eventHandler(email, sender, uid, files, emailService);
+    return await eventHandler(email, sender, uid, files);
   }
   const emailAddressToRemove = match[1];
   // Check if the email address is already added.
   // If not, add it to the pending email address list.
   const existingUid = await getUserFromEmail(emailAddressToRemove);
   if (existingUid !== uid) {
-    logger.warn(`${uid} attempted to remove 
+    logger.warn(`${uid} attempted to remove
       ${emailAddressToRemove}, but registered to ${existingUid}`);
     const response = {
       ...EMAIL_RESPONSES.removalEmailInUse,
@@ -219,7 +216,8 @@ async function removeEmailAddressFromUser(email, sender, uid, files = [], emailS
       },
     };
     logger.log(`Sending email additionalEmailInUse to ${sender}`);
-    return await sendEmailResponse(sender, email, response, true, emailService);
+    sendEvent(uid, "removeEmailFailed", {reason: "not_owned"});
+    return await sendEmailResponse(sender, email, response, true);
   } else {
     await removeEmailAddress(emailAddressToRemove);
     logger.log(`${uid} to removed
@@ -230,12 +228,13 @@ async function removeEmailAddressFromUser(email, sender, uid, files = [], emailS
         EMAIL_TO_REMOVE: emailAddressToRemove,
       },
     };
-    await sendEmailResponse(sender, email, response, true, emailService);
+    await sendEmailResponse(sender, email, response, true);
+    sendEvent(uid, "removeEmail");
     return `${emailAddressToRemove} removed.`;
   }
 }
 
-async function addEmailAddressToUser(email, sender, uid, files = [], emailService = "sendgrid") {
+async function addEmailAddressToUser(email, sender, uid, files = []) {
   // TODO: Make sure sender is the main account? Let's see if this goes wrong.
   const subject = email.subject;
   const emailRegex = /^add\s+([a-zA-Z0-9._+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6})$/;
@@ -243,14 +242,14 @@ async function addEmailAddressToUser(email, sender, uid, files = [], emailServic
   if (!match) {
     logger.log(`Email that starts with 'add' but doesn't 
       have a valid email address after it.`);
-    return await eventHandler(email, sender, uid, files, emailService);
+    return await eventHandler(email, sender, uid, files);
   }
   const emailAddressToAdd = match[1];
   // Check if the email address is already added.
   // If not, add it to the pending email address list.
   const existingUid = await getUserFromEmail(emailAddressToAdd);
   if (existingUid) {
-    logger.warn(`${uid} attempted to add 
+    logger.warn(`${uid} attempted to add
       ${emailAddressToAdd}, but already registered to ${existingUid}`);
     const response = {
       ...EMAIL_RESPONSES.additionalEmailInUse,
@@ -259,7 +258,8 @@ async function addEmailAddressToUser(email, sender, uid, files = [], emailServic
       },
     };
     logger.log(`Sending email additionalEmailInUse to ${sender}`);
-    return await sendEmailResponse(sender, email, response, true, emailService);
+    sendEvent(uid, "addUserFailed", {reason: "email_in_use"});
+    return await sendEmailResponse(sender, email, response, true);
   }
   const verificationCode = await addPendingEmailAddress(uid, emailAddressToAdd);
   // Send email to the user with the verification code.
@@ -273,18 +273,19 @@ async function addEmailAddressToUser(email, sender, uid, files = [], emailServic
   logger.log(
       // eslint-disable-next-line max-len
       `Sending email addAdditionalEmailAddress ${emailAddressToAdd} to pending list for ${uid}`);
-  await sendEmailResponse(emailAddressToAdd, email, response, false, emailService);
+  await sendEmailResponse(emailAddressToAdd, email, response, false);
+  sendEvent(uid, "addUserRequest");
   return {verificationCode};
 }
 
-async function eventHandler(email, sender, uid, files = [], emailService = "sendgrid") {
+async function eventHandler(email, sender, uid, files = []) {
   // logger.log("User ID: ", uid);
 
   // Can we authenticate with their calendar?
   const [oauthErr, oauth2Client] = await handleAsync(() => getOauthClient(uid));
   if (oauthErr) {
     logger.warn("Error getting OAuth client: ", oauthErr);
-    await sendEmailResponse(sender, email, EMAIL_RESPONSES.oauthFailed, true, emailService);
+    await sendEmailResponse(sender, email, EMAIL_RESPONSES.oauthFailed, true);
     sendEvent(uid, "addEvent", {result: "oauthFailed"});
     return;
   }
@@ -299,6 +300,7 @@ async function eventHandler(email, sender, uid, files = [], emailService = "send
       const [icsErr, icsEvent] = await handleAsync(() => eventFromICS(icsFile));
       if (icsErr) {
         logger.warn("ICS error: ", icsErr);
+        sendEvent(uid, "icsProcessingFailed", {reason: "parse_failed"});
       } else {
         event = icsEvent;
       }
@@ -309,11 +311,11 @@ async function eventHandler(email, sender, uid, files = [], emailService = "send
 
   if (!event) {
     // Can we get event details from the thread with AI?
-    const headers = getEmailHeaders(email.headers, ["Date", "Subject", "From"]);
-    const [processEmailErr, aiEvent] = await handleAsync(() => processEmail(email, headers));
+    const headers = getEmailHeaders(email.headers, ["date", "subject", "from"]);
+    const [processEmailErr, aiEvent] = await handleAsync(() => processEmail(email, headers, uid));
     if (processEmailErr) {
       logger.warn("OpenAI error: ", processEmailErr);
-      await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true, emailService);
+      await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true);
       sendEvent(uid, "addEvent", {result: "aiUnableToParse"});
       return;
     }
@@ -326,7 +328,7 @@ async function eventHandler(email, sender, uid, files = [], emailService = "send
         },
       };
       logger.warn("Error in email contents: ", aiEvent);
-      await sendEmailResponse(sender, email, response, true, emailService);
+      await sendEmailResponse(sender, email, response, true);
       sendEvent(uid, "addEvent", {result: "aiUnableToParse"});
       return aiEvent;
     } else {
@@ -334,7 +336,7 @@ async function eventHandler(email, sender, uid, files = [], emailService = "send
       if (aiEvent.events && Array.isArray(aiEvent.events)) {
         if (aiEvent.events.length === 0) {
           logger.warn("No events found in email");
-          await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true, emailService);
+          await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true);
           sendEvent(uid, "addEvent", {result: "aiUnableToParse"});
           return;
         }
@@ -357,13 +359,13 @@ async function eventHandler(email, sender, uid, files = [], emailService = "send
 
         if (aiEvent.events.length === 0) {
           logger.warn("All events had invalid times");
-          await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true, emailService);
+          await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true);
           sendEvent(uid, "addEvent", {result: "aiUnableToParse"});
           return;
         }
 
         // Process multiple events
-        return addEventsAndSendResponse(oauth2Client, aiEvent.events, uid, sender, email, emailService);
+        return addEventsAndSendResponse(oauth2Client, aiEvent.events, uid, sender, email);
       } else {
         // Old single event format (backward compatibility)
         event = aiEvent;
@@ -372,19 +374,19 @@ async function eventHandler(email, sender, uid, files = [], emailService = "send
         const timeValidation = validateEventTimes(event);
         if (!timeValidation.isValid) {
           logger.warn(`Invalid event times from AI: ${timeValidation.error}`);
-          await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true, emailService);
+          await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true);
           sendEvent(uid, "addEvent", {result: "aiUnableToParse"});
           return;
         }
 
         // Convert to array format
-        return addEventsAndSendResponse(oauth2Client, [event], uid, sender, email, emailService);
+        return addEventsAndSendResponse(oauth2Client, [event], uid, sender, email);
       }
     }
   }
 
   // Handle ICS event (convert to array format)
-  return addEventsAndSendResponse(oauth2Client, [event], uid, sender, email, emailService);
+  return addEventsAndSendResponse(oauth2Client, [event], uid, sender, email);
 }
 
 function validateEventTimes(event) {
@@ -425,7 +427,7 @@ function isValidEmail(email) {
   return emailRegex.test(email);
 }
 
-async function addEventsAndSendResponse(oauth2Client, events, uid, sender, email, emailService = "sendgrid") {
+async function addEventsAndSendResponse(oauth2Client, events, uid, sender, email) {
   const successfulEvents = [];
   const failedEvents = [];
 
@@ -459,7 +461,9 @@ async function addEventsAndSendResponse(oauth2Client, events, uid, sender, email
           uid: uid,
           attendees: event.attendees,
         };
-        eventObject.inviteOthersLink = `${API_URL}inviteAdditionalAttendees?${qs.stringify(params)}`;
+        const apiUrl = getApiUrl(ENVIRONMENT_NAME.value());
+        eventObject.inviteOthersLink = `${apiUrl}inviteAdditionalAttendees?${qs.stringify(params)}`;
+        eventObject.inviteOthersAttendees = event.attendees;
       }
       successfulEvents.push(eventObject);
     }
@@ -467,7 +471,7 @@ async function addEventsAndSendResponse(oauth2Client, events, uid, sender, email
 
   // If all events failed, send oauth failed response
   if (successfulEvents.length === 0) {
-    await sendEmailResponse(sender, email, EMAIL_RESPONSES.oauthFailed, true, emailService);
+    await sendEmailResponse(sender, email, EMAIL_RESPONSES.oauthFailed, true);
     return;
   }
 
@@ -508,6 +512,7 @@ async function addEventsAndSendResponse(oauth2Client, events, uid, sender, email
 
   // Add failed events info if any
   if (failedEvents.length > 0) {
+    sendEvent(uid, "addEventPartialFailure");
     responseHtml += `<p><strong>Failed to add ${failedEvents.length} event(s):</strong><br>`;
     for (const failed of failedEvents) {
       responseHtml += `- ${failed.event.summary}: ${failed.error}<br>`;
@@ -521,15 +526,8 @@ async function addEventsAndSendResponse(oauth2Client, events, uid, sender, email
     const eventObject = successfulEvents[0];
     let response;
 
-    if (eventObject.attendees && eventObject.attendees.length > 1) {
-      const params = {
-        eventId: eventObject.id,
-        calendarId: eventObject.calendarId,
-        uid: uid,
-        attendees: eventObject.attendees.map((a) => a.email),
-      };
-      const inviteLink = `${API_URL}inviteAdditionalAttendees?${qs.stringify(params)}`;
-      const inviteesWithoutHost = eventObject.attendees.filter((attendee) => attendee.email !== eventObject.organizer.email);
+    if (eventObject.inviteOthersLink) {
+      const inviteesWithoutHost = eventObject.inviteOthersAttendees.filter((email) => email !== eventObject.organizer.email);
 
       response = {
         ...EMAIL_RESPONSES.eventAddedAttendees,
@@ -538,8 +536,8 @@ async function addEventsAndSendResponse(oauth2Client, events, uid, sender, email
           EVENT_DATE: moment(eventObject.start.dateTime)
               .tz(eventObject.start.timeZone)
               .format("dddd, MMMM Do [at] h:mm A z"),
-          INVITE_LINK: inviteLink,
-          EVENT_ATTENDEES: inviteesWithoutHost.map((a) => a.email).join(", "),
+          INVITE_LINK: eventObject.inviteOthersLink,
+          EVENT_ATTENDEES: inviteesWithoutHost.join(", "),
         },
       };
     } else {
@@ -555,7 +553,7 @@ async function addEventsAndSendResponse(oauth2Client, events, uid, sender, email
       };
     }
 
-    await sendEmailResponse(sender, email, response, true, emailService);
+    await sendEmailResponse(sender, email, response, true);
   } else {
     // Multiple events - send custom HTML email
     const customHtml = `
@@ -564,8 +562,7 @@ ${responseHtml}
 <br><br>You can always ask for help: <a href="mailto:support@fwd2cal.com">support@fwd2cal.com</a><br>
     `;
 
-    const sendEmail = getSendEmailFunction(emailService);
-    await sendEmail({
+    await sendEmailResend({
       to: sender,
       from: MAIN_EMAIL_ADDRESS,
       subject: `Re: ${email.subject}`,
@@ -579,95 +576,112 @@ ${responseHtml}
 }
 
 function getSenderFromRawEmail(email) {
-  let sender;
-  try {
-    const envelope = JSON.parse(email.envelope);
-    sender = envelope.from.toLowerCase();
-  } catch (error) {
-    logger.warn("Error parsing envelope", error);
-  }
-  return sender;
+  return email.from ? email.from.toLowerCase() : undefined;
 }
 
 function getRecipientsFromRawEmail(email) {
-  let to;
-  try {
-    const envelope = JSON.parse(email.envelope);
-    to = envelope.to;
-    to = to.map((email) => email.toLowerCase());
-  } catch (error) {
-    logger.warn("Error parsing envelope", error);
-  }
-  return to;
+  const to = email.to || [];
+  return Array.isArray(to) ? to.map((email) => email.toLowerCase()) : [to.toLowerCase()];
 }
 
-// eslint-disable-next-line no-unused-vars
-function getDateFromHeader(header) {
-  let date;
-  try {
-    const datePattern = /Date: (.*)/g;
-    const matches = datePattern.exec(header);
-    if (matches && matches[1]) {
-      // Thu, 28 Mar 2024 10:38:21 +0000
-      date = moment(matches[1].trim(), "ddd, DD MMM YYYY HH:mm:ss ZZ").toDate();
+function getEmailThreadHeaders(headers) {
+  // Extract incoming Message-ID and existing References from the email
+  const extracted = getEmailHeaders(headers, ["Message-ID", "References"]);
+
+  const messageId = extracted["Message-ID"];
+  const existingReferences = extracted["References"];
+
+  const threadHeaders = {};
+
+  // Build proper threading headers for the reply
+  if (messageId) {
+    // Set In-Reply-To to the incoming message's ID
+    threadHeaders["In-Reply-To"] = messageId;
+
+    // Build References chain: existing references + incoming message ID
+    if (existingReferences) {
+      threadHeaders["References"] = `${existingReferences} ${messageId}`;
+    } else {
+      threadHeaders["References"] = messageId;
     }
-  } catch (error) {
-    logger.warn("Error extracting date with moment from header", error);
   }
-  return date;
+
+  return threadHeaders;
 }
 
-function getEmailThreadHeaders(header) {
-  const headers = {};
+function getEmailHeaders(headers, items) {
+  const result = {};
   try {
-    const inreplyPattern = /In-Reply-To: (.*)/g;
-    let matches = inreplyPattern.exec(header);
-    if (matches && matches[1]) {
-      // Thu, 28 Mar 2024 10:38:21 +0000
-      headers["In-Reply-To"] = matches[1].trim();
+    // Handle if headers is not an object
+    if (!headers || typeof headers !== "object") {
+      return result;
     }
-    const referncesPattern = /References: (.*)/g;
-    matches = referncesPattern.exec(header);
-    if (matches && matches[1]) {
-      // Thu, 28 Mar 2024 10:38:21 +0000
-      headers["References"] = matches[1].trim();
-    }
-  } catch (error) {
-    logger.warn("Error extracting date with moment from header", error);
-  }
-  return headers;
-}
 
-function getEmailHeaders(header, items) {
-  const headers = {};
-  try {
     items.forEach((item) => {
-      const pattern = new RegExp(`${item}: (.*)`, "g");
-      const matches = pattern.exec(header);
-      if (matches && matches[1]) {
-        headers[item] = matches[1].trim();
+      // Case-insensitive key lookup
+      const key = Object.keys(headers).find((k) =>
+        k.toLowerCase() === item.toLowerCase(),
+      );
+      if (key && headers[key]) {
+        // Trim if it's a string, otherwise return as-is
+        result[item] = typeof headers[key] === "string" ?
+            headers[key].trim() : headers[key];
       }
     });
   } catch (error) {
     logger.warn("Error extracting headers", error);
   }
-  return headers;
+  return result;
 }
 
 function threadEmailHtml(original, html) {
-  // const date = getDateFromHeader(original.header);
-  // const formattedDate = moment(date).format("MMM DD, YYYY");
-  // const formattedTime = moment(date).format("h:mm A");
-  // const senderFull = original.from;
-  // const threadLine =
-  //   `On Tue, ${formattedDate} at ${formattedTime} ${senderFull} wrote:`;
-  // return `${html}
-  // <div class="gmail_quote">
-  // <div dir="ltr" class="gmail_attr">
-  // ${threadLine}
-  // ${original.html}
-  // </div>
-  // </div>`;
+  if (!html) html = "";
+  try {
+    // Parse sender information from headers
+    let senderDisplay = original.from;
+    if (original.headers && original.headers.from) {
+      // Remove outer quotes if present: "\"Name\" <email>" -> "Name" <email>
+      const fromHeader = original.headers.from.replace(/^"(.*)"$/, "$1");
+      // Extract name and email from format: "Name <email>" or just "email"
+      const match = fromHeader.match(/^(.+?)\s*<(.+?)>$/);
+      if (match) {
+        senderDisplay = `${match[1].replace(/^"|"$/g, "")} <${match[2]}>`;
+      } else {
+        senderDisplay = fromHeader;
+      }
+    }
+
+    // Parse date from headers
+    let formattedDate = "";
+    let formattedTime = "";
+    if (original.headers && original.headers.date) {
+      // Remove outer quotes if present: "\"2025-11-10T06:47:51.000Z\"" -> ISO date
+      const dateString = original.headers.date.replace(/^"(.*)"$/, "$1");
+      const dateMoment = moment(dateString);
+      if (dateMoment.isValid()) {
+        formattedDate = dateMoment.utc().format("ddd, MMM D, YYYY");
+        formattedTime = dateMoment.utc().format("h:mm A") + " UTC";
+      }
+    }
+
+    // If we successfully parsed date and sender, create Gmail-style threading
+    if (formattedDate && formattedTime) {
+      const threadLine = `On ${formattedDate}, at ${formattedTime}, ${senderDisplay} wrote:`;
+      return `${html}<br>
+<div class="gmail_quote">
+<div dir="ltr" class="gmail_attr">
+${threadLine}<br>
+</div>
+<blockquote class="gmail_quote" style="margin:0px 0px 0px 0.8ex;border-left-width:1px;border-left-style:solid;padding-left:1ex;border-left-color:rgb(204,204,204)">
+${original.html}
+</blockquote>
+</div>`;
+    }
+  } catch (error) {
+    logger.warn("Error threading email HTML", error);
+  }
+
+  // Fallback to simple concatenation if anything fails
   return `${html}${original.html}`;
 }
 
@@ -691,8 +705,7 @@ function getSubject(messageType) {
 async function sendEmailResponse(sender,
     originalEmail,
     messageType,
-    includeThread,
-    emailService = "sendgrid") {
+    includeThread) {
   let html = getHtml(messageType);
   let subject = originalEmail.subject;
   if (messageType.subject) {
@@ -701,8 +714,7 @@ async function sendEmailResponse(sender,
   if (includeThread) {
     html = threadEmailHtml(originalEmail, html);
   }
-  const sendEmail = getSendEmailFunction(emailService);
-  await sendEmail({
+  await sendEmailResend({
     to: sender,
     from: MAIN_EMAIL_ADDRESS,
     subject: subject,
@@ -712,16 +724,42 @@ async function sendEmailResponse(sender,
 }
 
 function verifyEmail(email) {
+  // Log incoming email verification data
+  logger.info("Email verification check", {
+    from: email.from,
+    SPF: email.SPF,
+    dkim: email.dkim,
+  });
+
   if (email.SPF !== "pass") {
+    logger.warn("Email verification failed: SPF check failed", {
+      from: email.from,
+      SPF: email.SPF,
+      expected: "pass",
+    });
+    sendEvent(email.from, "emailRejected", {reason: "spf_failed"});
     return false;
   }
+
   if (email.dkim.indexOf("pass") === -1 ) {
+    logger.warn("Email verification failed: DKIM check failed", {
+      from: email.from,
+      dkim: email.dkim,
+      containsPass: email.dkim.indexOf("pass") !== -1,
+    });
+    sendEvent(email.from, "emailRejected", {reason: "dkim_failed"});
     return false;
   }
+
   // WARN: This IP might change, disable for now.
   //   if (email.sender_ip !== "209.85.216.44" && ENVIRONMENT==="production") {
   //     return false;
   //   }
+
+  logger.info("Email verification passed", {
+    from: email.from,
+  });
+
   return true;
 }
 

@@ -25,3 +25,9 @@ pubsub-debug.log
 # Local Netlify folder
 .netlify
 CLAUDE.md
+.env
+.env.*
+
+# bindings
+functions/test/bindings/resend-raw.json
+functions/test/bindings/resend-sample.json

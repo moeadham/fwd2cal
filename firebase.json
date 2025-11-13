@@ -13,9 +13,7 @@
         "firebase-debug.log",
         "firebase-debug.*.log"
       ],
-      "predeploy": [
-        "npm --prefix \"$RESOURCE_DIR\" run lint"
-      ]
+      "predeploy": ["npm --prefix \"$RESOURCE_DIR\" run lint"]
     }
   ],
   "emulators": {
@@ -38,13 +36,8 @@
   },
   "hosting": {
     "public": "public",
-    "ignore": [
-      "firebase.json",
-      "**/.*",
-      "**/node_modules/**"
-    ],
-    "redirects": [
-    ],
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "redirects": [],
     "rewrites": [
       {
         "source": "/not-found",
@@ -69,6 +62,26 @@
       {
         "source": "/signup",
         "function": "signup"
+      },
+      {
+        "source": "/v2/verifyAdditionalEmail",
+        "function": "v2verifyAdditionalEmail"
+      },
+      {
+        "source": "/v2/inviteAdditionalAttendees",
+        "function": "v2inviteAdditionalAttendees"
+      },
+      {
+        "source": "/v2/oauthCallback",
+        "function": "v2oauthCallback"
+      },
+      {
+        "source": "/v2/signup",
+        "function": "v2signup"
+      },
+      {
+        "source": "/v2/resendInboundCallback",
+        "function": "v2resendInboundCallback"
       }
     ]
   }

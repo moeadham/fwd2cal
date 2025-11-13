@@ -3,13 +3,15 @@
 
 
 if [ -z "$TESTER_PRIMARY_GOOGLE_ACCT" ]; then
-  echo "Error: TESTER_PRIMARY_GOOGLE_ACCT is not set: export TESTER_PRIMARY_GOOGLE_ACCT=\"your@gmail.com\""
-  exit 1
+  echo "WARN: TESTER_PRIMARY_GOOGLE_ACCT is not set. Setting to default: export TESTER_PRIMARY_GOOGLE_ACCT=\"jezos.beff.420@gmail.com\""
+  export TESTER_PRIMARY_GOOGLE_ACCT="jezos.beff.420@gmail.com"
+  # exit 1
 fi
 
 if [ -z "$TESTER_SECONDARY_EMAIL_ACCT" ]; then
-  echo "Error: TESTER_SECONDARY_EMAIL_ACCT is not set: export TESTER_SECONDARY_EMAIL_ACCT=\"anotherEmailAddressThatYouUse@anything.com\""
-  exit 1
+  echo "WARN: TESTER_SECONDARY_EMAIL_ACCT is not set. Setting to default: export TESTER_SECONDARY_EMAIL_ACCT=\"jezos.beff.420+secondary@gmail.com\""
+  export TESTER_SECONDARY_EMAIL_ACCT="jezos.beff.420+secondary@gmail.com"
+  # exit 1
 fi
 
 # If emulator didn't shut down cleanly last time, try:

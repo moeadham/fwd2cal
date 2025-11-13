@@ -7,9 +7,8 @@ const {getUserFromUID,
   getPendingEmailAddressByCode,
 } = require("./firestoreHandler");
 const {google} = require("googleapis");
-const {CREDENTIALS,
-  REDIRECT_URI_INDEX,
-} = require("./credentials");
+const {CREDENTIALS, getRedirectUriIndex} = require("./credentials");
+const {ENVIRONMENT_NAME} = require("./config");
 const {getAuth} = require("firebase-admin/auth");
 const {logger} = require("firebase-functions");
 const {isUUID} = require("validator");
@@ -44,10 +43,11 @@ async function refreshAccessToken(oauth2Client) {
 
 async function getOauthClient(uid) {
   const userData = await getUserFromUID(uid);
+  const redirectUriIndex = getRedirectUriIndex(ENVIRONMENT_NAME.value());
   const oauth2Client = new google.auth.OAuth2(
       CREDENTIALS.web.client_id,
       CREDENTIALS.web.client_secret,
-      CREDENTIALS.web.redirect_uris[REDIRECT_URI_INDEX],
+      CREDENTIALS.web.redirect_uris[redirectUriIndex],
   );
   oauth2Client.setCredentials({
     access_token: userData.access_token,
@@ -62,7 +62,12 @@ async function oauthCronJob() {
     logger.log("Refreshing tokens for Users with expiring tokens ",
         users.length);
     for (const user of users) {
-      await refreshOAuthTokens(user.id);
+      try {
+        await refreshOAuthTokens(user.id);
+      } catch (error) {
+        logger.warn(`Failed to refresh tokens for user ${user.id}:`, error);
+        sendEvent(user.id, "tokenRefreshFailed");
+      }
     }
   } catch (error) {
     logger.warn("Error refreshing tokens:", error);
@@ -82,10 +87,11 @@ async function deleteAccount(uid) {
 
 async function signupCallbackHandler(query) {
   logger.log("oauthCallback", query);
+  const redirectUriIndex = getRedirectUriIndex(ENVIRONMENT_NAME.value());
   const oauth2Client = new google.auth.OAuth2(
       CREDENTIALS.web.client_id,
       CREDENTIALS.web.client_secret,
-      CREDENTIALS.web.redirect_uris[REDIRECT_URI_INDEX],
+      CREDENTIALS.web.redirect_uris[redirectUriIndex],
   );
   try {
     const {tokens} = await oauth2Client.getToken(query);
@@ -158,6 +164,7 @@ async function verifyAdditionalEmail(req, res) {
     default: false,
   }]);
   logger.log(`added ${pendingEmail.id} to user account ${mainUser.uid}`);
+  sendEvent(mainUser.uid, "addUserConfirmed");
   return res.send({data: mainUser.email});
 }
 

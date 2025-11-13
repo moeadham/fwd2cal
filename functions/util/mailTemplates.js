@@ -19,7 +19,7 @@ Note: If you've already signed up for fwd2cal, and want to fwd events from this 
   },
   oauthFailed: {
     html:
-`Sorry - there was an issue authenticating with Google. Please click <a href="https://app.fwd2cal.com/signup">to authorize Google again</a>, and then forward your thread another time.
+`Sorry - there was an issue authenticating with Google. Please click <a href="https://app.fwd2cal.com/v2/signup">to authorize Google again</a>, and then forward your thread another time.
 
 Make sure you complete the checkbox to allow fwd2cal to access your calendar.
 <img src="https://app.fwd2cal.com/fwd2calPermissions.png" alt="Google Permissions" width="394" height="170" style="display: block;">
@@ -76,7 +76,7 @@ Forward the thread again and include some instructions to help AI figure it out.
     subject:
 `%ORIGINATOR_EMAIL% would like you to add events to their calendar`,
     html:
-`To join %ORIGINATOR_EMAIL%'s fwd2cal account, please click <a href="https://app.fwd2cal.com/auth/verifyAdditionalEmail?uuid=%VERIFICATION_CODE%">here</a><br><br>
+`To join %ORIGINATOR_EMAIL%'s fwd2cal account, please click <a href="https://app.fwd2cal.com/v2/verifyAdditionalEmail?uuid=%VERIFICATION_CODE%">here</a><br><br>
 
 After you approve, you can forward any email to calendar@fwd2cal.com, and it will automatically be turned into an event in %ORIGINATOR_EMAIL%'s calendar using AI.<br><br>
 

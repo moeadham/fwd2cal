@@ -1,9 +1,10 @@
 /* eslint-disable require-jsdoc */
-// const {logger} = require("firebase-functions");
+const {logger} = require("firebase-functions");
 const {getFirestore} = require("firebase-admin/firestore");
-const {ENVIRONMENT} = require("./credentials");
+const {ENVIRONMENT_NAME} = require("./config");
 const {v4: uuidv4} = require("uuid");
-// const {logger} = require("firebase-functions");
+const {sendEvent} = require("./analytics");
+
 async function getUserFromUID(uid) {
   const userDoc = await getFirestore().collection("Users").doc(uid).get();
   if (!userDoc.exists) {
@@ -26,7 +27,7 @@ async function findUsersWithExpiringTokens() {
   const now = new Date();
   const twoHoursLater = new Date(now.getTime() + (2 * 60 * 60 * 1000));
   let querySnapshot;
-  if (ENVIRONMENT === "production") {
+  if (ENVIRONMENT_NAME.value() === "production") {
     querySnapshot =
       await usersRef.where("expiry_date", "<=", twoHoursLater).get();
   } else {
@@ -45,48 +46,93 @@ async function findUsersWithExpiringTokens() {
 }
 
 async function storeUser(tokens, user) {
-  await getFirestore().collection("Users").doc(user.uid).set({
-    email: user.email,
-    access_token: tokens.access_token,
-    refresh_token: tokens.refresh_token,
-    expiry_date: tokens.expiry_date,
-    token_scope: tokens.scope,
-  });
+  try {
+    await getFirestore().collection("Users").doc(user.uid).set({
+      email: user.email,
+      access_token: tokens.access_token,
+      refresh_token: tokens.refresh_token,
+      expiry_date: tokens.expiry_date,
+      token_scope: tokens.scope,
+    });
+  } catch (error) {
+    logger.error(`Database error in storeUser for uid ${user.uid}:`, error);
+    sendEvent(user.uid, "databaseError", {operation: "storeUser"});
+    throw error;
+  }
 }
 
 async function updateUserTokens(tokens, uid) {
-  await getFirestore().collection("Users").doc(uid).update({
-    access_token: tokens.access_token,
-    refresh_token: tokens.refresh_token,
-    expiry_date: tokens.expiry_date,
-  });
+  try {
+    await getFirestore().collection("Users").doc(uid).update({
+      access_token: tokens.access_token,
+      refresh_token: tokens.refresh_token,
+      expiry_date: tokens.expiry_date,
+    });
+  } catch (error) {
+    logger.error(`Database error in updateUserTokens for uid ${uid}:`, error);
+    sendEvent(uid, "databaseError", {operation: "updateUserTokens"});
+    throw error;
+  }
 }
 
 async function addUserEmailAddress(user, emails) {
-  emails.forEach(async (item) => {
-    await getFirestore().collection("EmailAddress").doc(item.email).set({
-      uid: user.uid,
-      email: item.email,
-      default: item.default,
+  try {
+    emails.forEach(async (item) => {
+      await getFirestore().collection("EmailAddress").doc(item.email).set({
+        uid: user.uid,
+        email: item.email,
+        default: item.default,
+      });
     });
-  });
+  } catch (error) {
+    logger.error(
+        `Database error in addUserEmailAddress for uid ${user.uid}:`,
+        error);
+    sendEvent(user.uid, "databaseError", {operation: "addUserEmailAddress"});
+    throw error;
+  }
 }
 
 async function removeEmailAddress(email) {
-  await getFirestore().collection("EmailAddress").doc(email).delete();
+  try {
+    // Get uid before deleting for analytics
+    const uid = await getUserFromEmail(email);
+    await getFirestore().collection("EmailAddress").doc(email).delete();
+    if (!uid) {
+      logger.warn(`Could not find uid for email ${email} when removing`);
+    }
+  } catch (error) {
+    logger.error(
+        `Database error in removeEmailAddress for email ${email}:`,
+        error);
+    // Try to get uid for analytics, but don't fail if we can't
+    const uid = await getUserFromEmail(email).catch(() => null);
+    if (uid) {
+      sendEvent(uid, "databaseError", {operation: "removeEmailAddress"});
+    }
+    throw error;
+  }
 }
 
 async function addPendingEmailAddress(uid, pendingAddress) {
-  // TODO: ID should be the verification code, not the address.
-  const user = await getUserFromUID(uid);
-  const verificationCode = uuidv4();
-  await getFirestore().collection("PendingEmailAddress")
-      .doc(pendingAddress).set({
-        ownerUid: user.uid,
-        ownerEmail: user.email,
-        verificationCode: verificationCode,
-      });
-  return verificationCode;
+  try {
+    // TODO: ID should be the verification code, not the address.
+    const user = await getUserFromUID(uid);
+    const verificationCode = uuidv4();
+    await getFirestore().collection("PendingEmailAddress")
+        .doc(pendingAddress).set({
+          ownerUid: user.uid,
+          ownerEmail: user.email,
+          verificationCode: verificationCode,
+        });
+    return verificationCode;
+  } catch (error) {
+    logger.error(
+        `Database error in addPendingEmailAddress for uid ${uid}:`,
+        error);
+    sendEvent(uid, "databaseError", {operation: "addPendingEmailAddress"});
+    throw error;
+  }
 }
 
 async function getPendingEmailAddressByCode(code) {
