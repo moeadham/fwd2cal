@@ -635,6 +635,7 @@ function getEmailHeaders(headers, items) {
 }
 
 function threadEmailHtml(original, html) {
+  if (!html) html = "";
   try {
     // Parse sender information from headers
     let senderDisplay = original.from;
