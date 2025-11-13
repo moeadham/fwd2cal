@@ -35,8 +35,7 @@ When you deploy or run the emulator `firebase emulators:start`, Firebase will pr
 - `OPENROUTER_API_KEY` - Your OpenRouter API key
 - `RESEND_API_KEY` - Your Resend API key
 - `RESEND_SIGNING_SECRET` - Resend webhook signing secret
-- `GA_MEASUREMENT` - (Optional) Google Analytics measurement ID
-- `GA_SECRET` - (Optional) Google Analytics API secret
+- `POSTHOG_API_KEY` - (Optional) PostHog API key for analytics
 - `ENVIRONMENT_NAME` - (Optional) Defaults to "production"
 
 Configure Resend to forward incoming emails to your Firebase Functions webhook:
@@ -58,9 +57,8 @@ OPENROUTER_API_KEY=sk-or-v1-YOUR_API_KEY
 RESEND_API_KEY=re_YOUR_API_KEY
 RESEND_SIGNING_SECRET=whsec_YOUR_SECRET
 
-# Google Analytics (optional)
-GA_MEASUREMENT=G-YOUR_MEASUREMENT_ID
-GA_SECRET=YOUR_GA_SECRET
+# PostHog Analytics (optional)
+POSTHOG_API_KEY=phc_YOUR_API_KEY
 ```
 
 Also - you're probably going to want to save your credentials from https://console.cloud.google.com/apis/credentials to: `functions/auth/v2-google-auth-credentials.json`.

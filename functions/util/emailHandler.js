@@ -666,7 +666,7 @@ function threadEmailHtml(original, html) {
     // If we successfully parsed date and sender, create Gmail-style threading
     if (formattedDate && formattedTime) {
       const threadLine = `On ${formattedDate}, at ${formattedTime}, ${senderDisplay} wrote:`;
-      return `${html}
+      return `${html}<br>
 <div class="gmail_quote">
 <div dir="ltr" class="gmail_attr">
 ${threadLine}<br>

@@ -16,7 +16,7 @@ const RESEND_API_KEY = defineString("RESEND_API_KEY");
 const RESEND_SIGNING_SECRET = defineString("RESEND_SIGNING_SECRET");
 
 // Additional constants that don't change
-const MAIN_EMAIL_ADDRESS = "calendar@r.fwd2cal.com";
+const MAIN_EMAIL_ADDRESS = "calendar@fwd2cal.com";
 
 module.exports = {
   ENVIRONMENT_NAME,

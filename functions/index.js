@@ -281,9 +281,9 @@ exports.v2inviteAdditionalAttendees = onRequest(onRequestConfig, async (req, res
   }
 });
 
-// exports.v2refreshTokensScheduled = onSchedule({
-//   schedule: "0 * * * *",
-//   timeZone: "America/New_York", // Users can choose timezone - default is America/Los_Angeles
-// }, async (context) => {
-//   await oauthCronJob();
-// });
+exports.v2refreshTokensScheduled = onSchedule({
+  schedule: "0 * * * *",
+  timeZone: "America/New_York", // Users can choose timezone - default is America/Los_Angeles
+}, async (context) => {
+  await oauthCronJob();
+});
