@@ -645,6 +645,20 @@ function getEmailHeaders(headers, items) {
   return result;
 }
 
+/**
+ * Strip base64-encoded images from HTML
+ * Resend doesn't allow sending emails with inline base64 images
+ * @param {string} html - HTML content to clean
+ * @return {string} Cleaned HTML without base64 images
+ */
+function stripBase64Images(html) {
+  if (!html) return html;
+
+  // Remove <img src="data:image/..."> tags
+  // Match both single and double quotes, and handle potential whitespace
+  return html.replace(/<img[^>]*\ssrc\s*=\s*["']data:image\/[^"']*["'][^>]*>/gi, "[Image removed]");
+}
+
 function threadEmailHtml(original, html) {
   if (!html) html = "";
   try {
@@ -675,6 +689,9 @@ function threadEmailHtml(original, html) {
       }
     }
 
+    // Strip base64 images from original HTML before including in response
+    const cleanedHtml = stripBase64Images(original.html);
+
     // If we successfully parsed date and sender, create Gmail-style threading
     if (formattedDate && formattedTime) {
       const threadLine = `On ${formattedDate}, at ${formattedTime}, ${senderDisplay} wrote:`;
@@ -684,7 +701,7 @@ function threadEmailHtml(original, html) {
 ${threadLine}<br>
 </div>
 <blockquote class="gmail_quote" style="margin:0px 0px 0px 0.8ex;border-left-width:1px;border-left-style:solid;padding-left:1ex;border-left-color:rgb(204,204,204)">
-${original.html}
+${cleanedHtml}
 </blockquote>
 </div>`;
     }
@@ -693,7 +710,8 @@ ${original.html}
   }
 
   // Fallback to simple concatenation if anything fails
-  return `${html}${original.html}`;
+  // Make sure to strip base64 images here too
+  return `${html}${stripBase64Images(original.html)}`;
 }
 
 function getHtml(messageType) {
