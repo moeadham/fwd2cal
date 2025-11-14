@@ -2,6 +2,7 @@
 /* eslint-disable require-jsdoc */
 const {logger} = require("firebase-functions");
 const {getUserFromEmail,
+  getUserFromUID,
   addPendingEmailAddress,
   removeEmailAddress,
   deleteUser} = require("./firestoreHandler");
@@ -9,9 +10,9 @@ const {getOauthClient,
   deleteAccount} = require("./authHandler");
 const {processEmail} = require("./openai");
 const {addEvent, eventFromICS} = require("./calendarHelper");
-const sendEmailResend = require("./resend");
+const {sendEmailResend, removeContactFromSegment} = require("./resend");
 const {getApiUrl} = require("./credentials");
-const {ENVIRONMENT_NAME, MAIN_EMAIL_ADDRESS} = require("./config");
+const {ENVIRONMENT_NAME, MAIN_EMAIL_ADDRESS, RESEND_REGISTERED_USERS_SEGMENT_ID} = require("./config");
 const handleAsync = require("./handleAsync");
 const {mailTemplates} = require("./mailTemplates");
 const moment = require("moment-timezone");
@@ -180,8 +181,16 @@ function understandSubject(subject) {
 }
 
 async function deleteUserAccount(email, sender, uid, files = []) {
+  // Get primary email address before deleting user
+  const user = await getUserFromUID(uid);
+  const primaryEmail = user.email;
+
   await deleteUser(uid);
   await deleteAccount(uid);
+
+  // Remove primary email from registered users segment (fire-and-forget)
+  removeContactFromSegment(primaryEmail, RESEND_REGISTERED_USERS_SEGMENT_ID.value());
+
   const response = {
     ...EMAIL_RESPONSES.userDeleted,
     replace: {},

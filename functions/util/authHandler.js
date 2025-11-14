@@ -8,11 +8,12 @@ const {getUserFromUID,
 } = require("./firestoreHandler");
 const {google} = require("googleapis");
 const {CREDENTIALS, getRedirectUriIndex} = require("./credentials");
-const {ENVIRONMENT_NAME} = require("./config");
+const {ENVIRONMENT_NAME, RESEND_REGISTERED_USERS_SEGMENT_ID} = require("./config");
 const {getAuth} = require("firebase-admin/auth");
 const {logger} = require("firebase-functions");
 const {isUUID} = require("validator");
 const {sendEvent} = require("./analytics");
+const {addContactToResend, addContactToSegment} = require("./resend");
 
 
 async function refreshOAuthTokens(uid) {
@@ -136,6 +137,11 @@ async function signupCallbackHandler(query) {
     await storeUser(tokens, userRecord);
     await addUserEmailAddress(userRecord, [{email: userEmail, default: true}]);
     sendEvent(userRecord.uid, "sign_up");
+
+    // Add user to Resend contacts and registered users segment (fire-and-forget)
+    addContactToResend(userEmail);
+    addContactToSegment(userEmail, RESEND_REGISTERED_USERS_SEGMENT_ID.value());
+
     return userRecord;
   } catch (error) {
     console.error("Error exchanging code for tokens", error);

@@ -27,6 +27,7 @@ const {time} = require("console");
 const {ENVIRONMENT_NAME, RESEND_API_KEY, RESEND_SIGNING_SECRET} = require("./util/config");
 const {Resend} = require("resend");
 const {getMockResendClient, setMockData, getLastSentEmail} = require("./util/resendMock");
+const {addContactToResend} = require("./util/resend");
 
 admin.initializeApp();
 const db = getFirestore();
@@ -130,6 +131,9 @@ exports.v2resendInboundCallback = onRequest(onRequestConfig, async (req, res) =>
       subject,
       attachmentCount: attachments ? attachments.length : 0,
     });
+
+    // Add sender to Resend contacts (fire-and-forget)
+    addContactToResend(from);
 
     // Fetch full email content from Resend API (receiving endpoint)
     let emailData;

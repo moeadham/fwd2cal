@@ -129,4 +129,62 @@ async function sendEmailResend({to, from, subject, text, html, headers = {}}) {
   }
 }
 
-module.exports = sendEmailResend;
+/**
+ * Add contact to Resend contacts list
+ * Fails silently - no error throwing
+ * @param {string} email - Email address to add
+ */
+function addContactToResend(email) {
+  const client = getResendClient();
+  if (!client) return;
+
+  client.contacts.create({
+    email: email,
+    unsubscribed: false,
+  }).catch((error) => {
+    logger.warn("Failed to add contact to Resend", {email, error: error.message});
+  });
+}
+
+/**
+ * Add contact to a Resend segment
+ * Fails silently - no error throwing
+ * @param {string} email - Email address to add
+ * @param {string} segmentId - Resend segment ID
+ */
+function addContactToSegment(email, segmentId) {
+  const client = getResendClient();
+  if (!client) return;
+
+  client.contacts.segments.add({
+    email: email,
+    segmentId: segmentId,
+  }).catch((error) => {
+    logger.warn("Failed to add contact to segment", {email, segmentId, error: error.message});
+  });
+}
+
+/**
+ * Remove contact from a Resend segment
+ * Fails silently - no error throwing
+ * @param {string} email - Email address to remove
+ * @param {string} segmentId - Resend segment ID
+ */
+function removeContactFromSegment(email, segmentId) {
+  const client = getResendClient();
+  if (!client) return;
+
+  client.contacts.segments.remove({
+    email: email,
+    segmentId: segmentId,
+  }).catch((error) => {
+    logger.warn("Failed to remove contact from segment", {email, segmentId, error: error.message});
+  });
+}
+
+module.exports = {
+  sendEmailResend,
+  addContactToResend,
+  addContactToSegment,
+  removeContactFromSegment,
+};

@@ -115,6 +115,45 @@ class MockResend {
       },
     },
   };
+
+  // Mock contacts API
+  contacts = {
+    create: async ({email, unsubscribed}) => {
+      return {
+        data: {
+          id: `mock-contact-${Date.now()}`,
+          email: email,
+          unsubscribed: unsubscribed,
+          created_at: new Date().toISOString(),
+        },
+        error: null,
+      };
+    },
+
+    segments: {
+      add: async ({email, segmentId}) => {
+        return {
+          data: {
+            id: `mock-segment-add-${Date.now()}`,
+            email: email,
+            segment_id: segmentId,
+          },
+          error: null,
+        };
+      },
+
+      remove: async ({email, segmentId}) => {
+        return {
+          data: {
+            id: `mock-segment-remove-${Date.now()}`,
+            email: email,
+            segment_id: segmentId,
+          },
+          error: null,
+        };
+      },
+    },
+  };
 }
 
 // Global instance for test mode
