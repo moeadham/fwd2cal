@@ -481,6 +481,7 @@ async function addEventsAndSendResponse(oauth2Client, events, uid, sender, email
 
   // If all events failed, send oauth failed response
   if (successfulEvents.length === 0) {
+    sendEvent(uid, "calendarError", {reason: "oauth_failed"});
     await sendEmailResponse(sender, email, EMAIL_RESPONSES.oauthFailed, true);
     return;
   }
