@@ -13,10 +13,9 @@ class MockResend {
   }
 
   // Set test data for a specific email ID
-  setTestData(emailId, emailContent, attachments = {}, attachmentsList = []) {
+  setTestData(emailId, emailContent, attachmentsList = []) {
     this.testData[emailId] = {
       emailContent,
-      attachments,
       attachmentsList,
     };
   }
@@ -77,12 +76,21 @@ class MockResend {
           if (!testData || !testData.attachmentsList) {
             // Return empty list if no attachments configured
             return {
-              data: [],
+              data: {
+                object: "list",
+                has_more: false,
+                data: [],
+              },
               error: null,
             };
           }
+          // Match Resend's nested structure: {data: {object: 'list', data: [...]}}
           return {
-            data: testData.attachmentsList,
+            data: {
+              object: "list",
+              has_more: false,
+              data: testData.attachmentsList,
+            },
             error: null,
           };
         },
@@ -115,24 +123,6 @@ class MockResend {
     },
   };
 
-  // Mock attachments.receiving
-  attachments = {
-    receiving: {
-      get: async ({id, emailId}) => {
-        const testData = this.testData[emailId];
-        if (!testData || !testData.attachments || !testData.attachments[id]) {
-          return {
-            data: Buffer.from("Mock attachment content"),
-            error: null,
-          };
-        }
-        return {
-          data: testData.attachments[id],
-          error: null,
-        };
-      },
-    },
-  };
 
   // Mock contacts API
   contacts = {
@@ -184,9 +174,9 @@ function getMockResendClient() {
   return mockInstance;
 }
 
-function setMockData(emailId, emailContent, attachments = {}, attachmentsList = []) {
+function setMockData(emailId, emailContent, attachmentsList = []) {
   const mock = getMockResendClient();
-  mock.setTestData(emailId, emailContent, attachments, attachmentsList);
+  mock.setTestData(emailId, emailContent, attachmentsList);
 }
 
 function clearMockData() {

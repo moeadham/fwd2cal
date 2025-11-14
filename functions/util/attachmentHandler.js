@@ -8,18 +8,13 @@ const {logger} = require("firebase-functions");
  *
  * @param {Object} resend - Resend client instance
  * @param {string} emailId - Email ID from Resend
- * @param {Array} attachments - Array of attachment metadata from webhook
  * @return {Promise<Object>} {icsFiles: Array, imageUrls: Array}
  */
-async function processAttachments(resend, emailId, attachments) {
+async function processAttachments(resend, emailId) {
   const icsFiles = [];
   const imageUrls = [];
 
-  if (!attachments || attachments.length === 0) {
-    return {icsFiles, imageUrls};
-  }
-
-  // First, get detailed attachment info from list endpoint
+  // Get detailed attachment info from list endpoint
   let attachmentsList = [];
   try {
     const {data, error} = await resend.emails.receiving.attachments.list({
@@ -28,47 +23,49 @@ async function processAttachments(resend, emailId, attachments) {
     if (error) {
       logger.error("Failed to list attachments", {error: error.message});
     } else {
-      attachmentsList = data || [];
+      // The response has nested data: {data: {object: 'list', data: [...]}}
+      attachmentsList = data?.data || [];
     }
   } catch (listError) {
     logger.error("Failed to list attachments", {error: listError.message});
   }
 
-  // Process ICS attachments (download them)
-  const icsAttachments = attachments.filter(
-      (att) => att.filename && att.filename.toLowerCase().endsWith(".ics"),
-  );
+  // Process ICS attachments (download them from download_url)
+  for (const attachmentInfo of attachmentsList) {
+    const filename = attachmentInfo.filename?.toLowerCase() || "";
+    const isICS = filename.endsWith(".ics");
 
-  for (const attachment of icsAttachments) {
-    try {
-      const {data, error} = await resend.attachments.receiving.get({
-        id: attachment.id,
-        emailId: emailId,
-      });
-      if (error) {
-        logger.error("Failed to download ICS attachment", {
-          error: error.message,
-          attachmentId: attachment.id,
+    if (isICS) {
+      try {
+        // Fetch the ICS file content from the download URL
+        const response = await fetch(attachmentInfo.download_url);
+        if (!response.ok) {
+          logger.error("Failed to download ICS attachment", {
+            status: response.status,
+            attachmentId: attachmentInfo.id,
+            filename: attachmentInfo.filename,
+          });
+          continue;
+        }
+        const icsContent = await response.text();
+        icsFiles.push({
+          fieldname: "attachment",
+          file: Buffer.from(icsContent),
+          filename: {filename: attachmentInfo.filename},
+          encoding: "7bit",
+          mimetype: attachmentInfo.content_type || "text/calendar",
         });
-        continue;
+        logger.info("Downloaded ICS attachment", {
+          filename: attachmentInfo.filename,
+          size: icsContent.length,
+        });
+      } catch (fetchError) {
+        logger.error("Failed to download ICS attachment", {
+          error: fetchError.message,
+          attachmentId: attachmentInfo.id,
+          filename: attachmentInfo.filename,
+        });
       }
-      const attachContent = data;
-      icsFiles.push({
-        fieldname: "attachment",
-        file: Buffer.from(attachContent),
-        filename: {filename: attachment.filename},
-        encoding: "7bit",
-        mimetype: attachment.content_type || "text/calendar",
-      });
-      logger.info("Downloaded ICS attachment", {
-        filename: attachment.filename,
-        size: attachContent.length,
-      });
-    } catch (attachError) {
-      logger.error("Failed to download ICS attachment", {
-        error: attachError.message,
-        attachmentId: attachment.id,
-      });
     }
   }
 

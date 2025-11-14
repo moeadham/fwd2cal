@@ -85,7 +85,6 @@ exports.v2resendInboundCallback = onRequest(onRequestConfig, async (req, res) =>
       setMockData(
           emailId,
           req.body.mockData.emailContent,
-          req.body.mockData.attachments || {},
           req.body.mockData.attachmentsList || [],
       );
     }
@@ -206,7 +205,7 @@ exports.v2resendInboundCallback = onRequest(onRequestConfig, async (req, res) =>
     });
 
     // Handle attachments (ICS files and images)
-    const {icsFiles, imageUrls} = await processAttachments(resend, email_id, attachments);
+    const {icsFiles, imageUrls} = await processAttachments(resend, email_id);
 
     if (ENVIRONMENT_NAME.value() !== "production") {
       logger.log("RESEND WEBHOOK DATA", webhookData);

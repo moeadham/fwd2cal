@@ -22,15 +22,12 @@ const TESTER_PRIMARY_GOOGLE_ACCT = process.env.TESTER_PRIMARY_GOOGLE_ACCT;
 const TESTER_SECONDARY_EMAIL_ACCT = process.env.TESTER_SECONDARY_EMAIL_ACCT;
 
 // Helper function to send Resend webhook with mocked API responses
-function sendResendWebhook(testData, attachmentContent = null, attachmentsList = []) {
+function sendResendWebhook(testData, attachmentsList = []) {
   // Include mock data in the webhook payload for test mode
   const webhookWithMock = {
     ...testData.webhook,
     mockData: {
       emailContent: testData.emailContent,
-      attachments: attachmentContent ? {
-        "attachment-1": attachmentContent,
-      } : null,
       attachmentsList: attachmentsList,
     },
   };
@@ -233,12 +230,9 @@ describe(`fwd2cal (${EMAIL_SERVICE.toUpperCase()})`, () => {
     });
   });
   it("UT09 add an event with an ics attachment.", (done) => {
-    const fs = require("fs");
-    const path = require("path");
     const testMessage = bindings.emailWithICSAttachment;
-    const icsContent = fs.readFileSync(path.join(__dirname, "bindings", "calendar.ics"), "utf8");
 
-    sendResendWebhook(testMessage, icsContent)
+    sendResendWebhook(testMessage, testMessage.attachmentsList)
         .end((err, res) => {
           expect(err).to.be.null;
           expect(res).to.have.status(200);
@@ -301,21 +295,7 @@ describe(`fwd2cal (${EMAIL_SERVICE.toUpperCase()})`, () => {
   it("UT12 test email with image attachment", (done) => {
     const testMessage = bindings.emailWithImageAttachment;
 
-    // Mock attachmentsList data for the image
-    const attachmentsList = [
-      {
-        id: "img-attachment-1",
-        filename: "event_screenshot.jpg",
-        size: 243331,
-        content_type: "image/jpeg",
-        content_disposition: "attachment",
-        // download_url: "https://lh3.googleusercontent.com/pw/AP1GczONjl386DnE9FbgJ2GM8SzR690FF07zm2IgYVS4m9uAoAyO6EXW6kj2P0OQLXzIht8_8mKWJFEqfcgksyj3v3EKbJWZRTxgVnif5G0xZ0ExkMPkOvJmjdAc4JfoM7ppCL0FPWST_dd3Or6bH9RaSP958Q=w886-h1924-s-no-gm",
-        download_url: "https://firebasestorage.googleapis.com/v0/b/fwd2cal.firebasestorage.app/o/test%2FIMG_9444.jpg?alt=media&token=2cee463c-59b2-4763-abf3-92044414f2cc",
-        expires_at: new Date(Date.now() + 3600000).toISOString(), // 1 hour from now
-      },
-    ];
-
-    sendResendWebhook(testMessage, null, attachmentsList)
+    sendResendWebhook(testMessage, testMessage.attachmentsList)
         .end((err, res) => {
           expect(err).to.be.null;
           expect(res).to.have.status(200);

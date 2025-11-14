@@ -392,6 +392,20 @@ const emailWithICSAttachment = createResendTestData(
     },
 );
 
+// Add attachmentsList with download URL for ICS test
+emailWithICSAttachment.attachmentsList = [
+  {
+    id: "attachment-1",
+    filename: "calendar.ics",
+    content_type: "text/calendar",
+    content_id: "<attachment1>",
+    content_disposition: "attachment",
+    size: 500,
+    download_url: "https://firebasestorage.googleapis.com/v0/b/fwd2cal.firebasestorage.app/o/test%2Fcalendar.ics?alt=media&token=9e93bd61-f5d1-45b1-9508-5f5bbc1e1038",
+    expires_at: new Date(Date.now() + 3600000).toISOString(),
+  },
+];
+
 // Test 9: Multiple events in one email
 const multipleEventsEmail = createResendTestData(
     {
@@ -489,6 +503,19 @@ const emailWithImageAttachment = createResendTestData(
       },
     },
 );
+
+// Add attachmentsList with download URL for image test
+emailWithImageAttachment.attachmentsList = [
+  {
+    id: "img-attachment-1",
+    filename: "event_screenshot.jpg",
+    content_type: "image/jpeg",
+    size: 243331,
+    content_disposition: "attachment",
+    download_url: "https://firebasestorage.googleapis.com/v0/b/fwd2cal.firebasestorage.app/o/test%2FIMG_9444.jpg?alt=media&token=2cee463c-59b2-4763-abf3-92044414f2cc",
+    expires_at: new Date(Date.now() + 3600000).toISOString(),
+  },
+];
 
 module.exports = {
   emailFromMain,
