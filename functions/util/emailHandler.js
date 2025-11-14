@@ -114,7 +114,7 @@ async function handleEmail(email, files) {
   const to = getRecipientsFromRawEmail(email);
   if (to.includes("support@fwd2cal.com") ||
       to.includes("admin@fwd2cal.com") ||
-      email.subject.toLowerCase().startsWith("verify your email address")) { // To handle google account creation.
+      (email.subject && email.subject.toLowerCase().startsWith("verify your email address"))) { // To handle google account creation.
     return await sendToSupport(sender, email);
   }
 
@@ -164,6 +164,7 @@ async function sendToSupport(sender, email) {
 }
 
 function understandSubject(subject) {
+  if (!subject) subject = "";
   subject = subject.toLowerCase();
   if (subject.startsWith("add")) {
     return "addUser";
@@ -286,7 +287,7 @@ async function eventHandler(email, sender, uid, files = []) {
   if (oauthErr) {
     logger.warn("Error getting OAuth client: ", oauthErr);
     await sendEmailResponse(sender, email, EMAIL_RESPONSES.oauthFailed, true);
-    sendEvent(uid, "addEvent", {result: "oauthFailed"});
+    sendEvent(uid, "calendarError", {reason: "oauth_failed"});
     return;
   }
 
@@ -316,7 +317,7 @@ async function eventHandler(email, sender, uid, files = []) {
     if (processEmailErr) {
       logger.warn("OpenAI error: ", processEmailErr);
       await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true);
-      sendEvent(uid, "addEvent", {result: "aiUnableToParse"});
+      sendEvent(uid, "dataQualityIssue", {reason: "ai_api_error"});
       return;
     }
     if (aiEvent.error) {
@@ -329,7 +330,7 @@ async function eventHandler(email, sender, uid, files = []) {
       };
       logger.warn("Error in email contents: ", aiEvent);
       await sendEmailResponse(sender, email, response, true);
-      sendEvent(uid, "addEvent", {result: "aiUnableToParse"});
+      sendEvent(uid, "dataQualityIssue", {reason: "ai_returned_error"});
       return aiEvent;
     } else {
       // Handle new array format
@@ -337,7 +338,7 @@ async function eventHandler(email, sender, uid, files = []) {
         if (aiEvent.events.length === 0) {
           logger.warn("No events found in email");
           await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true);
-          sendEvent(uid, "addEvent", {result: "aiUnableToParse"});
+          sendEvent(uid, "dataQualityIssue", {reason: "no_events_found"});
           return;
         }
 
@@ -359,8 +360,8 @@ async function eventHandler(email, sender, uid, files = []) {
 
         if (aiEvent.events.length === 0) {
           logger.warn("All events had invalid times");
+          sendEvent(uid, "dataQualityIssue", {reason: "missing_required_fields"});
           await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true);
-          sendEvent(uid, "addEvent", {result: "aiUnableToParse"});
           return;
         }
 
@@ -374,8 +375,8 @@ async function eventHandler(email, sender, uid, files = []) {
         const timeValidation = validateEventTimes(event);
         if (!timeValidation.isValid) {
           logger.warn(`Invalid event times from AI: ${timeValidation.error}`);
+          sendEvent(uid, "dataQualityIssue", {reason: "missing_required_fields"});
           await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true);
-          sendEvent(uid, "addEvent", {result: "aiUnableToParse"});
           return;
         }
 
