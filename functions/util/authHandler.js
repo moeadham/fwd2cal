@@ -8,7 +8,10 @@ const {getUserFromUID,
 } = require("./firestoreHandler");
 const {google} = require("googleapis");
 const {CREDENTIALS, getRedirectUriIndex} = require("./credentials");
-const {ENVIRONMENT_NAME, RESEND_REGISTERED_USERS_SEGMENT_ID} = require("./config");
+const {
+  ENVIRONMENT_NAME,
+  RESEND_REGISTERED_USERS_SEGMENT_ID,
+} = require("./config");
 const {getAuth} = require("firebase-admin/auth");
 const {logger} = require("firebase-functions");
 const {isUUID} = require("validator");
@@ -138,7 +141,7 @@ async function signupCallbackHandler(query) {
     await addUserEmailAddress(userRecord, [{email: userEmail, default: true}]);
     sendEvent(userRecord.uid, "sign_up");
 
-    // Add user to Resend contacts and registered users segment (fire-and-forget)
+    // Add user to Resend contacts and registered users (fire-and-forget)
     addContactToResend(userEmail);
     addContactToSegment(userEmail, RESEND_REGISTERED_USERS_SEGMENT_ID.value());
 

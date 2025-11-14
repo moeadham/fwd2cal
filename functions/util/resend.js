@@ -142,7 +142,8 @@ function addContactToResend(email) {
     email: email,
     unsubscribed: false,
   }).catch((error) => {
-    logger.warn("Failed to add contact to Resend", {email, error: error.message});
+    logger.warn("Failed to add contact to Resend",
+        {email, error: error.message});
   });
 }
 
@@ -160,7 +161,8 @@ function addContactToSegment(email, segmentId) {
     email: email,
     segmentId: segmentId,
   }).catch((error) => {
-    logger.warn("Failed to add contact to segment", {email, segmentId, error: error.message});
+    logger.warn("Failed to add contact to segment",
+        {email, segmentId, error: error.message});
   });
 }
 
@@ -178,7 +180,8 @@ function removeContactFromSegment(email, segmentId) {
     email: email,
     segmentId: segmentId,
   }).catch((error) => {
-    logger.warn("Failed to remove contact from segment", {email, segmentId, error: error.message});
+    logger.warn("Failed to remove contact from segment",
+        {email, segmentId, error: error.message});
   });
 }
 
