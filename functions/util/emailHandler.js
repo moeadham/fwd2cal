@@ -96,7 +96,7 @@ const EMAIL_RESPONSES = {
   },
 };
 
-async function handleEmail(email, files) {
+async function handleEmail(email, files, imageUrls = []) {
   // Do we know this user?
   const sender = getSenderFromRawEmail(email);
   // Is the email sender verified?
@@ -144,9 +144,9 @@ async function handleEmail(email, files) {
     case "deleteAccount":
       return await deleteUserAccount(email, sender, uid, files);
     case "addEvent":
-      return await eventHandler(email, sender, uid, files);
+      return await eventHandler(email, sender, uid, files, imageUrls);
     default:
-      return await eventHandler(email, sender, uid, files);
+      return await eventHandler(email, sender, uid, files, imageUrls);
   }
 }
 
@@ -288,7 +288,7 @@ async function addEmailAddressToUser(email, sender, uid, files = []) {
   return {verificationCode};
 }
 
-async function eventHandler(email, sender, uid, files = []) {
+async function eventHandler(email, sender, uid, files = [], imageUrls = []) {
   // logger.log("User ID: ", uid);
 
   // Can we authenticate with their calendar?
@@ -322,7 +322,7 @@ async function eventHandler(email, sender, uid, files = []) {
   if (!event) {
     // Can we get event details from the thread with AI?
     const headers = getEmailHeaders(email.headers, ["date", "subject", "from"]);
-    const [processEmailErr, aiEvent] = await handleAsync(() => processEmail(email, headers, uid));
+    const [processEmailErr, aiEvent] = await handleAsync(() => processEmail(email, headers, uid, imageUrls));
     if (processEmailErr) {
       logger.warn("OpenAI error: ", processEmailErr);
       await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true);

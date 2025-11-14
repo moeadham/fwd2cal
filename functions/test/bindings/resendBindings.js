@@ -446,6 +446,50 @@ Sarah`,
     },
 );
 
+// Test 10: Email with image attachment showing event details
+const emailWithImageAttachment = createResendTestData(
+    {
+      type: "email.received",
+      created_at: new Date().toISOString(),
+      data: {
+        email_id: "test-email-10",
+        message_id: `<test-10-${Date.now()}@mail.gmail.com>`,
+        from: TESTER_PRIMARY_GOOGLE_ACCT,
+        to: ["calendar@fwd2cal.com"],
+        cc: [],
+        bcc: [],
+        subject: "",
+        created_at: new Date().toISOString(),
+        attachments: [
+          {
+            id: "img-attachment-1",
+            filename: "event_screenshot.jpg",
+            content_type: "image/jpeg",
+            size: 243331,
+          },
+        ],
+      },
+    },
+    {
+      id: "test-email-10",
+      subject: "",
+      from: TESTER_PRIMARY_GOOGLE_ACCT,
+      to: ["calendar@fwd2cal.com"],
+      html: ``,
+      text: ``,
+      headers: {
+        "authentication-results": generateAuthHeader(TESTER_PRIMARY_GOOGLE_ACCT),
+        "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
+        "to": "calendar@fwd2cal.com",
+        "subject": "",
+        "date": "Mon, 14 Nov 2025 10:00:00 +0000",
+        "message-id": `<test-10-${Date.now()}@mail.gmail.com>`,
+        "in-reply-to": "<original-message-10>",
+        "references": "<original-message-10>",
+      },
+    },
+);
+
 module.exports = {
   emailFromMain,
   addEmailAddress,
@@ -456,4 +500,5 @@ module.exports = {
   basicEmailFuture,
   emailWithICSAttachment,
   multipleEventsEmail,
+  emailWithImageAttachment,
 };

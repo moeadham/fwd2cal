@@ -10,7 +10,7 @@ const EventSchema = z.object({
   date: z.string().describe("DD MMMM YYYY - the date of the event"),
   start_time: z.string().describe("HH:mm - the start time of the event in 24 hour format"),
   end_time: z.string().nullable().describe("HH:mm - the end time of the event in 24 hour format"),
-  attendees: z.array(z.string()).describe("A list of attendees"),
+  attendees: z.array(z.string()).describe("A list of attendees email addresses. ONLY INCLUDE VALID EMAIL ADDRESSES, NOT NAMES."),
 });
 
 // Event data schema - main response for email processing

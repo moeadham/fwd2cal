@@ -38,7 +38,7 @@ async function defaultCompletion(messages, temperature = DEFAULT_TEMP, zodSchema
     temperature: temperature,
     max_tokens: DEFAULT_MAX_TOKENS,
   };
-
+  logger.debug("Request options", requestOptions);
   if (zodSchema) {
     // Use structured output with Zod schema
     requestOptions.response_format = zodResponseFormat(zodSchema, "response");
@@ -71,12 +71,37 @@ async function defaultCompletion(messages, temperature = DEFAULT_TEMP, zodSchema
   }
 }
 
-async function processEmail(email, headers, uid = null) {
+async function processEmail(email, headers, uid = null, imageUrls = []) {
   const text = `
   Date: ${headers.date}
   Subject: ${headers.subject}
   From: ${headers.from}
   ${email.text}`;
+
+  // Build user message content - text + images
+  let userContent;
+  if (imageUrls && imageUrls.length > 0) {
+    // Multi-content format with text and images
+    userContent = [
+      {
+        type: "text",
+        text: text,
+      },
+    ];
+    // Add each image URL
+    imageUrls.forEach((url) => {
+      userContent.push({
+        type: "image_url",
+        image_url: {
+          url: url,
+        },
+      });
+    });
+    logger.info("Including images in LLM request", {imageCount: imageUrls.length});
+  } else {
+    // Text-only format (backward compatible)
+    userContent = text;
+  }
 
   // logger.log(text);
   const eventMessages = [
@@ -84,14 +109,14 @@ async function processEmail(email, headers, uid = null) {
       role: "system",
       content: prompts.getEventData,
     },
-    {role: "user", content: text},
+    {role: "user", content: userContent},
   ];
   const timezoneMessages = [
     {
       role: "system",
       content: prompts.getEventTimezone,
     },
-    {role: "user", content: text},
+    {role: "user", content: userContent},
   ];
 
   const [eventResponse, timezoneResponse] = await Promise.all([

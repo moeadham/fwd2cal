@@ -22,7 +22,7 @@ const TESTER_PRIMARY_GOOGLE_ACCT = process.env.TESTER_PRIMARY_GOOGLE_ACCT;
 const TESTER_SECONDARY_EMAIL_ACCT = process.env.TESTER_SECONDARY_EMAIL_ACCT;
 
 // Helper function to send Resend webhook with mocked API responses
-function sendResendWebhook(testData, attachmentContent = null) {
+function sendResendWebhook(testData, attachmentContent = null, attachmentsList = []) {
   // Include mock data in the webhook payload for test mode
   const webhookWithMock = {
     ...testData.webhook,
@@ -31,6 +31,7 @@ function sendResendWebhook(testData, attachmentContent = null) {
       attachments: attachmentContent ? {
         "attachment-1": attachmentContent,
       } : null,
+      attachmentsList: attachmentsList,
     },
   };
 
@@ -46,7 +47,7 @@ function sendResendWebhook(testData, attachmentContent = null) {
 }
 
 describe(`fwd2cal (${EMAIL_SERVICE.toUpperCase()})`, () => {
-  it("UT00 get login URL and wait for tester to create account", (done) => {
+  before("UT00 get login URL and wait for tester to create account", (done) => {
     chai.request(apiURL)
         .get("/v2/signup")
         .redirects(0) // Prevent automatic following of redirects
@@ -297,7 +298,47 @@ describe(`fwd2cal (${EMAIL_SERVICE.toUpperCase()})`, () => {
         });
   });
 
-  it("UT12 delete account", (done) => {
+  it("UT12 test email with image attachment", (done) => {
+    const testMessage = bindings.emailWithImageAttachment;
+
+    // Mock attachmentsList data for the image
+    const attachmentsList = [
+      {
+        id: "img-attachment-1",
+        filename: "event_screenshot.jpg",
+        size: 243331,
+        content_type: "image/jpeg",
+        content_disposition: "attachment",
+        // download_url: "https://lh3.googleusercontent.com/pw/AP1GczONjl386DnE9FbgJ2GM8SzR690FF07zm2IgYVS4m9uAoAyO6EXW6kj2P0OQLXzIht8_8mKWJFEqfcgksyj3v3EKbJWZRTxgVnif5G0xZ0ExkMPkOvJmjdAc4JfoM7ppCL0FPWST_dd3Or6bH9RaSP958Q=w886-h1924-s-no-gm",
+        download_url: "https://firebasestorage.googleapis.com/v0/b/fwd2cal.firebasestorage.app/o/test%2FIMG_9444.jpg?alt=media&token=2cee463c-59b2-4763-abf3-92044414f2cc",
+        expires_at: new Date(Date.now() + 3600000).toISOString(), // 1 hour from now
+      },
+    ];
+
+    sendResendWebhook(testMessage, null, attachmentsList)
+        .end((err, res) => {
+          expect(err).to.be.null;
+          expect(res).to.have.status(200);
+          console.log(res.body);
+          expect(res.body).to.be.an("object");
+          // Should successfully create event from image
+          expect(res.body.data).to.not.have.property("error");
+          expect(res.body.data.kind).to.equal("calendar#event");
+
+          // Verify sent email
+          expect(res.body.sentEmail).to.be.an("object");
+          expect(res.body.sentEmail.html).to.include("Event added");
+
+          // Verify threading headers
+          const incomingMessageId = testMessage.emailContent.headers["message-id"];
+          expect(res.body.sentEmail.headers["In-Reply-To"]).to.equal(incomingMessageId);
+          expect(res.body.sentEmail.headers["References"]).to.equal(`<original-message-10> ${incomingMessageId}`);
+
+          done();
+        });
+  });
+
+  it("UT13 delete account", (done) => {
     const testMessage = bindings.deleteAccount;
     sendResendWebhook(testMessage)
         .end((err, res) => {

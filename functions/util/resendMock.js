@@ -13,10 +13,11 @@ class MockResend {
   }
 
   // Set test data for a specific email ID
-  setTestData(emailId, emailContent, attachments = {}) {
+  setTestData(emailId, emailContent, attachments = {}, attachmentsList = []) {
     this.testData[emailId] = {
       emailContent,
       attachments,
+      attachmentsList,
     };
   }
 
@@ -68,6 +69,23 @@ class MockResend {
           data: testData.emailContent,
           error: null,
         };
+      },
+
+      attachments: {
+        list: async ({emailId}) => {
+          const testData = this.testData[emailId];
+          if (!testData || !testData.attachmentsList) {
+            // Return empty list if no attachments configured
+            return {
+              data: [],
+              error: null,
+            };
+          }
+          return {
+            data: testData.attachmentsList,
+            error: null,
+          };
+        },
       },
     },
 
@@ -166,9 +184,9 @@ function getMockResendClient() {
   return mockInstance;
 }
 
-function setMockData(emailId, emailContent, attachments = {}) {
+function setMockData(emailId, emailContent, attachments = {}, attachmentsList = []) {
   const mock = getMockResendClient();
-  mock.setTestData(emailId, emailContent, attachments);
+  mock.setTestData(emailId, emailContent, attachments, attachmentsList);
 }
 
 function clearMockData() {

@@ -28,6 +28,7 @@ const {ENVIRONMENT_NAME, RESEND_API_KEY, RESEND_SIGNING_SECRET} = require("./uti
 const {Resend} = require("resend");
 const {getMockResendClient, setMockData, getLastSentEmail} = require("./util/resendMock");
 const {addContactToResend} = require("./util/resend");
+const {processAttachments} = require("./util/attachmentHandler");
 
 admin.initializeApp();
 const db = getFirestore();
@@ -81,7 +82,12 @@ exports.v2resendInboundCallback = onRequest(onRequestConfig, async (req, res) =>
     // In test mode, set up mock data from the request
     if (isTestMode && req.body.mockData) {
       const emailId = req.body.data.email_id;
-      setMockData(emailId, req.body.mockData.emailContent, req.body.mockData.attachments || {});
+      setMockData(
+          emailId,
+          req.body.mockData.emailContent,
+          req.body.mockData.attachments || {},
+          req.body.mockData.attachmentsList || [],
+      );
     }
 
     // Verify webhook signature
@@ -199,56 +205,19 @@ exports.v2resendInboundCallback = onRequest(onRequestConfig, async (req, res) =>
       headerCount: Object.keys(transformedEmail.headers).length,
     });
 
-    // Handle attachments if present (only ICS files)
-    const files = [];
-    if (attachments && attachments.length > 0) {
-      const icsAttachments = attachments.filter(
-          (att) => att.filename && att.filename.toLowerCase().endsWith(".ics"),
-      );
-
-      for (const attachment of icsAttachments) {
-        try {
-          const {data, error} = await resend.attachments.receiving.get({
-            id: attachment.id,
-            emailId: email_id,
-          });
-          if (error) {
-            logger.error("Failed to download attachment", {
-              error: error.message,
-              attachmentId: attachment.id,
-            });
-            continue;
-          }
-          const attachContent = data;
-          files.push({
-            fieldname: "attachment",
-            file: Buffer.from(attachContent),
-            filename: {filename: attachment.filename},
-            encoding: "7bit",
-            mimetype: attachment.content_type || "text/calendar",
-          });
-          logger.info("Downloaded ICS attachment", {
-            filename: attachment.filename,
-            size: attachContent.length,
-          });
-        } catch (attachError) {
-          logger.error("Failed to download attachment", {
-            error: attachError.message,
-            attachmentId: attachment.id,
-          });
-        }
-      }
-    }
+    // Handle attachments (ICS files and images)
+    const {icsFiles, imageUrls} = await processAttachments(resend, email_id, attachments);
 
     if (ENVIRONMENT_NAME.value() !== "production") {
       logger.log("RESEND WEBHOOK DATA", webhookData);
       logger.log("FETCHED EMAIL DATA", emailData);
       logger.log("TRANSFORMED EMAIL", transformedEmail);
-      logger.log("FILES", files);
+      logger.log("ICS FILES", icsFiles);
+      logger.log("IMAGE URLS", imageUrls);
     }
 
     // Process the email
-    const outcome = await handleEmail(transformedEmail, files);
+    const outcome = await handleEmail(transformedEmail, icsFiles, imageUrls);
 
     // Get the sent email data from mock for testing (non-production only)
     let sentEmail = null;
