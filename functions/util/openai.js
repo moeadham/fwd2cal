@@ -10,7 +10,7 @@ const {OPENROUTER_API_KEY} = require("./config");
 const {sendEvent} = require("./analytics");
 
 const DEFAULT_TEMP = 0.1;
-const DEFAULT_MAX_TOKENS = 4096;
+const DEFAULT_MAX_TOKENS = 16384;
 const DEFAULT_MODEL = "openai/gpt-4.1-mini";
 
 // Lazy initialization of OpenAI client configured for OpenRouter

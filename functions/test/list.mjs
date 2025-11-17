@@ -1,6 +1,6 @@
 import {Resend} from "resend";
 
-const resend = new Resend("re_KuvE2csv_CU3aYnFR42BBnxaDVrFiMMmb");
+const resend = new Resend("xx");
 
 let {data, error} = await resend.emails.receiving.attachments.list({
   emailId: "a20580a9-02c5-4df4-9bb0-1dd04b50e3b5",
