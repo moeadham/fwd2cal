@@ -140,6 +140,7 @@ async function signupCallbackHandler(query) {
     await storeUser(tokens, userRecord);
     await addUserEmailAddress(userRecord, [{email: userEmail, default: true}]);
     sendEvent(userRecord.uid, "sign_up");
+    sendEvent(userEmail, "signupConversion");
 
     // Add user to Resend contacts and registered users (fire-and-forget)
     addContactToResend(userEmail);

@@ -736,7 +736,7 @@ async function sendEmailResponse(sender,
     messageType,
     includeThread) {
   let html = getHtml(messageType);
-  let subject = originalEmail.subject;
+  let subject = originalEmail.subject || "Re: ";
   if (messageType.subject) {
     subject = getSubject(messageType);
   }
