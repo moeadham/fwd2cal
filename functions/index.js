@@ -23,7 +23,6 @@ const admin = require("firebase-admin");
 const prompts = require("./util/prompts");
 const {handleEmail} = require("./util/emailHandler");
 const {inviteAdditionalAttendees} = require("./util/calendarHelper");
-const {time} = require("console");
 const {ENVIRONMENT_NAME, RESEND_API_KEY, RESEND_SIGNING_SECRET} = require("./util/config");
 const {Resend} = require("resend");
 const {getMockResendClient, setMockData, getLastSentEmail} = require("./util/resendMock");

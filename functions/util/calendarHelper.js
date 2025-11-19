@@ -69,7 +69,21 @@ async function addEvent(oauth2Client, event, uid) {
     sendEvent(uid, "calendarError", {reason: "no_primary_calendar"});
     throw new Error("Primary calendar not found");
   }
-  const times = generateTimeObject(event, primaryCalendar, uid);
+
+  // Determine target calendar: use selected_calendar_id if provided, otherwise use primary
+  let targetCalendar = primaryCalendar;
+  if (event.selected_calendar_id) {
+    const selectedCal = calendarList.data.items
+        .find((cal) => cal.id === event.selected_calendar_id);
+    if (selectedCal) {
+      targetCalendar = selectedCal;
+      logger.log(`Using selected calendar: ${targetCalendar.id}`);
+    } else {
+      logger.warn(`Selected calendar ${event.selected_calendar_id} not found, using primary`);
+    }
+  }
+
+  const times = generateTimeObject(event, targetCalendar, uid);
   if (event.description === undefined || event.description === "undefined") {
     event.description = "";
   }
@@ -94,7 +108,7 @@ async function addEvent(oauth2Client, event, uid) {
   // This is needs a refactor.
   if (ONLY_INVITE_HOST) {
     requestBody.attendees = [
-      {email: primaryCalendar.id,
+      {email: targetCalendar.id,
         responseStatus: "accepted"}];
   }
   logger.log("Attempting to add event to google.");
@@ -106,7 +120,7 @@ async function addEvent(oauth2Client, event, uid) {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       insertEvent = await calendar.events.insert({
-        calendarId: primaryCalendar.id,
+        calendarId: targetCalendar.id,
         conferenceDataVersion: 1,
         resource: requestBody,
         sendNotifications: true,
@@ -139,7 +153,9 @@ async function addEvent(oauth2Client, event, uid) {
     }
   }
   sendEvent(uid, "addEvent", {result: "success"});
-  insertEvent.data.calendarId = primaryCalendar.id;
+  insertEvent.data.calendarId = targetCalendar.id;
+  insertEvent.data.calendarName = targetCalendar.summary;
+  insertEvent.data.isPrimaryCalendar = targetCalendar.primary || false;
   insertEvent.data.uid = uid;
   return insertEvent.data;
 }
@@ -220,25 +236,45 @@ async function getUserCalendars(oauth2Client, uid) {
   const calendar = google.calendar({version: "v3", auth: oauth2Client});
   const calendarList = await calendar.calendarList.list();
   // logger.log("CALENDAR OBJECT FULL:", calendarList);
-  const calendars = calendarList.data.items.map((calendar) => ({
-    kind: calendar.kind,
-    etag: calendar.etag,
-    selected: calendar.selected,
-    accessRole: calendar.accessRole,
-    conferenceProperties: calendar.conferenceProperties,
-    calendar_id: calendar.id,
-    summary: calendar.summary,
-    summaryOverride: calendar.summaryOverride,
-    description: calendar.description,
-    primary: calendar.primary,
-    timeZone: calendar.timeZone,
-    location: calendar.location,
-    hidden: calendar.hidden,
-    deleted: calendar.deleted,
-    uid: uid,
-  }));
+
+  // Filter to only writable calendars (owner or writer)
+  const calendars = calendarList.data.items
+      .filter((calendar) => calendar.accessRole === "owner" || calendar.accessRole === "writer")
+      .map((calendar) => ({
+        kind: calendar.kind,
+        etag: calendar.etag,
+        selected: calendar.selected,
+        accessRole: calendar.accessRole,
+        conferenceProperties: calendar.conferenceProperties,
+        calendar_id: calendar.id,
+        summary: calendar.summary,
+        summaryOverride: calendar.summaryOverride,
+        description: calendar.description,
+        primary: calendar.primary,
+        timeZone: calendar.timeZone,
+        location: calendar.location,
+        hidden: calendar.hidden,
+        deleted: calendar.deleted,
+        uid: uid,
+      }));
   // logger.log("Calendars:", calendars);
   return calendars;
+}
+
+/**
+ * Formats calendar object for LLM consumption
+ * Includes only relevant fields that help LLM choose the right calendar
+ * @param {object} calendar - Calendar object from getUserCalendars
+ * @return {object} Simplified calendar object for LLM
+ */
+function formatCalendarForLLM(calendar) {
+  return {
+    calendar_id: calendar.calendar_id,
+    summary: calendar.summaryOverride || calendar.summary, // Use custom name if set
+    description: calendar.description || "", // Calendar description for context
+    is_default: calendar.primary === true,
+    timeZone: calendar.timeZone,
+  };
 }
 
 async function inviteAdditionalAttendees(req, res) {
@@ -285,6 +321,7 @@ async function inviteAdditionalAttendees(req, res) {
 module.exports = {
   addEvent,
   getUserCalendars,
+  formatCalendarForLLM,
   inviteAdditionalAttendees,
   eventFromICS,
 };

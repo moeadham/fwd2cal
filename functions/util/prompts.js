@@ -1,6 +1,13 @@
 /* eslint-disable max-len */
+
+// Model configuration
+const DEFAULT_REASONING_MODEL = "openai/gpt-4.1-mini";
+const DEFAULT_FAST_MODEL = "openai/gpt-4.1-mini";
+
 const prompts = {
-  getEventData: `
+  getEventData: {
+    model: DEFAULT_REASONING_MODEL,
+    prompt: `
 Task: Review the following email thread and extract ALL events mentioned. Return an events_json with the following structure:
 {
   events: [
@@ -35,7 +42,25 @@ description: "A short outline of what was specifically missing from the email"
 
 Here are a few examples:
 ---EXAMPLE 1 START---
-email_text: 
+available_calendars:
+[
+  {
+    "calendar_id": "timmy@gmail.com",
+    "summary": "timmy@gmail.com",
+    "description": "",
+    "is_default": true,
+    "timeZone": "Europe/London"
+  },
+  {
+    "calendar_id": "timmy@acme.com",
+    "summary": "timmy@acme.com",
+    "description": "",
+    "is_default": false,
+    "timeZone": "America/New_York"
+  }
+]
+
+email_text:
 Date: Tue, 26 Mar 2024 12:38:21 +0000
 Subject: Fwd: Get ready for the Genius Bar
 From: Timmy Jimmy <timmy@gmail.com>
@@ -82,7 +107,8 @@ events_json:
       date: "3 April 2024",
       start_time: "10:20",
       end_time: undefined,
-      attendees: ["timmy@gmail.com"]
+      attendees: ["timmy@gmail.com"],
+      selected_calendar_id: null
     }
   ]
 }
@@ -91,7 +117,25 @@ events_json:
 --- EXAMPLE 1 END ---
 
 ---EXAMPLE 2 START---
-email_text: 
+available_calendars:
+[
+  {
+    "calendar_id": "jeff@gmail.com",
+    "summary": "jeff@gmail.com",
+    "description": "",
+    "is_default": true,
+    "timeZone": "America/New_York"
+  },
+  {
+    "calendar_id": "jeff@investing.com",
+    "summary": "jeff@investing.com",
+    "description": "",
+    "is_default": false,
+    "timeZone": "America/New_York"
+  }
+]
+
+email_text:
 Date: Thu, 21 Mar 2024 11:38:21 +0000
 Subject: Fwd: Investing Holdings Strategic Initiative
 From: jeff harry <jeff@investing.com>
@@ -140,7 +184,7 @@ You had proposed March 28th at 9:30, 10:30 or 11am, do you have any availability
 
 
 
-Best regards  
+Best regards
 
 
 events_json:
@@ -156,7 +200,8 @@ potential opportunities to work together",
       date: "26 March 2024",
       start_time: "15:00",
       end_time: undefined,
-      attendees: ["rsoom@toom.com", "jeff@investing.com", "Joe@investing.com"]
+      attendees: ["rsoom@toom.com", "jeff@investing.com", "Joe@investing.com"],
+      selected_calendar_id: "jeff@investing.com"
     }
   ]
 }
@@ -164,7 +209,25 @@ potential opportunities to work together",
 --- EXAMPLE 2 END ---
 
 ---EXAMPLE 3 START---
-email_text: 
+available_calendars:
+[
+  {
+    "calendar_id": "jeff@john.com",
+    "summary": "jeff@john.com",
+    "description": "",
+    "is_default": true,
+    "timeZone": "America/Los_Angeles"
+  },
+  {
+    "calendar_id": "jeff.john@oakwood.edu",
+    "summary": "School Calendar",
+    "description": "Oakwood School Events",
+    "is_default": false,
+    "timeZone": "America/Los_Angeles"
+  }
+]
+
+email_text:
 Date: Fri, 5 Apr 2024 01:08:21 +0000
 Subject: find a new suit
 From: jeff john <jeff@john.com>
@@ -181,7 +244,8 @@ events_json:
       date: "13 April 2024",
       start_time: "14:00",
       end_time: undefined,
-      attendees: ["jeff@john.com"]
+      attendees: ["jeff@john.com"],
+      selected_calendar_id: null
     }
   ]
 }
@@ -189,7 +253,25 @@ events_json:
 --- EXAMPLE 3 END ---
 
 ---EXAMPLE 4 START---
-email_text: 
+available_calendars:
+[
+  {
+    "calendar_id": "alex@gmail.com",
+    "summary": "alex@gmail.com",
+    "description": "",
+    "is_default": true,
+    "timeZone": "America/New_York"
+  },
+  {
+    "calendar_id": "alex@techco.com",
+    "summary": "alex@techco.com",
+    "description": "",
+    "is_default": false,
+    "timeZone": "America/New_York"
+  }
+]
+
+email_text:
 Date: Wed, 15 Apr 2025 16:30:00 +0000
 Subject: Fwd: Conference Schedule - Tech Summit 2025
 From: alex@techco.com
@@ -207,7 +289,7 @@ Day 1 (May 5th):
 - Keynote: Future of AI at 9:00 AM - 10:30 AM in Main Auditorium
 - Workshop: Machine Learning Basics from 2:00 PM to 5:00 PM in Room 201
 
-Day 2 (May 6th):  
+Day 2 (May 6th):
 - Panel Discussion: Ethics in Tech at 11:00 AM (1 hour) in Conference Hall B
 - Networking Lunch at 12:30 PM in the Atrium
 
@@ -226,7 +308,8 @@ events_json:
       date: "5 May 2025",
       start_time: "09:00",
       end_time: "10:30",
-      attendees: ["alex@techco.com"]
+      attendees: ["alex@techco.com"],
+      selected_calendar_id: "alex@techco.com"
     },
     {
       summary: "Workshop: Machine Learning Basics",
@@ -236,7 +319,8 @@ events_json:
       date: "5 May 2025",
       start_time: "14:00",
       end_time: "17:00",
-      attendees: ["alex@techco.com"]
+      attendees: ["alex@techco.com"],
+      selected_calendar_id: "alex@techco.com"
     },
     {
       summary: "Panel Discussion: Ethics in Tech",
@@ -246,7 +330,8 @@ events_json:
       date: "6 May 2025",
       start_time: "11:00",
       end_time: "12:00",
-      attendees: ["alex@techco.com"]
+      attendees: ["alex@techco.com"],
+      selected_calendar_id: "alex@techco.com"
     },
     {
       summary: "Networking Lunch",
@@ -256,18 +341,83 @@ events_json:
       date: "6 May 2025",
       start_time: "12:30",
       end_time: undefined,
-      attendees: ["alex@techco.com"]
+      attendees: ["alex@techco.com"],
+      selected_calendar_id: "alex@techco.com"
     }
   ]
 }
 
 --- EXAMPLE 4 END ---
 
+---EXAMPLE 5 START---
+available_calendars:
+[
+  {
+    "calendar_id": "sarah@gmail.com",
+    "summary": "sarah@gmail.com",
+    "description": "",
+    "is_default": true,
+    "timeZone": "America/Los_Angeles"
+  },
+  {
+    "calendar_id": "sarah@designco.com",
+    "summary": "sarah@designco.com",
+    "description": "",
+    "is_default": false,
+    "timeZone": "America/Los_Angeles"
+  }
+]
+
+email_text:
+Date: Mon, 10 Jun 2024 09:15:00 +0000
+Subject: Fwd: Design Review Meeting
+From: sarah@gmail.com
+---------- Forwarded message ---------
+From: Mike Johnson <mike@designco.com>
+Date: Mon, Jun 10, 2024 at 9:00 AM
+Subject: Design Review Meeting
+To: Sarah Williams <sarah@designco.com>
+Cc: Design Team <team@designco.com>
+
+Hi Sarah,
+
+Let's schedule our quarterly design review meeting for this Thursday, June 13th at 2:00 PM.
+
+We'll review:
+- Q2 design deliverables
+- Client feedback
+- Q3 roadmap planning
+
+Looking forward to it!
+
+Mike
+
+events_json:
+{
+  events: [
+    {
+      summary: "Design Review Meeting",
+      location: undefined,
+      description: "Q2 design deliverables review, client feedback, Q3 roadmap planning",
+      conference_call: true,
+      date: "13 June 2024",
+      start_time: "14:00",
+      end_time: undefined,
+      attendees: ["mike@designco.com", "sarah@designco.com", "team@designco.com"],
+      selected_calendar_id: "sarah@designco.com"
+    }
+  ]
+}
+
+--- EXAMPLE 5 END ---
+
 Respond only with JSON.
 `,
+  },
 
-  getEventTimezone:
-`Task: Review the following email thread and return a timezone_json with the  IANA Time Zone of the event.
+  getEventTimezone: {
+    model: DEFAULT_FAST_MODEL,
+    prompt: `Task: Review the following email thread and return a timezone_json with the  IANA Time Zone of the event.
 {
   reason: Brief reasoning of why the timezone was chosen
   timezone:  IANA Time Zone Database formatted string
@@ -398,9 +548,11 @@ timezone_json:
 Respond only with JSON.
 
 `,
+  },
 
-  parseICS: `
-Task: Review the following ICS file and return a JSON in the google calendar format.
+  parseICS: {
+    model: DEFAULT_REASONING_MODEL,
+    prompt: `Task: Review the following ICS file and return a JSON in the google calendar format.
 
 If a field is optional, and not present in the ICS file, you can leave it out of the JSON.
 
@@ -531,6 +683,7 @@ Google Calendar JSON format:
 
 ICS File:
 `,
+  },
 };
 
 const schemas = {

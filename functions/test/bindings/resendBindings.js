@@ -517,6 +517,124 @@ emailWithImageAttachment.attachmentsList = [
   },
 ];
 
+// Test: Family event for Family Calendar
+const familyEvent = createResendTestData(
+    {
+      type: "email.received",
+      created_at: new Date().toISOString(),
+      data: {
+        email_id: "test-email-family",
+        message_id: `<test-family-${Date.now()}@mail.gmail.com>`,
+        from: TESTER_PRIMARY_GOOGLE_ACCT,
+        to: ["calendar@fwd2cal.com"],
+        cc: [],
+        bcc: [],
+        subject: "Fwd: Family Dinner Reservation",
+        created_at: new Date().toISOString(),
+        attachments: [],
+      },
+    },
+    {
+      id: "test-email-family",
+      subject: "Fwd: Family Dinner Reservation",
+      from: TESTER_PRIMARY_GOOGLE_ACCT,
+      to: ["calendar@fwd2cal.com"],
+      html: `<div dir="ltr"><br><div class="gmail_quote"><div dir="ltr" class="gmail_attr">---------- Forwarded message ---------<br>From: <strong class="gmail_sendername" dir="auto">The Ivy Restaurant</strong> <span dir="auto">&lt;<a href="mailto:reservations@theivy.com">reservations@theivy.com</a>&gt;</span><br>Date: Mon, Dec 15, 2025 at 2:30 PM<br>Subject: Family Dinner Reservation Confirmed<br>To: &lt;<a href="mailto:${TESTER_PRIMARY_GOOGLE_ACCT}">${TESTER_PRIMARY_GOOGLE_ACCT}</a>&gt;<br></div><br><p><strong>Your reservation is confirmed</strong></p><p>Saturday, December 20, 2025 at 7:00 PM</p><p>Party of 6 - Family Dinner</p><p>The Ivy Restaurant<br>1-5 West Street, London WC2H 9NQ</p></div></div>`,
+      text: `
+add this to my family calendar
+      
+---------- Forwarded message ---------
+From: The Ivy Restaurant <reservations@theivy.com>
+Date: Mon, Dec 15, 2025 at 2:30 PM
+Subject: Family Dinner Reservation Confirmed
+To: ${TESTER_PRIMARY_GOOGLE_ACCT}
+
+
+Your reservation is confirmed
+
+Saturday, December 20, 2025 at 7:00 PM
+
+Party of 6 - Family Dinner
+
+The Ivy Restaurant
+1-5 West Street, London WC2H 9NQ`,
+      headers: {
+        "authentication-results": generateAuthHeader(TESTER_PRIMARY_GOOGLE_ACCT),
+        "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
+        "to": "calendar@fwd2cal.com",
+        "subject": "Fwd: Family Dinner Reservation",
+        "date": "Mon, 15 Dec 2025 14:30:00 +0000",
+        "message-id": `<test-family-${Date.now()}@mail.gmail.com>`,
+        "in-reply-to": "<original-message-family>",
+        "references": "<original-message-family>",
+      },
+    },
+);
+
+// Test: Work event for moe@visibl.ai calendar
+const workEventVisibl = createResendTestData(
+    {
+      type: "email.received",
+      created_at: new Date().toISOString(),
+      data: {
+        email_id: "test-email-work-visibl",
+        message_id: `<test-work-visibl-${Date.now()}@mail.gmail.com>`,
+        from: TESTER_PRIMARY_GOOGLE_ACCT,
+        to: ["calendar@fwd2cal.com"],
+        cc: [],
+        bcc: [],
+        subject: "Fwd: Visibl Product Strategy Meeting",
+        created_at: new Date().toISOString(),
+        attachments: [],
+      },
+    },
+    {
+      id: "test-email-work-visibl",
+      subject: "Fwd: Visibl Product Strategy Meeting",
+      from: TESTER_PRIMARY_GOOGLE_ACCT,
+      to: ["calendar@fwd2cal.com"],
+      html: `<div dir="ltr"><br><div class="gmail_quote"><div dir="ltr" class="gmail_attr">---------- Forwarded message ---------<br>From: <strong class="gmail_sendername" dir="auto">Sarah Chen</strong> <span dir="auto">&lt;<a href="mailto:sarah@visibl.ai">sarah@visibl.ai</a>&gt;</span><br>Date: Wed, Dec 18, 2025 at 9:15 AM<br>Subject: Visibl Product Strategy Meeting<br>To: Moe Doe &lt;<a href="mailto:moe@visibl.ai">moe@visibl.ai</a>&gt;<br>Cc: Product Team &lt;<a href="mailto:product@visibl.ai">product@visibl.ai</a>&gt;<br></div><br><p>Hi Moe,</p><p>Let's sync on the Q1 2026 product roadmap for Visibl.</p><p><strong>Meeting Details:</strong></p><p>Thursday, December 19, 2025<br>2:00 PM - 3:30 PM EST<br>Zoom: https://visibl.zoom.us/j/12345</p><p>Agenda:<br>- Review customer feedback<br>- Discuss new feature priorities<br>- Resource allocation</p><p>Best,<br>Sarah</p></div></div>`,
+      text: `
+add this to my visibl calendar     
+      
+---------- Forwarded message ---------
+From: Sarah Chen <sarah@visibl.ai>
+Date: Wed, Dec 18, 2025 at 9:15 AM
+Subject: Visibl Product Strategy Meeting
+To: Moe Doe <moe@visibl.ai>
+Cc: Product Team <product@visibl.ai>
+
+
+Hi Moe,
+
+Let's sync on the Q1 2026 product roadmap for Visibl.
+
+Meeting Details:
+
+Thursday, December 19, 2025
+2:00 PM - 3:30 PM EST
+Zoom: https://visibl.zoom.us/j/12345
+
+Agenda:
+- Review customer feedback
+- Discuss new feature priorities
+- Resource allocation
+
+Best,
+Sarah`,
+      headers: {
+        "authentication-results": generateAuthHeader(TESTER_PRIMARY_GOOGLE_ACCT),
+        "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
+        "to": "calendar@fwd2cal.com",
+        "subject": "Fwd: Visibl Product Strategy Meeting",
+        "date": "Wed, 18 Dec 2025 09:15:00 +0000",
+        "message-id": `<test-work-visibl-${Date.now()}@mail.gmail.com>`,
+        "in-reply-to": "<original-message-work-visibl>",
+        "references": "<original-message-work-visibl>",
+      },
+    },
+);
+
 module.exports = {
   emailFromMain,
   addEmailAddress,
@@ -528,4 +646,6 @@ module.exports = {
   emailWithICSAttachment,
   multipleEventsEmail,
   emailWithImageAttachment,
+  familyEvent,
+  workEventVisibl,
 };

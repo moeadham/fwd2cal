@@ -11,6 +11,7 @@ const EventSchema = z.object({
   start_time: z.string().describe("HH:mm - the start time of the event in 24 hour format"),
   end_time: z.string().nullable().describe("HH:mm - the end time of the event in 24 hour format"),
   attendees: z.array(z.string()).describe("A list of attendees email addresses. ONLY INCLUDE VALID EMAIL ADDRESSES, NOT NAMES."),
+  selected_calendar_id: z.string().nullable().optional().describe("The calendar_id where this event should be added. Choose based on event context (e.g., match calendar_id to the attendee's email address, or the calendar description to the context of the event. If unsure, use null to default to the user's primary calendar."),
 });
 
 // Event data schema - main response for email processing
@@ -18,6 +19,7 @@ const EventDataSchema = z.object({
   events: z.array(EventSchema).nullable().optional().describe("Array of events extracted from the email"),
   error: z.string().nullable().optional().describe("Error message if no date provided"),
   description: z.string().nullable().optional().describe("Error description if no date provided"),
+  reason: z.string().nullable().optional().describe("Reason for your choices. This is for debugging purposes only."),
 });
 
 // Timezone schema

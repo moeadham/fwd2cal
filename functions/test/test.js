@@ -318,7 +318,59 @@ describe(`fwd2cal (${EMAIL_SERVICE.toUpperCase()})`, () => {
         });
   });
 
-  it("UT13 delete account", (done) => {
+  it("UT13 family event should select Family Calendar", (done) => {
+    const testMessage = bindings.familyEvent;
+    sendResendWebhook(testMessage)
+        .end((err, res) => {
+          expect(err).to.be.null;
+          expect(res).to.have.status(200);
+          console.log(res.body);
+          expect(res.body).to.be.an("object");
+          // Should successfully create event from image
+          expect(res.body.data).to.not.have.property("error");
+          expect(res.body.data.kind).to.equal("calendar#event");
+
+          // Verify sent email
+          expect(res.body.sentEmail).to.be.an("object");
+          expect(res.body.sentEmail.html).to.include("Event added");
+
+          // Verify event was created on Family Calendar (group calendar)
+          if (res.body.data.calendarId) {
+            console.log(`Event added to calendar: ${res.body.data.calendarId}`);
+            expect(res.body.data.calendarId).to.include("group.calendar.google.com");
+          }
+
+          done();
+        });
+  });
+
+  it("UT14 work event should select moe@visibl.ai calendar", (done) => {
+    const testMessage = bindings.workEventVisibl;
+    sendResendWebhook(testMessage)
+        .end((err, res) => {
+          expect(err).to.be.null;
+          expect(res).to.have.status(200);
+          console.log(res.body);
+          expect(res.body).to.be.an("object");
+          // Should successfully create event from image
+          expect(res.body.data).to.not.have.property("error");
+          expect(res.body.data.kind).to.equal("calendar#event");
+
+          // Verify sent email
+          expect(res.body.sentEmail).to.be.an("object");
+          expect(res.body.sentEmail.html).to.include("Event added");
+
+          // Verify event was created on visibl.ai calendar
+          if (res.body.data.calendarId) {
+            console.log(`Event added to calendar: ${res.body.data.calendarId}`);
+            expect(res.body.data.calendarId).to.include("visibl.ai");
+          }
+
+          done();
+        });
+  });
+
+  it("UT15 delete account", (done) => {
     const testMessage = bindings.deleteAccount;
     sendResendWebhook(testMessage)
         .end((err, res) => {

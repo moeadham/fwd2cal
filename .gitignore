@@ -31,3 +31,4 @@ CLAUDE.md
 # bindings
 functions/test/bindings/resend-raw.json
 functions/test/bindings/resend-sample.json
+functions/test/bindings/error.ics

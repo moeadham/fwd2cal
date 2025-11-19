@@ -9,7 +9,7 @@ const {getUserFromEmail,
 const {getOauthClient,
   deleteAccount} = require("./authHandler");
 const {processEmail} = require("./openai");
-const {addEvent, eventFromICS} = require("./calendarHelper");
+const {addEvent, eventFromICS, getUserCalendars, formatCalendarForLLM} = require("./calendarHelper");
 const {sendEmailResend, removeContactFromSegment} = require("./resend");
 const {getApiUrl} = require("./credentials");
 const {ENVIRONMENT_NAME, MAIN_EMAIL_ADDRESS, RESEND_REGISTERED_USERS_SEGMENT_ID} = require("./config");
@@ -53,6 +53,7 @@ const EMAIL_RESPONSES = {
       EVENT_LINK: "",
       EVENT_DATE: "",
       EVENT_ATTENDEES: "",
+      CALENDAR_NAME: "",
     },
   },
   eventAddedAttendees: {
@@ -62,6 +63,7 @@ const EMAIL_RESPONSES = {
       EVENT_DATE: "",
       INVITE_LINK: "",
       EVENT_ATTENDEES: "",
+      CALENDAR_NAME: "",
     },
   },
   addAdditionalEmailAddress: {
@@ -300,6 +302,18 @@ async function eventHandler(email, sender, uid, files = [], imageUrls = []) {
     return;
   }
 
+  // Fetch user's calendars for LLM context
+  let calendarsForLLM = [];
+  try {
+    const calendars = await getUserCalendars(oauth2Client, uid);
+    calendarsForLLM = calendars.map(formatCalendarForLLM);
+    logger.log(`Fetched ${calendarsForLLM.length} calendars for user ${uid}`);
+    logger.log("Calendars for LLM:", JSON.stringify(calendarsForLLM, null, 2));
+  } catch (calendarErr) {
+    logger.warn("Error fetching calendars, continuing without calendar list: ", calendarErr);
+    // Continue without calendar list - will default to primary calendar
+  }
+
   // Is there an ICS attachment to the email?
   let event;
   if (files && files.length > 0) {
@@ -322,7 +336,7 @@ async function eventHandler(email, sender, uid, files = [], imageUrls = []) {
   if (!event) {
     // Can we get event details from the thread with AI?
     const headers = getEmailHeaders(email.headers, ["date", "subject", "from"]);
-    const [processEmailErr, aiEvent] = await handleAsync(() => processEmail(email, headers, uid, imageUrls));
+    const [processEmailErr, aiEvent] = await handleAsync(() => processEmail(email, headers, uid, imageUrls, calendarsForLLM));
     if (processEmailErr) {
       logger.warn("OpenAI error: ", processEmailErr);
       await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true);
@@ -501,6 +515,11 @@ async function addEventsAndSendResponse(oauth2Client, events, uid, sender, email
       responseHtml += `Location: ${eventObject.location}<br>`;
     }
 
+    // Add calendar name if not primary
+    if (!eventObject.isPrimaryCalendar && eventObject.calendarName) {
+      responseHtml += `Calendar: ${eventObject.calendarName}<br>`;
+    }
+
     // Check if any event has multiple attendees
     if (eventObject.attendees && eventObject.attendees.length > 1) {
       const attendeeEmails = eventObject.attendees.map((a) => a.email).join(", ");
@@ -537,6 +556,9 @@ async function addEventsAndSendResponse(oauth2Client, events, uid, sender, email
     const eventObject = successfulEvents[0];
     let response;
 
+    // Determine calendar name to display (only if not primary)
+    const calendarNameText = eventObject.isPrimaryCalendar ? "" : `<br>Calendar: ${eventObject.calendarName}`;
+
     if (eventObject.inviteOthersLink) {
       const inviteesWithoutHost = eventObject.inviteOthersAttendees.filter((email) => email !== eventObject.organizer.email);
 
@@ -549,6 +571,7 @@ async function addEventsAndSendResponse(oauth2Client, events, uid, sender, email
               .format("dddd, MMMM Do [at] h:mm A z"),
           INVITE_LINK: eventObject.inviteOthersLink,
           EVENT_ATTENDEES: inviteesWithoutHost.join(", "),
+          CALENDAR_NAME: calendarNameText,
         },
       };
     } else {
@@ -560,6 +583,7 @@ async function addEventsAndSendResponse(oauth2Client, events, uid, sender, email
               .tz(eventObject.start.timeZone)
               .format("dddd, MMMM Do [at] h:mm A z"),
           EVENT_ATTENDEES: eventObject.attendees ? eventObject.attendees.map((attendee) => attendee.email).join(", ") : "",
+          CALENDAR_NAME: calendarNameText,
         },
       };
     }
@@ -682,7 +706,10 @@ function threadEmailHtml(original, html) {
     if (original.headers && original.headers.date) {
       // Remove outer quotes if present: "\"2025-11-10T06:47:51.000Z\"" -> ISO date
       const dateString = original.headers.date.replace(/^"(.*)"$/, "$1");
-      const dateMoment = moment(dateString);
+      // Use moment's RFC2822 parsing with strict mode to avoid deprecation warnings
+      const dateMoment = moment(dateString, moment.RFC_2822, true).isValid() ?
+        moment(dateString, moment.RFC_2822, true) :
+        moment(dateString); // Fallback for ISO dates
       if (dateMoment.isValid()) {
         formattedDate = dateMoment.utc().format("ddd, MMM D, YYYY");
         formattedTime = dateMoment.utc().format("h:mm A") + " UTC";

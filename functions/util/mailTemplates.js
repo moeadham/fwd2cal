@@ -56,7 +56,7 @@ Forward the thread again and include some instructions to help AI figure it out.
     html:
 `Event added to your calendar.
 <br>Date: %EVENT_DATE%
-<br>Attendees: %EVENT_ATTENDEES%
+<br>Attendees: %EVENT_ATTENDEES%%CALENDAR_NAME%
 <br><a href="%EVENT_LINK%" style="display:inline-block; padding:10px 20px; margin:5px 0; background-color:#3498db; color:white; text-align:center; text-decoration:none; font-weight:bold; border-radius:5px; border:none; cursor:pointer;">View Event</a>
 
 <br><br>You can always ask for help: <a href="mailto:support@fwd2cal.com">support@fwd2cal.com</a><br>`,
@@ -64,7 +64,7 @@ Forward the thread again and include some instructions to help AI figure it out.
   eventAddedAttendees: {
     html:
 `Event added to your calendar.
-<br>Date: %EVENT_DATE%
+<br>Date: %EVENT_DATE%%CALENDAR_NAME%
 <br> <a href="%EVENT_LINK%" style="display:inline-block; padding:10px 20px; margin:5px 0; background-color:#3498db; color:white; text-align:center; text-decoration:none; font-weight:bold; border-radius:5px; border:none; cursor:pointer;">View Event</a>
 <br> You may want to invite:
 <br>- %EVENT_ATTENDEES%

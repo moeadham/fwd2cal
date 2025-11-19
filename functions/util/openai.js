@@ -11,7 +11,6 @@ const {sendEvent} = require("./analytics");
 
 const DEFAULT_TEMP = 0.1;
 const DEFAULT_MAX_TOKENS = 16384;
-const DEFAULT_MODEL = "openai/gpt-4.1-mini";
 
 // Lazy initialization of OpenAI client configured for OpenRouter
 let openai = null;
@@ -29,16 +28,15 @@ const getOpenAIClient = () => {
   return openai;
 };
 
-async function defaultCompletion(messages, temperature = DEFAULT_TEMP, zodSchema = null, uid = null) {
+async function defaultCompletion(messages, model, temperature = DEFAULT_TEMP, zodSchema = null, uid = null) {
   logger.debug(`OpenAI request with ${tokenHelper.countTokens(JSON.stringify(messages))} prompt tokens`);
 
   const requestOptions = {
     messages: messages,
-    model: DEFAULT_MODEL,
+    model: model,
     temperature: temperature,
     max_tokens: DEFAULT_MAX_TOKENS,
   };
-  logger.debug("Request options", requestOptions);
   if (zodSchema) {
     // Use structured output with Zod schema
     requestOptions.response_format = zodResponseFormat(zodSchema, "response");
@@ -71,9 +69,14 @@ async function defaultCompletion(messages, temperature = DEFAULT_TEMP, zodSchema
   }
 }
 
-async function processEmail(email, headers, uid = null, imageUrls = []) {
-  const text = `
-  Date: ${headers.date}
+async function processEmail(email, headers, uid = null, imageUrls = [], calendars = []) {
+  // Prepend calendar list if provided
+  let calendarText = "";
+  if (calendars && calendars.length > 0) {
+    calendarText = `available_calendars:\n${JSON.stringify(calendars, null, 2)}\n\nemail_text:\n`;
+  }
+
+  const text = `${calendarText}Date: ${headers.date}
   Subject: ${headers.subject}
   From: ${headers.from}
   ${email.text}`;
@@ -103,25 +106,24 @@ async function processEmail(email, headers, uid = null, imageUrls = []) {
     userContent = text;
   }
 
-  // logger.log(text);
   const eventMessages = [
     {
       role: "system",
-      content: prompts.getEventData,
+      content: prompts.getEventData.prompt,
     },
     {role: "user", content: userContent},
   ];
   const timezoneMessages = [
     {
       role: "system",
-      content: prompts.getEventTimezone,
+      content: prompts.getEventTimezone.prompt,
     },
     {role: "user", content: userContent},
   ];
 
   const [eventResponse, timezoneResponse] = await Promise.all([
-    defaultCompletion(eventMessages, DEFAULT_TEMP, EventDataSchema, uid),
-    defaultCompletion(timezoneMessages, DEFAULT_TEMP, TimezoneSchema, uid),
+    defaultCompletion(eventMessages, prompts.getEventData.model, DEFAULT_TEMP, EventDataSchema, uid),
+    defaultCompletion(timezoneMessages, prompts.getEventTimezone.model, DEFAULT_TEMP, TimezoneSchema, uid),
   ]);
 
   // Clean up undefined values
@@ -170,11 +172,11 @@ async function parseICS(ics) {
   const messages = [
     {
       role: "system",
-      content: prompts.parseICS,
+      content: prompts.parseICS.prompt,
     },
     {role: "user", content: ics},
   ];
-  return await defaultCompletion(messages, DEFAULT_TEMP, ICSParserSchema);
+  return await defaultCompletion(messages, prompts.parseICS.model, DEFAULT_TEMP, ICSParserSchema);
 }
 
 module.exports = {
