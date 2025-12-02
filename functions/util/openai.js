@@ -5,6 +5,7 @@ const {zodResponseFormat} = require("openai/helpers/zod");
 const {logger} = require("firebase-functions");
 const tokenHelper = require("./tokenHelper");
 const {prompts} = require("./prompts");
+const {getUserContext} = require("./firestoreHandler");
 const {EventDataSchema, TimezoneSchema, ICSParserSchema} = require("./schemas.zod");
 const {OPENROUTER_API_KEY} = require("./config");
 const {sendEvent} = require("./analytics");
@@ -78,18 +79,29 @@ async function processEmail(email, headers, uid = null) {
   From: ${headers.from}
   ${email.text}`;
 
-  // logger.log(text);
+  let userContextInstruction = "";
+  if (uid) {
+    try {
+      const userContext = await getUserContext(uid);
+      if (userContext && userContext.trim()) {
+        userContextInstruction = `\n\nUser context (use this to decide which events are relevant and how to interpret the email):\n${userContext.trim()}`;
+      }
+    } catch (error) {
+      logger.warn(`Unable to load user context for uid ${uid}:`, error);
+    }
+  }
+
   const eventMessages = [
     {
       role: "system",
-      content: prompts.getEventData,
+      content: prompts.getEventData + userContextInstruction,
     },
     {role: "user", content: text},
   ];
   const timezoneMessages = [
     {
       role: "system",
-      content: prompts.getEventTimezone,
+      content: prompts.getEventTimezone + userContextInstruction,
     },
     {role: "user", content: text},
   ];

@@ -4,7 +4,9 @@ const {logger} = require("firebase-functions");
 const {getUserFromEmail,
   addPendingEmailAddress,
   removeEmailAddress,
-  deleteUser} = require("./firestoreHandler");
+  deleteUser,
+  getUserContext,
+  setUserContext} = require("./firestoreHandler");
 const {getOauthClient,
   deleteAccount} = require("./authHandler");
 const {processEmail} = require("./openai");
@@ -136,6 +138,8 @@ async function handleEmail(email, files) {
   // Track all received emails with the action type
   sendEvent(uid, "emailReceived", {action: subjectAction});
   switch (subjectAction) {
+    case "setContext":
+      return await setUserContextFromEmail(email, sender, uid);
     case "addUser":
       return await addEmailAddressToUser(email, sender, uid, files);
     case "removeEmail":
@@ -165,7 +169,9 @@ async function sendToSupport(sender, email) {
 
 function understandSubject(subject) {
   subject = subject.toLowerCase();
-  if (subject.startsWith("add")) {
+  if (subject.startsWith("context")) {
+    return "setContext";
+  } else if (subject.startsWith("add")) {
     return "addUser";
   } else if (subject.startsWith("remove")) {
     return "removeEmail";
@@ -276,6 +282,44 @@ async function addEmailAddressToUser(email, sender, uid, files = []) {
   await sendEmailResponse(emailAddressToAdd, email, response, false);
   sendEvent(uid, "addUserRequest");
   return {verificationCode};
+}
+
+async function setUserContextFromEmail(email, sender, uid) {
+  let oldContext = "";
+  try {
+    oldContext = await getUserContext(uid);
+  } catch (error) {
+    logger.warn(`Unable to read existing userContext for uid ${uid}:`, error);
+  }
+
+  const newContext = (email.text || "").trim();
+  await setUserContext(uid, newContext);
+
+  const formatContextForHtml = (context) => {
+    if (!context) {
+      return "(none)";
+    }
+    return context.replace(/\n/g, "<br>");
+  };
+
+  const htmlBody = `
+<p>Your context has been updated.</p>
+<p><strong>Old context:</strong><br>${formatContextForHtml(oldContext)}</p>
+<p><strong>New context:</strong><br>${formatContextForHtml(newContext)}</p>
+  `;
+
+  const threadedHtml = threadEmailHtml(email, htmlBody);
+
+  await sendEmailResend({
+    to: sender,
+    from: MAIN_EMAIL_ADDRESS,
+    subject: `Re: ${email.subject}`,
+    html: threadedHtml,
+    headers: getEmailThreadHeaders(email.headers),
+  });
+
+  sendEvent(uid, "userContextUpdated");
+  return {oldContext, newContext};
 }
 
 async function eventHandler(email, sender, uid, files = []) {

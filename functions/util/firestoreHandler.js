@@ -170,6 +170,33 @@ async function deleteUser(uid) {
   return;
 }
 
+async function getUserContext(uid) {
+  try {
+    const userDoc = await getFirestore().collection("Users").doc(uid).get();
+    if (!userDoc.exists) {
+      throw new Error("User document does not exist");
+    }
+    const data = userDoc.data();
+    return data && data.userContext ? data.userContext : "";
+  } catch (error) {
+    logger.error(`Database error in getUserContext for uid ${uid}:`, error);
+    sendEvent(uid, "databaseError", {operation: "getUserContext"});
+    throw error;
+  }
+}
+
+async function setUserContext(uid, context) {
+  try {
+    await getFirestore().collection("Users").doc(uid).set({
+      userContext: context,
+    }, {merge: true});
+  } catch (error) {
+    logger.error(`Database error in setUserContext for uid ${uid}:`, error);
+    sendEvent(uid, "databaseError", {operation: "setUserContext"});
+    throw error;
+  }
+}
+
 module.exports = {
   getUserFromUID,
   getUserFromEmail,
@@ -181,5 +208,7 @@ module.exports = {
   getPendingEmailAddressByCode,
   removeEmailAddress,
   deleteUser,
+  getUserContext,
+  setUserContext,
 };
 
