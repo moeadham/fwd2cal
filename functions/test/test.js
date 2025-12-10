@@ -62,7 +62,7 @@ describe(`fwd2cal (${EMAIL_SERVICE.toUpperCase()})`, async () => {
             console.error("Error fetching signup URL:", err);
             done(err);
           } else {
-            console.log("If you want to test - you need to complete this Google Authorization in the next 30 seconds!");
+            console.log("If you want to test - you need to complete this Google Authorization in the next 60 seconds!");
             console.log("-------------------------------------------");
             console.log("Redirect URL:", res.headers.location);
             exec(`open -a "Google Chrome" "${res.headers.location}"`, (error, stdout, stderr) => {
@@ -74,7 +74,7 @@ describe(`fwd2cal (${EMAIL_SERVICE.toUpperCase()})`, async () => {
             });
             setTimeout(() => {
               done();
-            }, 20000);
+            }, 60000);
           }
         });
   });
