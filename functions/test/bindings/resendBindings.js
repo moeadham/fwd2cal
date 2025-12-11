@@ -393,6 +393,9 @@ const emailWithICSAttachment = createResendTestData(
 );
 
 // Add attachmentsList with download URL for ICS test
+// Token stored in env var to avoid GitHub secret scanning flags
+const ICS_TEST_FILE_TOKEN = process.env.ICS_TEST_FILE_TOKEN || "";
+const ICS_BASE_URL = "https://firebasestorage.googleapis.com/v0/b/fwd2cal.firebasestorage.app/o/test%2Fcalendar.ics?alt=media";
 emailWithICSAttachment.attachmentsList = [
   {
     id: "attachment-1",
@@ -401,7 +404,7 @@ emailWithICSAttachment.attachmentsList = [
     content_id: "<attachment1>",
     content_disposition: "attachment",
     size: 500,
-    download_url: "https://firebasestorage.googleapis.com/v0/b/fwd2cal.firebasestorage.app/o/test%2Fcalendar.ics?alt=media&token=9e93bd61-f5d1-45b1-9508-5f5bbc1e1038",
+    download_url: ICS_TEST_FILE_TOKEN ? `${ICS_BASE_URL}&token=${ICS_TEST_FILE_TOKEN}` : ICS_BASE_URL,
     expires_at: new Date(Date.now() + 3600000).toISOString(),
   },
 ];
@@ -505,6 +508,9 @@ const emailWithImageAttachment = createResendTestData(
 );
 
 // Add attachmentsList with download URL for image test
+// Token stored in env var to avoid GitHub secret scanning flags
+const IMG_TEST_FILE_TOKEN = process.env.IMG_TEST_FILE_TOKEN || "";
+const IMG_BASE_URL = "https://firebasestorage.googleapis.com/v0/b/fwd2cal.firebasestorage.app/o/test%2FIMG_9444.jpg?alt=media";
 emailWithImageAttachment.attachmentsList = [
   {
     id: "img-attachment-1",
@@ -512,7 +518,7 @@ emailWithImageAttachment.attachmentsList = [
     content_type: "image/jpeg",
     size: 243331,
     content_disposition: "attachment",
-    download_url: "https://firebasestorage.googleapis.com/v0/b/fwd2cal.firebasestorage.app/o/test%2FIMG_9444.jpg?alt=media&token=2cee463c-59b2-4763-abf3-92044414f2cc",
+    download_url: IMG_TEST_FILE_TOKEN ? `${IMG_BASE_URL}&token=${IMG_TEST_FILE_TOKEN}` : IMG_BASE_URL,
     expires_at: new Date(Date.now() + 3600000).toISOString(),
   },
 ];
