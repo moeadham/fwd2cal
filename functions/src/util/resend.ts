@@ -1,21 +1,20 @@
-/* eslint-disable require-jsdoc */
+import { Resend } from "resend";
+import { logger } from "firebase-functions/v2";
+import { RESEND_API_KEY, ENVIRONMENT_NAME } from "./config";
+import { getMockResendClient } from "./resendMock";
+import { sendEvent } from "./analytics";
+import { ResendEmailOptions, ResendAPIResponse, ResendClient } from "../types";
 
-const {Resend} = require("resend");
-const {logger} = require("firebase-functions");
-const {RESEND_API_KEY, ENVIRONMENT_NAME} = require("./config");
-const {getMockResendClient} = require("./resendMock");
-const {sendEvent} = require("./analytics");
-
-let resend = null;
+let resend: Resend | null = null;
 
 /**
  * Initialize Resend client (lazy initialization)
- * @return {Resend} Resend client or mock
  */
-function getResendClient() {
+function getResendClient(): ResendClient | null {
   // Use mock client in test/local mode (same as index.js)
-  const isTestMode = ENVIRONMENT_NAME.value() === "local" ||
-      ENVIRONMENT_NAME.value() === "test";
+  const isTestMode =
+    ENVIRONMENT_NAME.value() === "local" ||
+    ENVIRONMENT_NAME.value() === "test";
   if (isTestMode) {
     return getMockResendClient(); // Returns singleton mock instance
   }
@@ -29,21 +28,20 @@ function getResendClient() {
     }
     resend = new Resend(apiKey);
   }
-  return resend;
+  return resend as unknown as ResendClient;
 }
 
 /**
  * Send email via Resend
- * @param {Object} options - Email options
- * @param {string} options.to - Recipient email address
- * @param {string} options.from - Sender email address
- * @param {string} options.subject - Email subject
- * @param {string} options.text - Plain text content
- * @param {string} options.html - HTML content
- * @param {Object} options.headers - Optional headers for threading
- * @return {Promise<Object>} Response from Resend API
  */
-async function sendEmailResend({to, from, subject, text, html, headers = {}}) {
+async function sendEmailResend({
+  to,
+  from,
+  subject,
+  text,
+  html,
+  headers = {},
+}: ResendEmailOptions): Promise<ResendAPIResponse> {
   try {
     const client = getResendClient();
     if (!client) {
@@ -51,15 +49,23 @@ async function sendEmailResend({to, from, subject, text, html, headers = {}}) {
     }
 
     // Log client type for debugging
-    const isTestMode = ENVIRONMENT_NAME.value() === "local" ||
-        ENVIRONMENT_NAME.value() === "test";
+    const isTestMode =
+      ENVIRONMENT_NAME.value() === "local" ||
+      ENVIRONMENT_NAME.value() === "test";
     logger.info("Resend client info", {
       clientType: isTestMode ? "MOCK" : "REAL",
       environment: ENVIRONMENT_NAME.value(),
       hasApiKey: !!RESEND_API_KEY.value(),
     });
 
-    const message = {
+    const message: {
+      from: string;
+      to: string;
+      subject: string;
+      text?: string;
+      html: string;
+      headers?: Record<string, string>;
+    } = {
       from: from,
       to: to,
       subject: subject,
@@ -101,10 +107,12 @@ async function sendEmailResend({to, from, subject, text, html, headers = {}}) {
         from,
         subject,
       });
-      sendEvent("email_service", "emailSendFailed",
-          {reason: "resend_api_error"});
-      /* eslint-disable-next-line max-len */
-      throw new Error(`Resend API error: ${response.error.message || JSON.stringify(response.error)}`);
+      sendEvent("email_service", "emailSendFailed", {
+        reason: "resend_api_error",
+      });
+      throw new Error(
+        `Resend API error: ${response.error.message || JSON.stringify(response.error)}`
+      );
     }
 
     logger.info("Email sent successfully via Resend", {
@@ -117,77 +125,90 @@ async function sendEmailResend({to, from, subject, text, html, headers = {}}) {
 
     return response;
   } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : undefined;
     logger.error("Failed to send email via Resend", {
-      error: error.message,
-      errorStack: error.stack,
+      error: errorMessage,
+      errorStack: errorStack,
       to,
       from,
       subject,
     });
-    sendEvent("email_service", "emailSendFailed", {reason: "exception"});
-    throw new Error(`Failed to send email: ${error.message}`);
+    sendEvent("email_service", "emailSendFailed", { reason: "exception" });
+    throw new Error(`Failed to send email: ${errorMessage}`);
   }
 }
 
 /**
  * Add contact to Resend contacts list
  * Fails silently - no error throwing
- * @param {string} email - Email address to add
  */
-function addContactToResend(email) {
+function addContactToResend(email: string): void {
   const client = getResendClient();
   if (!client) return;
 
-  client.contacts.create({
-    email: email,
-    unsubscribed: false,
-  }).catch((error) => {
-    logger.warn("Failed to add contact to Resend",
-        {email, error: error.message});
-  });
+  client.contacts
+    .create({
+      email: email,
+      unsubscribed: false,
+    })
+    .catch((error: Error) => {
+      logger.warn("Failed to add contact to Resend", {
+        email,
+        error: error.message,
+      });
+    });
 }
 
 /**
  * Add contact to a Resend segment
  * Fails silently - no error throwing
- * @param {string} email - Email address to add
- * @param {string} segmentId - Resend segment ID
  */
-function addContactToSegment(email, segmentId) {
+function addContactToSegment(email: string, segmentId: string): void {
   const client = getResendClient();
   if (!client) return;
 
-  client.contacts.segments.add({
-    email: email,
-    segmentId: segmentId,
-  }).catch((error) => {
-    logger.warn("Failed to add contact to segment",
-        {email, segmentId, error: error.message});
-  });
+  client.contacts.segments
+    .add({
+      email: email,
+      segmentId: segmentId,
+    })
+    .catch((error: Error) => {
+      logger.warn("Failed to add contact to segment", {
+        email,
+        segmentId,
+        error: error.message,
+      });
+    });
 }
 
 /**
  * Remove contact from a Resend segment
  * Fails silently - no error throwing
- * @param {string} email - Email address to remove
- * @param {string} segmentId - Resend segment ID
  */
-function removeContactFromSegment(email, segmentId) {
+function removeContactFromSegment(email: string, segmentId: string): void {
   const client = getResendClient();
   if (!client) return;
 
-  client.contacts.segments.remove({
-    email: email,
-    segmentId: segmentId,
-  }).catch((error) => {
-    logger.warn("Failed to remove contact from segment",
-        {email, segmentId, error: error.message});
-  });
+  client.contacts.segments
+    .remove({
+      email: email,
+      segmentId: segmentId,
+    })
+    .catch((error: Error) => {
+      logger.warn("Failed to remove contact from segment", {
+        email,
+        segmentId,
+        error: error.message,
+      });
+    });
 }
 
-module.exports = {
+export {
   sendEmailResend,
   addContactToResend,
   addContactToSegment,
   removeContactFromSegment,
+  getResendClient,
 };

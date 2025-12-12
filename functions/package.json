@@ -2,22 +2,25 @@
   "name": "fwd2cal",
   "description": "fwd an email and its added to your calendar",
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "build:watch": "tsc -p tsconfig.build.json --watch",
     "test": "./test.sh",
-    "lint": "eslint .",
-    "serve": "firebase emulators:start",
-    "shell": "firebase functions:shell",
+    "lint": "eslint src/**/*.ts",
+    "serve": "npm run build && firebase emulators:start",
+    "shell": "npm run build && firebase functions:shell",
     "start": "npm run shell",
-    "deploy": "firebase deploy",
-    "logs": "firebase functions:log"
+    "deploy": "npm run build && firebase deploy",
+    "logs": "firebase functions:log",
+    "clean": "rm -rf lib"
   },
   "engines": {
     "node": "22"
   },
-  "main": "index.js",
+  "main": "lib/index.js",
   "dependencies": {
     "axios": "1.13.2",
     "firebase-admin": "^13.6.0",
-    "firebase-functions": "^7.0.0",
+    "firebase-functions": "^6.0.0",
     "googleapis": "^134.0.0",
     "js-tiktoken": "^1.0.10",
     "moment-timezone": "^0.5.45",
@@ -33,10 +36,23 @@
   },
   "devDependencies": {
     "@google-cloud/pubsub": "^4.3.3",
+    "@types/chai": "^5.2.3",
+    "@types/chai-http": "^3.0.5",
+    "@types/express": "^4.17.21",
+    "@types/mocha": "^10.0.10",
+    "@types/moment-timezone": "^0.5.30",
+    "@types/node": "^22.10.2",
+    "@types/qs": "^6.9.17",
+    "@types/underscore": "^1.11.15",
+    "@types/uuid": "^10.0.0",
+    "@types/validator": "^13.12.2",
     "chai": "^4.4.1",
     "chai-http": "^4.4.0",
     "eslint": "^8.15.0",
-    "eslint-config-google": "^0.14.0"
+    "eslint-config-google": "^0.14.0",
+    "mocha": "^11.7.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.2"
   },
   "private": true,
   "author": "moe adham",

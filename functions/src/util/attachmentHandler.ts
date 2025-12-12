@@ -1,33 +1,41 @@
-/* eslint-disable require-jsdoc */
-const {logger} = require("firebase-functions");
+import { logger } from "firebase-functions/v2";
+import {
+  ICSFile,
+  ProcessedAttachments,
+  AttachmentInfo,
+  ResendClient,
+} from "../types";
 
 /**
  * Process attachments from a Resend email
  * - Downloads ICS files for calendar parsing
  * - Collects image URLs (png, jpg, jpeg, webp) for LLM vision processing
- *
- * @param {Object} resend - Resend client instance
- * @param {string} emailId - Email ID from Resend
- * @return {Promise<Object>} {icsFiles: Array, imageUrls: Array}
  */
-async function processAttachments(resend, emailId) {
-  const icsFiles = [];
-  const imageUrls = [];
+async function processAttachments(
+  resend: ResendClient,
+  emailId: string
+): Promise<ProcessedAttachments> {
+  const icsFiles: ICSFile[] = [];
+  const imageUrls: string[] = [];
 
   // Get detailed attachment info from list endpoint
-  let attachmentsList = [];
+  let attachmentsList: AttachmentInfo[] = [];
   try {
-    const {data, error} = await resend.emails.receiving.attachments.list({
+    logger.info("Fetching attachments for email", { emailId });
+    const { data, error } = await resend.emails.receiving.attachments.list({
       emailId: emailId,
     });
     if (error) {
-      logger.error("Failed to list attachments", {error: error.message});
+      logger.error("Failed to list attachments", { error: error.message });
     } else {
       // The response has nested data: {data: {object: 'list', data: [...]}}
       attachmentsList = data?.data || [];
+      logger.info("Attachments list received", { count: attachmentsList.length, attachments: attachmentsList.map(a => a.filename) });
     }
   } catch (listError) {
-    logger.error("Failed to list attachments", {error: listError.message});
+    const errorMessage =
+      listError instanceof Error ? listError.message : String(listError);
+    logger.error("Failed to list attachments", { error: errorMessage });
   }
 
   // Process ICS attachments (download them from download_url)
@@ -51,7 +59,7 @@ async function processAttachments(resend, emailId) {
         icsFiles.push({
           fieldname: "attachment",
           file: Buffer.from(icsContent),
-          filename: {filename: attachmentInfo.filename},
+          filename: { filename: attachmentInfo.filename },
           encoding: "7bit",
           mimetype: attachmentInfo.content_type || "text/calendar",
         });
@@ -60,8 +68,10 @@ async function processAttachments(resend, emailId) {
           size: icsContent.length,
         });
       } catch (fetchError) {
+        const errorMessage =
+          fetchError instanceof Error ? fetchError.message : String(fetchError);
         logger.error("Failed to download ICS attachment", {
-          error: fetchError.message,
+          error: errorMessage,
           attachmentId: attachmentInfo.id,
           filename: attachmentInfo.filename,
         });
@@ -108,9 +118,7 @@ async function processAttachments(resend, emailId) {
     });
   }
 
-  return {icsFiles, imageUrls};
+  return { icsFiles, imageUrls };
 }
 
-module.exports = {
-  processAttachments,
-};
+export { processAttachments };
