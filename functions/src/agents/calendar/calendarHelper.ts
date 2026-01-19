@@ -1,11 +1,11 @@
 import { logger } from "firebase-functions/v2";
 import moment from "moment-timezone";
 import { google, calendar_v3, Auth } from "googleapis";
-import handleAsync from "./handleAsync";
-import { getOauthClient } from "./authHandler";
+import handleAsync from "../../util/handleAsync";
+import { getOauthClient } from "../../util/authHandler";
 import ical from "node-ical";
 import _ from "underscore";
-import { sendEvent } from "./analytics";
+import { sendEvent } from "../../util/analytics";
 import {
   Event,
   GoogleCalendar,
@@ -17,7 +17,7 @@ import {
   ICSFile,
   CalendarEventRequestBody,
   RequestWithQuery,
-} from "../types";
+} from "../../types";
 import { Response } from "express";
 
 const DEFAULT_EVENT_LENGTH = 30;

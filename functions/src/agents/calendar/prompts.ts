@@ -1,4 +1,4 @@
-import { Prompts } from "../types";
+import { Prompts } from "../../types";
 
 // Model configuration
 const DEFAULT_REASONING_MODEL = "openai/gpt-4.1-mini";

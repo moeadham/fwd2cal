@@ -1,4 +1,4 @@
-import { MailTemplates } from "../types";
+import { MailTemplates } from "../../types";
 
 const mailTemplates: MailTemplates = {
   noUserFound: {

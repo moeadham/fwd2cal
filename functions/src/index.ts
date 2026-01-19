@@ -9,8 +9,8 @@ import admin from "firebase-admin";
 import { Resend } from "resend";
 import { getFunctions } from "firebase-admin/functions";
 
-import { handleEmail } from "./util/emailHandler";
-import { inviteAdditionalAttendees } from "./util/calendarHelper";
+import { handleEmail } from "./agents/calendar/emailHandler";
+import { inviteAdditionalAttendees } from "./agents/calendar/calendarHelper";
 import {
   ENVIRONMENT_NAME,
   RESEND_API_KEY,
@@ -22,7 +22,7 @@ import {
   getLastSentEmail,
 } from "./util/resendMock";
 import { addContactToResend } from "./util/resend";
-import { processAttachments } from "./util/attachmentHandler";
+import { processAttachments } from "./agents/calendar/attachmentHandler";
 import {
   oauthCronJob,
   signupCallbackHandler,

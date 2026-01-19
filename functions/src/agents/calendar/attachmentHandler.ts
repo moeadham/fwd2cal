@@ -4,7 +4,7 @@ import {
   ProcessedAttachments,
   AttachmentInfo,
   ResendClient,
-} from "../types";
+} from "../../types";
 
 /**
  * Process attachments from a Resend email

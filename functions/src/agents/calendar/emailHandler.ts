@@ -5,27 +5,36 @@ import {
   addPendingEmailAddress,
   removeEmailAddress,
   deleteUser,
-} from "./firestoreHandler";
-import { getOauthClient, deleteAccount } from "./authHandler";
-import { processEmail } from "./openai";
+} from "../../util/firestoreHandler";
+import { getOauthClient, deleteAccount } from "../../util/authHandler";
+import { processEmail } from "./llm";
 import {
   addEvent,
   eventFromICS,
   getUserCalendars,
   formatCalendarForLLM,
 } from "./calendarHelper";
-import { sendEmailResend, removeContactFromSegment } from "./resend";
-import { getApiUrl } from "./credentials";
+import { sendEmailResend, removeContactFromSegment } from "../../util/resend";
+import { getApiUrl } from "../../util/credentials";
 import {
   ENVIRONMENT_NAME,
   MAIN_EMAIL_ADDRESS,
   RESEND_REGISTERED_USERS_SEGMENT_ID,
-} from "./config";
-import handleAsync from "./handleAsync";
+} from "../../util/config";
+import handleAsync from "../../util/handleAsync";
+import {
+  isValidEmail,
+  getSenderFromRawEmail,
+  getRecipientsFromRawEmail,
+  getEmailHeaders,
+  getEmailThreadHeaders,
+  threadEmailHtml,
+  verifyEmail,
+} from "../../util/emailUtils";
 import { mailTemplates } from "./mailTemplates";
 import moment from "moment-timezone";
 import qs from "qs";
-import { sendEvent } from "./analytics";
+import { sendEvent } from "../../util/analytics";
 import {
   TransformedEmail,
   ICSFile,
@@ -36,8 +45,7 @@ import {
   GoogleCalendarEvent,
   CalendarForLLM,
   FailedEvent,
-  EmailThreadHeaders,
-} from "../types";
+} from "../../types";
 import { Auth } from "googleapis";
 
 interface EmailResponses {
@@ -581,12 +589,6 @@ function validateEventTimes(event: Event): EventValidationResult {
   return { isValid: true };
 }
 
-function isValidEmail(email: string): boolean {
-  // Email validation regex that supports + character and other common email patterns
-  const emailRegex = /^[a-zA-Z0-9._+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
-  return emailRegex.test(email);
-}
-
 async function addEventsAndSendResponse(
   oauth2Client: Auth.OAuth2Client,
   events: Event[],
@@ -771,143 +773,6 @@ ${responseHtml}
   return successfulEvents.length === 1 ? successfulEvents[0] : successfulEvents;
 }
 
-function getSenderFromRawEmail(email: TransformedEmail): string | undefined {
-  return email.from ? email.from.toLowerCase() : undefined;
-}
-
-function getRecipientsFromRawEmail(email: TransformedEmail): string[] {
-  const to = email.to || [];
-  return to.map((emailAddr) => emailAddr.toLowerCase());
-}
-
-function getEmailThreadHeaders(
-  headers: Record<string, string>
-): EmailThreadHeaders {
-  // Extract incoming Message-ID and existing References from the email
-  const extracted = getEmailHeaders(headers, ["Message-ID", "References"]);
-
-  const messageId = extracted["Message-ID"];
-  const existingReferences = extracted["References"];
-
-  const threadHeaders: EmailThreadHeaders = {};
-
-  // Build proper threading headers for the reply
-  if (messageId) {
-    // Set In-Reply-To to the incoming message's ID
-    threadHeaders["In-Reply-To"] = messageId;
-
-    // Build References chain: existing references + incoming message ID
-    if (existingReferences) {
-      threadHeaders["References"] = `${existingReferences} ${messageId}`;
-    } else {
-      threadHeaders["References"] = messageId;
-    }
-  }
-
-  return threadHeaders;
-}
-
-function getEmailHeaders(
-  headers: Record<string, string>,
-  items: string[]
-): Record<string, string> {
-  const result: Record<string, string> = {};
-  try {
-    // Handle if headers is not an object
-    if (!headers || typeof headers !== "object") {
-      return result;
-    }
-
-    items.forEach((item) => {
-      // Case-insensitive key lookup
-      const key = Object.keys(headers).find(
-        (k) => k.toLowerCase() === item.toLowerCase()
-      );
-      if (key && headers[key]) {
-        // Trim if it's a string, otherwise return as-is
-        result[item] =
-          typeof headers[key] === "string" ? headers[key].trim() : headers[key];
-      }
-    });
-  } catch (error) {
-    logger.warn("Error extracting headers", error);
-  }
-  return result;
-}
-
-/**
- * Strip base64-encoded images from HTML
- * Resend doesn't allow sending emails with inline base64 images
- */
-function stripBase64Images(html: string): string {
-  if (!html) return html;
-
-  // Remove <img src="data:image/..."> tags
-  // Match both single and double quotes, and handle potential whitespace
-  return html.replace(
-    /<img[^>]*\ssrc\s*=\s*["']data:image\/[^"']*["'][^>]*>/gi,
-    "[Image removed]"
-  );
-}
-
-function threadEmailHtml(original: TransformedEmail, html: string): string {
-  if (!html) html = "";
-  try {
-    // Parse sender information from headers
-    let senderDisplay = original.from;
-    if (original.headers && original.headers.from) {
-      // Remove outer quotes if present: "\"Name\" <email>" -> "Name" <email>
-      const fromHeader = original.headers.from.replace(/^"(.*)"$/, "$1");
-      // Extract name and email from format: "Name <email>" or just "email"
-      const match = fromHeader.match(/^(.+?)\s*<(.+?)>$/);
-      if (match) {
-        senderDisplay = `${match[1].replace(/^"|"$/g, "")} <${match[2]}>`;
-      } else {
-        senderDisplay = fromHeader;
-      }
-    }
-
-    // Parse date from headers
-    let formattedDate = "";
-    let formattedTime = "";
-    if (original.headers && original.headers.date) {
-      // Remove outer quotes if present: "\"2025-11-10T06:47:51.000Z\"" -> ISO date
-      const dateString = original.headers.date.replace(/^"(.*)"$/, "$1");
-      // Use moment's RFC2822 parsing with strict mode to avoid deprecation warnings
-      const dateMoment = moment(dateString, moment.RFC_2822, true).isValid()
-        ? moment(dateString, moment.RFC_2822, true)
-        : moment(dateString); // Fallback for ISO dates
-      if (dateMoment.isValid()) {
-        formattedDate = dateMoment.utc().format("ddd, MMM D, YYYY");
-        formattedTime = dateMoment.utc().format("h:mm A") + " UTC";
-      }
-    }
-
-    // Strip base64 images from original HTML before including in response
-    const cleanedHtml = stripBase64Images(original.html);
-
-    // If we successfully parsed date and sender, create Gmail-style threading
-    if (formattedDate && formattedTime) {
-      const threadLine = `On ${formattedDate}, at ${formattedTime}, ${senderDisplay} wrote:`;
-      return `${html}<br>
-<div class="gmail_quote">
-<div dir="ltr" class="gmail_attr">
-${threadLine}<br>
-</div>
-<blockquote class="gmail_quote" style="margin:0px 0px 0px 0.8ex;border-left-width:1px;border-left-style:solid;padding-left:1ex;border-left-color:rgb(204,204,204)">
-${cleanedHtml}
-</blockquote>
-</div>`;
-    }
-  } catch (error) {
-    logger.warn("Error threading email HTML", error);
-  }
-
-  // Fallback to simple concatenation if anything fails
-  // Make sure to strip base64 images here too
-  return `${html}${stripBase64Images(original.html)}`;
-}
-
 function getHtml(messageType: EmailResponseTemplate): string {
   logger.log("messageType", messageType.templateName);
   const template =
@@ -953,41 +818,6 @@ async function sendEmailResponse(
     html: html,
     headers: getEmailThreadHeaders(originalEmail.headers),
   });
-}
-
-function verifyEmail(email: TransformedEmail): boolean {
-  // Log incoming email verification data
-  logger.info("Email verification check", {
-    from: email.from,
-    SPF: email.SPF,
-    dkim: email.dkim,
-  });
-
-  if (email.SPF !== "pass") {
-    logger.warn("Email verification failed: SPF check failed", {
-      from: email.from,
-      SPF: email.SPF,
-      expected: "pass",
-    });
-    sendEvent(email.from, "emailRejected", { reason: "spf_failed" });
-    return false;
-  }
-
-  if (email.dkim.indexOf("pass") === -1) {
-    logger.warn("Email verification failed: DKIM check failed", {
-      from: email.from,
-      dkim: email.dkim,
-      containsPass: email.dkim.indexOf("pass") !== -1,
-    });
-    sendEvent(email.from, "emailRejected", { reason: "dkim_failed" });
-    return false;
-  }
-
-  logger.info("Email verification passed", {
-    from: email.from,
-  });
-
-  return true;
 }
 
 export { handleEmail };

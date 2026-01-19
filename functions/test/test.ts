@@ -287,7 +287,7 @@ describe(`fwd2cal (${EMAIL_SERVICE.toUpperCase()})`, function() {
     });
   });
 
-  it.skip("UT09 add an event with an ics attachment.", async function() {
+  it("UT09 add an event with an ics attachment.", async function() {
     const testMessage = emailWithICSAttachment;
 
     const res = await sendResendWebhook(testMessage, testMessage.attachmentsList);

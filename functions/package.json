@@ -46,6 +46,8 @@
     "@types/underscore": "^1.11.15",
     "@types/uuid": "^10.0.0",
     "@types/validator": "^13.12.2",
+    "@typescript-eslint/eslint-plugin": "^8.53.0",
+    "@typescript-eslint/parser": "^8.53.0",
     "chai": "^4.4.1",
     "chai-http": "^4.4.0",
     "eslint": "^8.15.0",

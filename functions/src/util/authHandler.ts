@@ -135,7 +135,7 @@ async function signupCallbackHandler(
           });
           userRecord = { uid: newUser.uid, email: userEmail };
           logger.log("Successfully created new user:", userRecord.uid);
-        } catch (createError) {
+        } catch (_createError) {
           const err = new Error("Authentication failed") as Error & {
             code?: number;
           };

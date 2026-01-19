@@ -91,7 +91,7 @@ class MockResend implements ResendClient {
         }): Promise<{ data: ResendAttachmentsList; error: null }> => {
           const testData = this.testData[options.emailId];
           console.log(`[MockResend] attachments.list called for emailId: ${options.emailId}`);
-          console.log(`[MockResend] testData exists: ${!!testData}, attachmentsList: ${testData?.attachmentsList?.length ?? 'undefined'}`);
+          console.log(`[MockResend] testData exists: ${!!testData}, attachmentsList: ${testData?.attachmentsList?.length ?? "undefined"}`);
           if (!testData || !testData.attachmentsList || testData.attachmentsList.length === 0) {
             // Return empty list if no attachments configured
             return {
@@ -148,7 +148,7 @@ class MockResend implements ResendClient {
 
   // Mock contacts API
   contacts = {
-    create: async (options: {
+    create: async (_options: {
       email: string;
       unsubscribed: boolean;
     }): Promise<ResendAPIResponse> => {
@@ -161,7 +161,7 @@ class MockResend implements ResendClient {
     },
 
     segments: {
-      add: async (options: {
+      add: async (_options: {
         email: string;
         segmentId: string;
       }): Promise<ResendAPIResponse> => {
@@ -173,7 +173,7 @@ class MockResend implements ResendClient {
         };
       },
 
-      remove: async (options: {
+      remove: async (_options: {
         email: string;
         segmentId: string;
       }): Promise<ResendAPIResponse> => {
