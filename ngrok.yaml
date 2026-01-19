@@ -4,4 +4,4 @@ tunnels:
     addr: 5002
     proto: http
 log_level: debug
-log: /tmp/ngrok.log
+log: /tmp/ngrok.log 
