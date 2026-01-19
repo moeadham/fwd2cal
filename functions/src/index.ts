@@ -27,7 +27,7 @@ import {
   oauthCronJob,
   signupCallbackHandler,
   verifyAdditionalEmail,
-} from "./util/authHandler";
+} from "./auth/authHandler";
 import {
   GoogleOAuthCredentials,
   TransformedEmail,

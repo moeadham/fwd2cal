@@ -6,7 +6,7 @@ import {
   removeEmailAddress,
   deleteUser,
 } from "../../util/firestoreHandler";
-import { getOauthClient, deleteAccount } from "../../util/authHandler";
+import { getOauthClient, deleteAccount } from "../../auth/authHandler";
 import { processEmail } from "./llm";
 import {
   addEvent,
@@ -15,7 +15,7 @@ import {
   formatCalendarForLLM,
 } from "./calendarHelper";
 import { sendEmailResend, removeContactFromSegment } from "../../util/resend";
-import { getApiUrl } from "../../util/credentials";
+import { getApiUrl } from "../../auth/credentials";
 import {
   ENVIRONMENT_NAME,
   MAIN_EMAIL_ADDRESS,

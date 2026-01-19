@@ -5,15 +5,15 @@ import {
   addUserEmailAddress,
   updateUserTokens,
   getPendingEmailAddressByCode,
-} from "./firestoreHandler";
+} from "../util/firestoreHandler";
 import { google, Auth } from "googleapis";
 import { CREDENTIALS, getRedirectUriIndex } from "./credentials";
-import { ENVIRONMENT_NAME, RESEND_REGISTERED_USERS_SEGMENT_ID } from "./config";
+import { ENVIRONMENT_NAME, RESEND_REGISTERED_USERS_SEGMENT_ID } from "../util/config";
 import { getAuth } from "firebase-admin/auth";
 import { logger } from "firebase-functions/v2";
 import { isUUID } from "validator";
-import { sendEvent } from "./analytics";
-import { addContactToResend, addContactToSegment } from "./resend";
+import { sendEvent } from "../util/analytics";
+import { addContactToResend, addContactToSegment } from "../util/resend";
 import { OAuthTokens, FirebaseUserRecord, RequestWithQuery } from "../types";
 import { Response } from "express";
 

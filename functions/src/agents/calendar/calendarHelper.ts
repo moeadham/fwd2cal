@@ -2,7 +2,7 @@ import { logger } from "firebase-functions/v2";
 import moment from "moment-timezone";
 import { google, calendar_v3, Auth } from "googleapis";
 import handleAsync from "../../util/handleAsync";
-import { getOauthClient } from "../../util/authHandler";
+import { getOauthClient } from "../../auth/authHandler";
 import ical from "node-ical";
 import _ from "underscore";
 import { sendEvent } from "../../util/analytics";
