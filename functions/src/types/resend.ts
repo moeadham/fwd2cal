@@ -1,4 +1,4 @@
-import { AttachmentInfo, TransformedEmail } from "./email";
+import {AttachmentInfo, TransformedEmail} from "./email";
 
 // Resend email options
 export interface ResendEmailOptions {

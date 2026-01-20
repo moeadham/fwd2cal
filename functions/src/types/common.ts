@@ -1,4 +1,4 @@
-import { Request } from "express";
+import {Request} from "express";
 
 // Error with code
 export interface ErrorWithCode extends Error {

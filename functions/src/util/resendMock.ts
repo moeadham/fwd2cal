@@ -5,7 +5,7 @@ import {
   ResendAPIResponse,
   MockSentEmail,
 } from "../types";
-import { AttachmentInfo, TransformedEmail } from "../types";
+import {AttachmentInfo, TransformedEmail} from "../types";
 
 interface TestData {
   emailContent: TransformedEmail | ResendEmailData;
@@ -22,9 +22,9 @@ class MockResend implements ResendClient {
 
   // Set test data for a specific email ID
   setTestData(
-    emailId: string,
-    emailContent: TransformedEmail | ResendEmailData,
-    attachmentsList: AttachmentInfo[] = []
+      emailId: string,
+      emailContent: TransformedEmail | ResendEmailData,
+      attachmentsList: AttachmentInfo[] = [],
   ): void {
     this.testData[emailId] = {
       emailContent,
@@ -54,7 +54,7 @@ class MockResend implements ResendClient {
   emails = {
     receiving: {
       get: async (
-        emailId: string
+          emailId: string,
       ): Promise<{ data: ResendEmailData; error: null }> => {
         const testData = this.testData[emailId];
         if (!testData) {
@@ -70,9 +70,9 @@ class MockResend implements ResendClient {
               headers: {
                 "authentication-results":
                   "amazonses.com; spf=pass; dkim=pass header.i=@example.com; dmarc=pass",
-                from: "test@example.com",
-                to: "calendar@fwd2cal.com",
-                subject: "Test Email",
+                "from": "test@example.com",
+                "to": "calendar@fwd2cal.com",
+                "subject": "Test Email",
                 "message-id": `<${emailId}@example.com>`,
               },
             },
@@ -91,7 +91,8 @@ class MockResend implements ResendClient {
         }): Promise<{ data: ResendAttachmentsList; error: null }> => {
           const testData = this.testData[options.emailId];
           console.log(`[MockResend] attachments.list called for emailId: ${options.emailId}`);
-          console.log(`[MockResend] testData exists: ${!!testData}, attachmentsList: ${testData?.attachmentsList?.length ?? "undefined"}`);
+          const attachCount = testData?.attachmentsList?.length ?? "undefined";
+          console.log(`[MockResend] testData exists: ${!!testData}, attachmentsList: ${attachCount}`);
           if (!testData || !testData.attachmentsList || testData.attachmentsList.length === 0) {
             // Return empty list if no attachments configured
             return {
@@ -199,9 +200,9 @@ function getMockResendClient(): MockResend {
 }
 
 function setMockData(
-  emailId: string,
-  emailContent: TransformedEmail | ResendEmailData,
-  attachmentsList: AttachmentInfo[] = []
+    emailId: string,
+    emailContent: TransformedEmail | ResendEmailData,
+    attachmentsList: AttachmentInfo[] = [],
 ): void {
   const mock = getMockResendClient();
   mock.setTestData(emailId, emailContent, attachmentsList);

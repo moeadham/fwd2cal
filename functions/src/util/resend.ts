@@ -1,9 +1,9 @@
-import { Resend } from "resend";
-import { logger } from "firebase-functions/v2";
-import { RESEND_API_KEY, ENVIRONMENT_NAME } from "./config";
-import { getMockResendClient } from "./resendMock";
-import { sendEvent } from "./analytics";
-import { ResendEmailOptions, ResendAPIResponse, ResendClient } from "../types";
+import {Resend} from "resend";
+import {logger} from "firebase-functions/v2";
+import {RESEND_API_KEY, ENVIRONMENT_NAME} from "./config";
+import {getMockResendClient} from "./resendMock";
+import {sendEvent} from "./analytics";
+import {ResendEmailOptions, ResendAPIResponse, ResendClient} from "../types";
 
 let resend: Resend | null = null;
 
@@ -111,7 +111,7 @@ async function sendEmailResend({
         reason: "resend_api_error",
       });
       throw new Error(
-        `Resend API error: ${response.error.message || JSON.stringify(response.error)}`
+          `Resend API error: ${response.error.message || JSON.stringify(response.error)}`,
       );
     }
 
@@ -135,7 +135,7 @@ async function sendEmailResend({
       from,
       subject,
     });
-    sendEvent("email_service", "emailSendFailed", { reason: "exception" });
+    sendEvent("email_service", "emailSendFailed", {reason: "exception"});
     throw new Error(`Failed to send email: ${errorMessage}`);
   }
 }
@@ -149,16 +149,16 @@ function addContactToResend(email: string): void {
   if (!client) return;
 
   client.contacts
-    .create({
-      email: email,
-      unsubscribed: false,
-    })
-    .catch((error: Error) => {
-      logger.warn("Failed to add contact to Resend", {
-        email,
-        error: error.message,
+      .create({
+        email: email,
+        unsubscribed: false,
+      })
+      .catch((error: Error) => {
+        logger.warn("Failed to add contact to Resend", {
+          email,
+          error: error.message,
+        });
       });
-    });
 }
 
 /**
@@ -170,17 +170,17 @@ function addContactToSegment(email: string, segmentId: string): void {
   if (!client) return;
 
   client.contacts.segments
-    .add({
-      email: email,
-      segmentId: segmentId,
-    })
-    .catch((error: Error) => {
-      logger.warn("Failed to add contact to segment", {
-        email,
-        segmentId,
-        error: error.message,
+      .add({
+        email: email,
+        segmentId: segmentId,
+      })
+      .catch((error: Error) => {
+        logger.warn("Failed to add contact to segment", {
+          email,
+          segmentId,
+          error: error.message,
+        });
       });
-    });
 }
 
 /**
@@ -192,17 +192,17 @@ function removeContactFromSegment(email: string, segmentId: string): void {
   if (!client) return;
 
   client.contacts.segments
-    .remove({
-      email: email,
-      segmentId: segmentId,
-    })
-    .catch((error: Error) => {
-      logger.warn("Failed to remove contact from segment", {
-        email,
-        segmentId,
-        error: error.message,
+      .remove({
+        email: email,
+        segmentId: segmentId,
+      })
+      .catch((error: Error) => {
+        logger.warn("Failed to remove contact from segment", {
+          email,
+          segmentId,
+          error: error.message,
+        });
       });
-    });
 }
 
 export {

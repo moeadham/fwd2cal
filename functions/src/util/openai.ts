@@ -1,11 +1,11 @@
 import OpenAI from "openai";
-import { zodResponseFormat } from "openai/helpers/zod";
-import { logger } from "firebase-functions/v2";
+import {zodResponseFormat} from "openai/helpers/zod";
+import {logger} from "firebase-functions/v2";
 import tokenHelper from "./tokenHelper";
-import { ChatMessage } from "../types";
-import { OPENROUTER_API_KEY } from "./config";
-import { sendEvent } from "./analytics";
-import { z } from "zod";
+import {ChatMessage} from "../types";
+import {OPENROUTER_API_KEY} from "./config";
+import {sendEvent} from "./analytics";
+import {z} from "zod";
 
 const DEFAULT_TEMP = 0.1;
 const DEFAULT_MAX_TOKENS = 16384;
@@ -79,15 +79,15 @@ function getOpenAIClient(): OpenAI {
  * Generic completion function with support for structured output via Zod schemas
  */
 async function defaultCompletion<T>(
-  messages: ChatMessage[],
-  model: string,
-  temperature: number = DEFAULT_TEMP,
-  zodSchema: z.ZodType<T> | null = null,
-  uid: string | null = null,
-  retry: boolean = true
+    messages: ChatMessage[],
+    model: string,
+    temperature: number = DEFAULT_TEMP,
+    zodSchema: z.ZodType<T> | null = null,
+    uid: string | null = null,
+    retry: boolean = true,
 ): Promise<T | string> {
   logger.debug(
-    `OpenAI request with ${tokenHelper.countTokens(JSON.stringify(messages))} prompt tokens`
+      `OpenAI request with ${tokenHelper.countTokens(JSON.stringify(messages))} prompt tokens`,
   );
 
   const requestOptions: OpenAI.ChatCompletionCreateParams = {
@@ -116,32 +116,35 @@ async function defaultCompletion<T>(
 
       if (!completion) {
         logger.error("Completion is null");
-        if (uid)
+        if (uid) {
           sendEvent(uid, "aiError", {
             reason: "invalid_response",
           });
+        }
         throw new Error("Completion is null");
       }
       if (!completion.choices || !completion.choices[0]) {
         logger.error("No choices in completion");
         logger.error(JSON.stringify(completion, null, 2));
-        if (uid)
+        if (uid) {
           sendEvent(uid, "aiError", {
             reason: "invalid_response",
           });
+        }
         throw new Error("No choices in completion");
       }
       if (completion.choices[0].finish_reason !== "stop") {
         logger.error(
-          `Unexpected finish reason: ${completion.choices[0].finish_reason}`
+            `Unexpected finish reason: ${completion.choices[0].finish_reason}`,
         );
         logger.error(JSON.stringify(completion, null, 2));
-        if (uid)
+        if (uid) {
           sendEvent(uid, "aiError", {
             reason: "invalid_response",
           });
+        }
         throw new Error(
-          `Unexpected finish reason: ${completion.choices[0].finish_reason}`
+            `Unexpected finish reason: ${completion.choices[0].finish_reason}`,
         );
       }
 
@@ -150,7 +153,7 @@ async function defaultCompletion<T>(
     } else {
       // Regular text completion without structured output
       const completion = await getOpenAIClient().chat.completions.create(
-        requestOptions
+          requestOptions,
       );
       return completion.choices[0].message.content || "";
     }
@@ -164,12 +167,13 @@ async function defaultCompletion<T>(
     // Handle retryable errors (network, 429, 5xx, transient 404) - retry after delay
     if (retry && isRetryableError(error)) {
       const err = error as Error & { status?: number };
-      const errorType = isNetworkError(error)
-        ? "network/socket error"
-        : err.status
-          ? `HTTP ${err.status}`
-          : "unknown";
-      logger.warn(`OpenRouter API error (${errorType}). Waiting ${DEFAULT_RETRY_DELAY_MS / 1000} seconds before retrying.`);
+      const errorType = isNetworkError(error) ?
+        "network/socket error" :
+        err.status ?
+          `HTTP ${err.status}` :
+          "unknown";
+      const waitSecs = DEFAULT_RETRY_DELAY_MS / 1000;
+      logger.warn(`OpenRouter API error (${errorType}). Waiting ${waitSecs}s before retrying.`);
       await delay(DEFAULT_RETRY_DELAY_MS);
       return defaultCompletion(messages, model, temperature, zodSchema, uid, false);
     }
@@ -179,4 +183,4 @@ async function defaultCompletion<T>(
   }
 }
 
-export { getOpenAIClient, defaultCompletion, DEFAULT_TEMP, DEFAULT_MAX_TOKENS };
+export {getOpenAIClient, defaultCompletion, DEFAULT_TEMP, DEFAULT_MAX_TOKENS};

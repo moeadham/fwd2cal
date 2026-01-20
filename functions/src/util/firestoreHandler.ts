@@ -1,8 +1,8 @@
-import { logger } from "firebase-functions/v2";
-import { getFirestore } from "firebase-admin/firestore";
-import { ENVIRONMENT_NAME } from "./config";
-import { v4 as uuidv4 } from "uuid";
-import { sendEvent } from "./analytics";
+import {logger} from "firebase-functions/v2";
+import {getFirestore} from "firebase-admin/firestore";
+import {ENVIRONMENT_NAME} from "./config";
+import {v4 as uuidv4} from "uuid";
+import {sendEvent} from "./analytics";
 import {
   UserDocument,
   OAuthTokens,
@@ -17,7 +17,7 @@ async function getUserFromUID(uid: string): Promise<UserDocument> {
   if (!userDoc.exists) {
     throw new Error("User document does not exist");
   }
-  return { uid: userDoc.id, ...userDoc.data() } as UserDocument;
+  return {uid: userDoc.id, ...userDoc.data()} as UserDocument;
 }
 
 async function getUserFromEmail(email: string): Promise<string | null> {
@@ -36,8 +36,8 @@ async function findUsersWithExpiringTokens(): Promise<UserWithExpiringTokens[]> 
   let querySnapshot;
   if (ENVIRONMENT_NAME.value() === "production") {
     querySnapshot = await usersRef
-      .where("expiry_date", "<=", twoHoursLater)
-      .get();
+        .where("expiry_date", "<=", twoHoursLater)
+        .get();
   } else {
     querySnapshot = await usersRef.get(); // For Local testing.
   }
@@ -48,14 +48,14 @@ async function findUsersWithExpiringTokens(): Promise<UserWithExpiringTokens[]> 
   const users: UserWithExpiringTokens[] = [];
   querySnapshot.forEach((doc) => {
     console.log(`User ${doc.id} has a token expiring soon.`);
-    users.push({ id: doc.id, ...doc.data() } as UserWithExpiringTokens);
+    users.push({id: doc.id, ...doc.data()} as UserWithExpiringTokens);
   });
   return users;
 }
 
 async function storeUser(
-  tokens: OAuthTokens,
-  user: FirebaseUserRecord
+    tokens: OAuthTokens,
+    user: FirebaseUserRecord,
 ): Promise<void> {
   try {
     await getFirestore().collection("Users").doc(user.uid).set({
@@ -67,14 +67,14 @@ async function storeUser(
     });
   } catch (error) {
     logger.error(`Database error in storeUser for uid ${user.uid}:`, error);
-    sendEvent(user.uid, "databaseError", { operation: "storeUser" });
+    sendEvent(user.uid, "databaseError", {operation: "storeUser"});
     throw error;
   }
 }
 
 async function updateUserTokens(
-  tokens: OAuthTokens,
-  uid: string
+    tokens: OAuthTokens,
+    uid: string,
 ): Promise<void> {
   try {
     await getFirestore().collection("Users").doc(uid).update({
@@ -84,14 +84,14 @@ async function updateUserTokens(
     });
   } catch (error) {
     logger.error(`Database error in updateUserTokens for uid ${uid}:`, error);
-    sendEvent(uid, "databaseError", { operation: "updateUserTokens" });
+    sendEvent(uid, "databaseError", {operation: "updateUserTokens"});
     throw error;
   }
 }
 
 async function addUserEmailAddress(
-  user: FirebaseUserRecord,
-  emails: EmailItem[]
+    user: FirebaseUserRecord,
+    emails: EmailItem[],
 ): Promise<void> {
   try {
     for (const item of emails) {
@@ -103,10 +103,10 @@ async function addUserEmailAddress(
     }
   } catch (error) {
     logger.error(
-      `Database error in addUserEmailAddress for uid ${user.uid}:`,
-      error
+        `Database error in addUserEmailAddress for uid ${user.uid}:`,
+        error,
     );
-    sendEvent(user.uid, "databaseError", { operation: "addUserEmailAddress" });
+    sendEvent(user.uid, "databaseError", {operation: "addUserEmailAddress"});
     throw error;
   }
 }
@@ -121,51 +121,51 @@ async function removeEmailAddress(email: string): Promise<void> {
     }
   } catch (error) {
     logger.error(
-      `Database error in removeEmailAddress for email ${email}:`,
-      error
+        `Database error in removeEmailAddress for email ${email}:`,
+        error,
     );
     // Try to get uid for analytics, but don't fail if we can't
     const uid = await getUserFromEmail(email).catch((): null => null);
     if (uid) {
-      sendEvent(uid, "databaseError", { operation: "removeEmailAddress" });
+      sendEvent(uid, "databaseError", {operation: "removeEmailAddress"});
     }
     throw error;
   }
 }
 
 async function addPendingEmailAddress(
-  uid: string,
-  pendingAddress: string
+    uid: string,
+    pendingAddress: string,
 ): Promise<string> {
   try {
     const user = await getUserFromUID(uid);
     const verificationCode = uuidv4();
     await getFirestore()
-      .collection("PendingEmailAddress")
-      .doc(pendingAddress)
-      .set({
-        ownerUid: user.uid,
-        ownerEmail: user.email,
-        verificationCode: verificationCode,
-      });
+        .collection("PendingEmailAddress")
+        .doc(pendingAddress)
+        .set({
+          ownerUid: user.uid,
+          ownerEmail: user.email,
+          verificationCode: verificationCode,
+        });
     return verificationCode;
   } catch (error) {
     logger.error(
-      `Database error in addPendingEmailAddress for uid ${uid}:`,
-      error
+        `Database error in addPendingEmailAddress for uid ${uid}:`,
+        error,
     );
-    sendEvent(uid, "databaseError", { operation: "addPendingEmailAddress" });
+    sendEvent(uid, "databaseError", {operation: "addPendingEmailAddress"});
     throw error;
   }
 }
 
 async function getPendingEmailAddressByCode(
-  code: string
+    code: string,
 ): Promise<PendingEmailAddressDocument | null> {
   const doc = await getFirestore()
-    .collection("PendingEmailAddress")
-    .where("verificationCode", "==", code)
-    .get();
+      .collection("PendingEmailAddress")
+      .where("verificationCode", "==", code)
+      .get();
   if (doc.empty) {
     return null;
   }
@@ -180,17 +180,17 @@ async function deleteUser(uid: string): Promise<void> {
   // Delete all email addresses associated to the uid.
   const batch = getFirestore().batch();
   const emailSnapshot = await getFirestore()
-    .collection("EmailAddress")
-    .where("uid", "==", uid)
-    .get();
+      .collection("EmailAddress")
+      .where("uid", "==", uid)
+      .get();
   emailSnapshot.forEach((doc) => {
     batch.delete(doc.ref);
   });
 
   const pendingEmailSnapshot = await getFirestore()
-    .collection("PendingEmailAddress")
-    .where("ownerUid", "==", uid)
-    .get();
+      .collection("PendingEmailAddress")
+      .where("ownerUid", "==", uid)
+      .get();
   pendingEmailSnapshot.forEach((doc) => {
     batch.delete(doc.ref);
   });

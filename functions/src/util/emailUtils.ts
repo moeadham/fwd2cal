@@ -1,7 +1,7 @@
-import { logger } from "firebase-functions/v2";
+import {logger} from "firebase-functions/v2";
 import moment from "moment-timezone";
-import { sendEvent } from "./analytics";
-import { TransformedEmail, EmailThreadHeaders } from "../types";
+import {sendEvent} from "./analytics";
+import {TransformedEmail, EmailThreadHeaders} from "../types";
 
 /**
  * Validates an email address format
@@ -31,8 +31,8 @@ function getRecipientsFromRawEmail(email: TransformedEmail): string[] {
  * Extracts specified headers from an email headers object (case-insensitive)
  */
 function getEmailHeaders(
-  headers: Record<string, string>,
-  items: string[]
+    headers: Record<string, string>,
+    items: string[],
 ): Record<string, string> {
   const result: Record<string, string> = {};
   try {
@@ -42,7 +42,7 @@ function getEmailHeaders(
 
     items.forEach((item) => {
       const key = Object.keys(headers).find(
-        (k) => k.toLowerCase() === item.toLowerCase()
+          (k) => k.toLowerCase() === item.toLowerCase(),
       );
       if (key && headers[key]) {
         result[item] =
@@ -59,7 +59,7 @@ function getEmailHeaders(
  * Builds email threading headers (In-Reply-To, References) for reply emails
  */
 function getEmailThreadHeaders(
-  headers: Record<string, string>
+    headers: Record<string, string>,
 ): EmailThreadHeaders {
   const extracted = getEmailHeaders(headers, ["Message-ID", "References"]);
 
@@ -89,8 +89,8 @@ function stripBase64Images(html: string): string {
   if (!html) return html;
 
   return html.replace(
-    /<img[^>]*\ssrc\s*=\s*["']data:image\/[^"']*["'][^>]*>/gi,
-    "[Image removed]"
+      /<img[^>]*\ssrc\s*=\s*["']data:image\/[^"']*["'][^>]*>/gi,
+      "[Image removed]",
   );
 }
 
@@ -115,9 +115,9 @@ function threadEmailHtml(original: TransformedEmail, html: string): string {
     let formattedTime = "";
     if (original.headers && original.headers.date) {
       const dateString = original.headers.date.replace(/^"(.*)"$/, "$1");
-      const dateMoment = moment(dateString, moment.RFC_2822, true).isValid()
-        ? moment(dateString, moment.RFC_2822, true)
-        : moment(dateString);
+      const dateMoment = moment(dateString, moment.RFC_2822, true).isValid() ?
+        moment(dateString, moment.RFC_2822, true) :
+        moment(dateString);
       if (dateMoment.isValid()) {
         formattedDate = dateMoment.utc().format("ddd, MMM D, YYYY");
         formattedTime = dateMoment.utc().format("h:mm A") + " UTC";
@@ -133,7 +133,8 @@ function threadEmailHtml(original: TransformedEmail, html: string): string {
 <div dir="ltr" class="gmail_attr">
 ${threadLine}<br>
 </div>
-<blockquote class="gmail_quote" style="margin:0px 0px 0px 0.8ex;border-left-width:1px;border-left-style:solid;padding-left:1ex;border-left-color:rgb(204,204,204)">
+<blockquote class="gmail_quote" style="margin:0px 0px 0px 0.8ex;border-left-width:1px;\
+border-left-style:solid;padding-left:1ex;border-left-color:rgb(204,204,204)">
 ${cleanedHtml}
 </blockquote>
 </div>`;
@@ -161,7 +162,7 @@ function verifyEmail(email: TransformedEmail): boolean {
       SPF: email.SPF,
       expected: "pass",
     });
-    sendEvent(email.from, "emailRejected", { reason: "spf_failed" });
+    sendEvent(email.from, "emailRejected", {reason: "spf_failed"});
     return false;
   }
 
@@ -171,7 +172,7 @@ function verifyEmail(email: TransformedEmail): boolean {
       dkim: email.dkim,
       containsPass: email.dkim.indexOf("pass") !== -1,
     });
-    sendEvent(email.from, "emailRejected", { reason: "dkim_failed" });
+    sendEvent(email.from, "emailRejected", {reason: "dkim_failed"});
     return false;
   }
 
