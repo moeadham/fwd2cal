@@ -58,7 +58,7 @@ const dispatchConfig: TaskQueueOptions = {
     minBackoffSeconds: 1,
   },
   memory: "512MiB",
-  timeoutSeconds: 3600,
+  timeoutSeconds: 1800,
 };
 
 exports.v2signup = onRequest(
