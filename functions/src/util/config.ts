@@ -18,8 +18,10 @@ const RESEND_REGISTERED_USERS_SEGMENT_ID = defineString(
     "RESEND_REGISTERED_USERS_SEGMENT_ID",
 );
 
-// Additional constants that don't change
-const MAIN_EMAIL_ADDRESS = "calendar@fwd2cal.com";
+
+const MAIN_EMAIL_ADDRESS = defineString("MAIN_EMAIL_ADDRESS", {
+  default: "calendar@fwd2cal.com",
+});
 
 export {
   ENVIRONMENT_NAME,

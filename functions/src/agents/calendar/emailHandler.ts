@@ -209,7 +209,7 @@ async function sendToSupport(
   const content = `From: ${sender} <br><br> Subject: ${email.subject} <br><br> ${email.html}`;
   await sendEmailResend({
     to: "fwd2cal@googlegroups.com",
-    from: MAIN_EMAIL_ADDRESS,
+    from: MAIN_EMAIL_ADDRESS.value(),
     subject: email.subject,
     html: content,
   });
@@ -762,7 +762,7 @@ ${responseHtml}
 
     await sendEmailResend({
       to: sender,
-      from: MAIN_EMAIL_ADDRESS,
+      from: MAIN_EMAIL_ADDRESS.value(),
       subject: `Re: ${email.subject}`,
       html: threadEmailHtml(email, customHtml),
       headers: getEmailThreadHeaders(email.headers),
@@ -813,7 +813,7 @@ async function sendEmailResponse(
   }
   await sendEmailResend({
     to: sender,
-    from: MAIN_EMAIL_ADDRESS,
+    from: MAIN_EMAIL_ADDRESS.value(),
     subject: subject,
     html: html,
     headers: getEmailThreadHeaders(originalEmail.headers),
