@@ -13,6 +13,7 @@ import { handleEmail } from "./agents/calendar/emailHandler";
 import { inviteAdditionalAttendees } from "./agents/calendar/calendarHelper";
 import {
   ENVIRONMENT_NAME,
+  MAIN_EMAIL_ADDRESS,
   RESEND_API_KEY,
   RESEND_SIGNING_SECRET,
 } from "./util/config";
@@ -150,6 +151,21 @@ exports.v2resendInboundCallback = onRequest(
           type: webhookData.type,
         });
         res.status(200).json({ message: "ok" });
+        return;
+      }
+
+      // Filter emails not addressed to this environment
+      const recipients = webhookData.data.to || [];
+      const mainEmail = MAIN_EMAIL_ADDRESS.value();
+      const isForThisEnvironment = recipients.some(
+        (addr: string) => addr.toLowerCase() === mainEmail.toLowerCase()
+      );
+
+      if (!isForThisEnvironment) {
+        logger.log(
+          `Email not for this environment. Recipients: ${recipients.join(", ")}, Expected: ${mainEmail}`
+        );
+        res.status(200).json({ message: "Email not for this environment, skipping" });
         return;
       }
       // Dispatch the task with data.
