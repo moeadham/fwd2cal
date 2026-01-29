@@ -1,14 +1,13 @@
-/* eslint-disable max-len */
-/* eslint-disable require-jsdoc */
-const {PostHog} = require("posthog-node");
-const {POSTHOG_API_KEY, ENVIRONMENT_NAME} = require("./config");
-const {logger} = require("firebase-functions");
+import {PostHog} from "posthog-node";
+import {POSTHOG_API_KEY, ENVIRONMENT_NAME} from "./config";
+import {logger} from "firebase-functions/v2";
+import {AnalyticsEventParams} from "./types";
 
 // Initialize PostHog client with serverless-optimized settings
 // flushAt: 1 and flushInterval: 0 ensure immediate flushing for Firebase Functions
-let posthogClient = null;
+let posthogClient: PostHog | null = null;
 
-function getPostHogClient() {
+function getPostHogClient(): PostHog {
   if (!posthogClient) {
     posthogClient = new PostHog(POSTHOG_API_KEY.value(), {
       host: "https://eu.i.posthog.com",
@@ -19,7 +18,11 @@ function getPostHogClient() {
   return posthogClient;
 }
 
-async function sendEvent(uid, eventName, eventParams = {}) {
+async function sendEvent(
+    uid: string,
+    eventName: string,
+    eventParams: AnalyticsEventParams = {},
+): Promise<void> {
   try {
     const client = getPostHogClient();
 
@@ -44,8 +47,9 @@ async function sendEvent(uid, eventName, eventParams = {}) {
     logger.debug("PostHog event sent successfully:", eventName);
   } catch (error) {
     // Log error but don't throw - analytics failures shouldn't break core functionality
-    logger.error("PostHog Error sending event:", error.message);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error("PostHog Error sending event:", errorMessage);
   }
 }
 
-module.exports = {sendEvent};
+export {sendEvent};

@@ -32,3 +32,11 @@ CLAUDE.md
 functions/test/bindings/resend-raw.json
 functions/test/bindings/resend-sample.json
 functions/test/bindings/error.ics
+
+# TypeScript build output and maps
+functions/lib/
+*.tsbuildinfo
+*.js.map
+*.d.ts.map
+
+.vscode

@@ -22,13 +22,24 @@ lsof -ti :4400 | xargs kill
 lsof -ti :5000 | xargs kill
 lsof -ti :8080 | xargs kill
 
+echo "Building TypeScript..."
+npm run build || { echo "Build failed"; exit 1; }
+
+# Load environment variables from .env.local for tests
+if [ -f .env.local ]; then
+  echo "Loading environment variables from .env.local..."
+  set -a
+  source .env.local
+  set +a
+fi
+
 echo "Starting firebase emulator"
 firebase emulators:start > /dev/stdout &
 LOGS_PID=$!
 sleep 20
 
 echo "running tests"
-mocha test/test.js --timeout 99999999999 --bail "$@" || TEST_FAILED=true
+./node_modules/.bin/mocha --require ts-node/register test/test.ts --timeout 99999999999 --bail "$@" || TEST_FAILED=true
 
 # Stop the logs stream
 kill $LOGS_PID

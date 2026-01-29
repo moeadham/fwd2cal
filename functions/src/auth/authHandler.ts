@@ -1,27 +1,29 @@
-/* eslint-disable require-jsdoc */
-const {getUserFromUID,
+import {
+  getUserFromUID,
   findUsersWithExpiringTokens,
   storeUser,
   addUserEmailAddress,
   updateUserTokens,
   getPendingEmailAddressByCode,
-} = require("./firestoreHandler");
-const {google} = require("googleapis");
-const {CREDENTIALS, getRedirectUriIndex} = require("./credentials");
-const {
+} from "../util/firestoreHandler";
+import {google, Auth} from "googleapis";
+import {CREDENTIALS, getRedirectUriIndex} from "./credentials";
+import {
   ENVIRONMENT_NAME,
   RESEND_REGISTERED_USERS_SEGMENT_ID,
-} = require("./config");
-const {getAuth} = require("firebase-admin/auth");
-const {logger} = require("firebase-functions");
-const {isUUID} = require("validator");
-const {sendEvent} = require("./analytics");
-const {addContactToResend, addContactToSegment} = require("./resend");
+} from "../util/config";
+import {getAuth} from "firebase-admin/auth";
+import {logger} from "firebase-functions/v2";
+import {isUUID} from "validator";
+import {sendEvent} from "../util/analytics";
+import {addContactToResend, addContactToSegment} from "../util/resend";
+import {OAuthTokens, FirebaseUserRecord} from "./types";
+import {RequestWithQuery} from "../util/types";
+import {Response} from "express";
 
-
-async function refreshOAuthTokens(uid) {
+async function refreshOAuthTokens(uid: string): Promise<void> {
   const oauth2Client = await getOauthClient(uid);
-  let tokens;
+  let tokens: OAuthTokens;
   try {
     tokens = await refreshAccessToken(oauth2Client);
     await updateUserTokens(tokens, uid);
@@ -32,20 +34,22 @@ async function refreshOAuthTokens(uid) {
   }
 }
 
-async function refreshAccessToken(oauth2Client) {
+async function refreshAccessToken(
+    oauth2Client: Auth.OAuth2Client,
+): Promise<OAuthTokens> {
   return new Promise((resolve, reject) => {
     oauth2Client.refreshAccessToken((err, tokens) => {
       if (err) {
         logger.warn("Error refreshing access token", err);
         reject(err);
       } else {
-        resolve(tokens);
+        resolve(tokens as OAuthTokens);
       }
     });
   });
 }
 
-async function getOauthClient(uid) {
+async function getOauthClient(uid: string): Promise<Auth.OAuth2Client> {
   const userData = await getUserFromUID(uid);
   const redirectUriIndex = getRedirectUriIndex(ENVIRONMENT_NAME.value());
   const oauth2Client = new google.auth.OAuth2(
@@ -60,11 +64,13 @@ async function getOauthClient(uid) {
   return oauth2Client;
 }
 
-async function oauthCronJob() {
+async function oauthCronJob(): Promise<void> {
   try {
     const users = await findUsersWithExpiringTokens();
-    logger.log("Refreshing tokens for Users with expiring tokens ",
-        users.length);
+    logger.log(
+        "Refreshing tokens for Users with expiring tokens ",
+        users.length,
+    );
     for (const user of users) {
       try {
         await refreshOAuthTokens(user.id);
@@ -78,7 +84,7 @@ async function oauthCronJob() {
   }
 }
 
-async function deleteAccount(uid) {
+async function deleteAccount(uid: string): Promise<void> {
   const auth = getAuth();
   try {
     await auth.deleteUser(uid);
@@ -89,7 +95,9 @@ async function deleteAccount(uid) {
   }
 }
 
-async function signupCallbackHandler(query) {
+async function signupCallbackHandler(
+    query: Record<string, string>,
+): Promise<FirebaseUserRecord> {
   logger.log("oauthCallback", query);
   const redirectUriIndex = getRedirectUriIndex(ENVIRONMENT_NAME.value());
   const oauth2Client = new google.auth.OAuth2(
@@ -98,10 +106,12 @@ async function signupCallbackHandler(query) {
       CREDENTIALS.web.redirect_uris[redirectUriIndex],
   );
   try {
-    const {tokens} = await oauth2Client.getToken(query);
+    const {tokens} = await oauth2Client.getToken({code: query.code});
     // Assuming you've got the tokens, specifically the id_token
     if (!tokens.id_token) {
-      const error = new Error("Google ID token not found in the response");
+      const error = new Error(
+          "Google ID token not found in the response",
+      ) as Error & { code?: number };
       error.code = 400;
       throw error;
     }
@@ -110,55 +120,73 @@ async function signupCallbackHandler(query) {
 
     const auth = getAuth();
     oauth2Client.setCredentials(tokens);
-    const userInfoResponse = await oauth2Client.request({url: "https://www.googleapis.com/oauth2/v1/userinfo?alt=json"});
+    const userInfoResponse = await oauth2Client.request<{ email: string }>({
+      url: "https://www.googleapis.com/oauth2/v1/userinfo?alt=json",
+    });
     const userEmail = userInfoResponse.data.email;
     logger.log("User Email:", userEmail);
-    let userRecord;
+    let userRecord: FirebaseUserRecord;
     try {
-      userRecord = await auth.getUserByEmail(userEmail);
+      const firebaseUser = await auth.getUserByEmail(userEmail);
+      userRecord = {uid: firebaseUser.uid, email: firebaseUser.email || userEmail};
     } catch (error) {
-      if (error.code === "auth/user-not-found") {
+      const authError = error as { code?: string };
+      if (authError.code === "auth/user-not-found") {
         try {
-          userRecord = await auth.createUser({
+          const newUser = await auth.createUser({
             email: userEmail,
             emailVerified: true,
           });
+          userRecord = {uid: newUser.uid, email: userEmail};
           logger.log("Successfully created new user:", userRecord.uid);
-        } catch (error) {
-          const err = new Error("Authentication failed");
+        } catch (_createError) {
+          const err = new Error("Authentication failed") as Error & {
+            code?: number;
+          };
           err.code = 500;
           throw err;
         }
       } else {
-        logger.log("Error fetching user record", error.code, error.message);
-        const err = new Error("Authentication failed");
+        const firebaseError = error as { code?: string; message?: string };
+        logger.log(
+            "Error fetching user record",
+            firebaseError.code,
+            firebaseError.message,
+        );
+        const err = new Error("Authentication failed") as Error & {
+          code?: number;
+        };
         err.code = 500;
         throw err;
       }
     }
 
-    await storeUser(tokens, userRecord);
+    await storeUser(tokens as OAuthTokens, userRecord);
     await addUserEmailAddress(userRecord, [{email: userEmail, default: true}]);
     sendEvent(userRecord.uid, "sign_up");
     sendEvent(userEmail, "signupConversion");
 
     // Add user to Resend contacts and registered users (fire-and-forget)
     addContactToResend(userEmail);
-    addContactToSegment(userEmail, RESEND_REGISTERED_USERS_SEGMENT_ID.value());
+    addContactToSegment(
+        userEmail,
+        RESEND_REGISTERED_USERS_SEGMENT_ID.value(),
+    );
 
     return userRecord;
   } catch (error) {
     console.error("Error exchanging code for tokens", error);
-    const err = new Error("Authentication failed");
+    const err = new Error("Authentication failed") as Error & { code?: number };
     err.code = 500;
     throw err;
   }
 }
 
-// TODO: other handlers should probably just handle res
-// directly as well.
-async function verifyAdditionalEmail(req, res) {
-  if (!(req?.query?.uuid) && isUUID(req.query.uuid)) {
+async function verifyAdditionalEmail(
+    req: RequestWithQuery,
+    res: Response,
+): Promise<Response | void> {
+  if (!req?.query?.uuid || !isUUID(req.query.uuid)) {
     // return a 404.
     return res.redirect(302, "https://www.fwd2cal.com/not-found");
   }
@@ -169,16 +197,21 @@ async function verifyAdditionalEmail(req, res) {
     return res.redirect(302, "https://www.fwd2cal.com/not-found");
   }
   const mainUser = await getUserFromUID(pendingEmail.ownerUid);
-  await addUserEmailAddress(mainUser, [{
-    email: pendingEmail.id,
-    default: false,
-  }]);
+  await addUserEmailAddress(
+      {uid: mainUser.uid, email: mainUser.email},
+      [
+        {
+          email: pendingEmail.id,
+          default: false,
+        },
+      ],
+  );
   logger.log(`added ${pendingEmail.id} to user account ${mainUser.uid}`);
   sendEvent(mainUser.uid, "addUserConfirmed");
   return res.send({data: mainUser.email});
 }
 
-module.exports = {
+export {
   getOauthClient,
   refreshOAuthTokens,
   oauthCronJob,
@@ -186,5 +219,3 @@ module.exports = {
   verifyAdditionalEmail,
   deleteAccount,
 };
-
-
