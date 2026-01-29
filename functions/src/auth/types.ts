@@ -1,3 +1,7 @@
+// ============================================================================
+// USER AND OAUTH TYPES
+// ============================================================================
+
 // User document from Firestore
 export interface UserDocument {
   uid: string;

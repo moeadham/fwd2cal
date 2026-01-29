@@ -1,4 +1,4 @@
-import {AsyncResult} from "../types";
+import {AsyncResult} from "./types";
 
 // Error handling wrapper
 async function handleAsync<T>(fn: () => Promise<T>): Promise<AsyncResult<T>> {

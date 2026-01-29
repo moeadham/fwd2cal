@@ -4,13 +4,9 @@ import {
   ResendAttachmentsList,
   ResendAPIResponse,
   MockSentEmail,
-} from "../types";
-import {AttachmentInfo, TransformedEmail} from "../types";
-
-interface TestData {
-  emailContent: TransformedEmail | ResendEmailData;
-  attachmentsList: AttachmentInfo[];
-}
+  TestData,
+} from "./types";
+import {AttachmentInfo, TransformedEmail} from "../agents/calendar/types";
 
 /**
  * Mock Resend client for testing

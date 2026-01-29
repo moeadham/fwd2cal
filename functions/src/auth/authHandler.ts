@@ -17,7 +17,8 @@ import {logger} from "firebase-functions/v2";
 import {isUUID} from "validator";
 import {sendEvent} from "../util/analytics";
 import {addContactToResend, addContactToSegment} from "../util/resend";
-import {OAuthTokens, FirebaseUserRecord, RequestWithQuery} from "../types";
+import {OAuthTokens, FirebaseUserRecord} from "./types";
+import {RequestWithQuery} from "../util/types";
 import {Response} from "express";
 
 async function refreshOAuthTokens(uid: string): Promise<void> {

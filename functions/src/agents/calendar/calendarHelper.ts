@@ -17,8 +17,10 @@ import {
   ParsedICSEvent,
   ICSFile,
   CalendarEventRequestBody,
-  RequestWithQuery,
-} from "../../types";
+  ICalEvent,
+  ICalTimezone,
+} from "./types";
+import {RequestWithQuery} from "../../util/types";
 import { Response } from "express";
 
 const DEFAULT_EVENT_LENGTH = 30;
@@ -231,23 +233,6 @@ async function addEvent(
   };
 
   return result;
-}
-
-interface ICalEvent {
-  type: string;
-  start: Date;
-  end: Date;
-  summary?: string | { val: string };
-  description?: string | { val: string };
-  location?: string | { val: string };
-  organizer?: { val: string };
-  attendee?: Array<{ val: string }>;
-  timezone?: string;
-}
-
-interface ICalTimezone {
-  type: string;
-  tzid: string;
 }
 
 async function eventFromICS(icsFile: ICSFile): Promise<ParsedICSEvent> {

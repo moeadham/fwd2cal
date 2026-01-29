@@ -47,12 +47,9 @@ import {
   GoogleCalendarEvent,
   CalendarForLLM,
   FailedEvent,
-} from "../../types";
+  EmailResponses,
+} from "./types";
 import { Auth } from "googleapis";
-
-interface EmailResponses {
-  [key: string]: EmailResponseTemplate;
-}
 
 const EMAIL_RESPONSES: EmailResponses = {
   unverifiedEmail: {

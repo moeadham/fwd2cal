@@ -1,4 +1,4 @@
-import { MailTemplates } from "../../types";
+import { MailTemplates } from "./types";
 
 // Get base URL based on project ID
 const isDevProject = process.env.GCLOUD_PROJECT === "fwd2cal-dev-2578e";

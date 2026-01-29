@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import {GoogleOAuthCredentials} from "../types";
+import {GoogleOAuthCredentials} from "./types";
 
 const isDevProject = process.env.GCLOUD_PROJECT === "fwd2cal-dev-2578e";
 const credentialsFileName = isDevProject ?

@@ -10,7 +10,7 @@ import {
   PendingEmailAddressDocument,
   UserWithExpiringTokens,
   EmailItem,
-} from "../types";
+} from "../auth/types";
 
 async function getUserFromUID(uid: string): Promise<UserDocument> {
   const userDoc = await getFirestore().collection("Users").doc(uid).get();

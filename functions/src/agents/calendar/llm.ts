@@ -12,17 +12,9 @@ import {
   CalendarForLLM,
   TextContent,
   ImageURLContent,
-} from "../../types";
-
-interface EmailForProcessing {
-  text: string;
-}
-
-interface HeadersForProcessing {
-  date?: string;
-  subject?: string;
-  from?: string;
-}
+  EmailForProcessing,
+  HeadersForProcessing,
+} from "./types";
 
 async function processEmail(
   email: EmailForProcessing,

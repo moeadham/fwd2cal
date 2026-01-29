@@ -3,7 +3,7 @@ import {logger} from "firebase-functions/v2";
 import {RESEND_API_KEY, ENVIRONMENT_NAME} from "./config";
 import {getMockResendClient} from "./resendMock";
 import {sendEvent} from "./analytics";
-import {ResendEmailOptions, ResendAPIResponse, ResendClient} from "../types";
+import {ResendEmailOptions, ResendAPIResponse, ResendClient} from "./types";
 
 let resend: Resend | null = null;
 

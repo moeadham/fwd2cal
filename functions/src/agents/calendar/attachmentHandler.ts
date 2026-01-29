@@ -3,8 +3,8 @@ import {
   ICSFile,
   ProcessedAttachments,
   AttachmentInfo,
-  ResendClient,
-} from "../../types";
+} from "./types";
+import { ResendClient } from "../../util/types";
 
 /**
  * Process attachments from a Resend email

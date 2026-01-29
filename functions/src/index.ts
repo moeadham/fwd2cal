@@ -29,13 +29,15 @@ import {
   signupCallbackHandler,
   verifyAdditionalEmail,
 } from "./auth/authHandler";
+import {GoogleOAuthCredentials} from "./auth/types";
+import {TransformedEmail} from "./agents/calendar/types";
 import {
-  GoogleOAuthCredentials,
-  TransformedEmail,
   ResendWebhookData,
   TaskDispatchOptions,
   ResendClient,
-} from "./types";
+  TaskRequest,
+  DispatchResult,
+} from "./util/types";
 
 const isDevProject = process.env.GCLOUD_PROJECT === "fwd2cal-dev-2578e";
 const credentialsFileName = isDevProject ?
@@ -220,17 +222,6 @@ async function dispatchTask({
     }
     return;
   }
-}
-
-interface TaskRequest {
-  data: ResendWebhookData;
-}
-
-interface DispatchResult {
-  message: string;
-  data?: unknown;
-  sentEmail?: unknown;
-  error?: string;
 }
 
 exports.v2resendInboundDispatch = onTaskDispatched(

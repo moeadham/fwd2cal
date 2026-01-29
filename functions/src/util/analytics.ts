@@ -1,7 +1,7 @@
 import {PostHog} from "posthog-node";
 import {POSTHOG_API_KEY, ENVIRONMENT_NAME} from "./config";
 import {logger} from "firebase-functions/v2";
-import {AnalyticsEventParams} from "../types";
+import {AnalyticsEventParams} from "./types";
 
 // Initialize PostHog client with serverless-optimized settings
 // flushAt: 1 and flushInterval: 0 ensure immediate flushing for Firebase Functions
