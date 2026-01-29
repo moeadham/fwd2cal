@@ -1,4 +1,4 @@
-import { logger } from "firebase-functions/v2";
+import {logger} from "firebase-functions/v2";
 import {
   getUserFromEmail,
   getUserFromUID,
@@ -6,16 +6,16 @@ import {
   removeEmailAddress,
   deleteUser,
 } from "../../util/firestoreHandler";
-import { getOauthClient, deleteAccount } from "../../auth/authHandler";
-import { processEmail } from "./llm";
+import {getOauthClient, deleteAccount} from "../../auth/authHandler";
+import {processEmail} from "./llm";
 import {
   addEvent,
   eventFromICS,
   getUserCalendars,
   formatCalendarForLLM,
 } from "./calendarHelper";
-import { sendEmailResend, removeContactFromSegment } from "../../util/resend";
-import { getApiUrl } from "../../auth/credentials";
+import {sendEmailResend, removeContactFromSegment} from "../../util/resend";
+import {getApiUrl} from "../../auth/credentials";
 import {
   ENVIRONMENT_NAME,
   MAIN_EMAIL_ADDRESS,
@@ -33,10 +33,10 @@ import {
   threadEmailHtml,
   verifyEmail,
 } from "../../util/emailUtils";
-import { mailTemplates } from "./mailTemplates";
+import {mailTemplates} from "./mailTemplates";
 import moment from "moment-timezone";
 import qs from "qs";
-import { sendEvent } from "../../util/analytics";
+import {sendEvent} from "../../util/analytics";
 import {
   TransformedEmail,
   ICSFile,
@@ -49,7 +49,7 @@ import {
   FailedEvent,
   EmailResponses,
 } from "./types";
-import { Auth } from "googleapis";
+import {Auth} from "googleapis";
 
 const EMAIL_RESPONSES: EmailResponses = {
   unverifiedEmail: {
@@ -130,14 +130,14 @@ const EMAIL_RESPONSES: EmailResponses = {
 };
 
 async function handleEmail(
-  email: TransformedEmail,
-  files: ICSFile[],
-  imageUrls: string[] = []
+    email: TransformedEmail,
+    files: ICSFile[],
+    imageUrls: string[] = [],
 ): Promise<HandleEmailResult | GoogleCalendarEvent | GoogleCalendarEvent[] | undefined> {
   // Do we know this user?
   const sender = getSenderFromRawEmail(email);
   if (!sender) {
-    return { error: "No sender found" };
+    return {error: "No sender found"};
   }
 
   // Is the email sender verified?
@@ -150,7 +150,7 @@ async function handleEmail(
       },
     };
     await sendEmailResponse(sender, email, response, true);
-    return { error: "Unverified email address" };
+    return {error: "Unverified email address"};
   }
 
   // Is this a support email?
@@ -176,13 +176,13 @@ async function handleEmail(
     };
     await sendEmailResponse(sender, email, response, true);
     sendEvent(sender, "userInvited");
-    return { result: `${sender} has been invited to signup` };
+    return {result: `${sender} has been invited to signup`};
   }
 
   const subjectAction = understandSubject(email.subject);
   logger.log(`Request from ${sender} to ${subjectAction}`);
   // Track all received emails with the action type
-  sendEvent(uid, "emailReceived", { action: subjectAction });
+  sendEvent(uid, "emailReceived", {action: subjectAction});
 
   switch (subjectAction) {
     case "addUser":
@@ -199,8 +199,8 @@ async function handleEmail(
 }
 
 async function sendToSupport(
-  sender: string,
-  email: TransformedEmail
+    sender: string,
+    email: TransformedEmail,
 ): Promise<HandleEmailResult> {
   logger.log(`Support email received from ${sender}`);
   logger.log(email.subject);
@@ -212,7 +212,7 @@ async function sendToSupport(
     subject: email.subject,
     html: content,
   });
-  return { result: `email forwarded to support group.` };
+  return {result: `email forwarded to support group.`};
 }
 
 function understandSubject(subject: string): string {
@@ -232,9 +232,9 @@ function understandSubject(subject: string): string {
 }
 
 async function deleteUserAccount(
-  email: TransformedEmail,
-  sender: string,
-  uid: string
+    email: TransformedEmail,
+    sender: string,
+    uid: string,
 ): Promise<HandleEmailResult> {
   // Get primary email address before deleting user
   const user = await getUserFromUID(uid);
@@ -245,8 +245,8 @@ async function deleteUserAccount(
 
   // Remove primary email from registered users segment (fire-and-forget)
   removeContactFromSegment(
-    primaryEmail,
-    RESEND_REGISTERED_USERS_SEGMENT_ID.value()
+      primaryEmail,
+      RESEND_REGISTERED_USERS_SEGMENT_ID.value(),
   );
 
   const response: EmailResponseTemplate = {
@@ -255,14 +255,14 @@ async function deleteUserAccount(
   };
   await sendEmailResponse(sender, email, response, true);
   sendEvent(uid, "deleteAccount");
-  return { result: `${uid} account deleted.` };
+  return {result: `${uid} account deleted.`};
 }
 
 async function removeEmailAddressFromUser(
-  email: TransformedEmail,
-  sender: string,
-  uid: string,
-  files: ICSFile[] = []
+    email: TransformedEmail,
+    sender: string,
+    uid: string,
+    files: ICSFile[] = [],
 ): Promise<HandleEmailResult | GoogleCalendarEvent | GoogleCalendarEvent[] | undefined> {
   const subject = email.subject;
   const emailRegex =
@@ -288,7 +288,7 @@ async function removeEmailAddressFromUser(
       },
     };
     logger.log(`Sending email additionalEmailInUse to ${sender}`);
-    sendEvent(uid, "removeEmailFailed", { reason: "not_owned" });
+    sendEvent(uid, "removeEmailFailed", {reason: "not_owned"});
     await sendEmailResponse(sender, email, response, true);
     return;
   } else {
@@ -303,15 +303,15 @@ async function removeEmailAddressFromUser(
     };
     await sendEmailResponse(sender, email, response, true);
     sendEvent(uid, "removeEmail");
-    return { result: `${emailAddressToRemove} removed.` };
+    return {result: `${emailAddressToRemove} removed.`};
   }
 }
 
 async function addEmailAddressToUser(
-  email: TransformedEmail,
-  sender: string,
-  uid: string,
-  files: ICSFile[] = []
+    email: TransformedEmail,
+    sender: string,
+    uid: string,
+    files: ICSFile[] = [],
 ): Promise<HandleEmailResult | GoogleCalendarEvent | GoogleCalendarEvent[] | undefined> {
   const subject = email.subject;
   const emailRegex = /^add\s+([a-zA-Z0-9._+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6})$/;
@@ -335,7 +335,7 @@ async function addEmailAddressToUser(
       },
     };
     logger.log(`Sending email additionalEmailInUse to ${sender}`);
-    sendEvent(uid, "addUserFailed", { reason: "email_in_use" });
+    sendEvent(uid, "addUserFailed", {reason: "email_in_use"});
     await sendEmailResponse(sender, email, response, true);
     return;
   }
@@ -349,26 +349,26 @@ async function addEmailAddressToUser(
     },
   };
   logger.log(
-    `Sending email addAdditionalEmailAddress ${emailAddressToAdd} to pending list for ${uid}`
+      `Sending email addAdditionalEmailAddress ${emailAddressToAdd} to pending list for ${uid}`,
   );
   await sendEmailResponse(emailAddressToAdd, email, response, false);
   sendEvent(uid, "addUserRequest");
-  return { verificationCode };
+  return {verificationCode};
 }
 
 async function eventHandler(
-  email: TransformedEmail,
-  sender: string,
-  uid: string,
-  files: ICSFile[] = [],
-  imageUrls: string[] = []
+    email: TransformedEmail,
+    sender: string,
+    uid: string,
+    files: ICSFile[] = [],
+    imageUrls: string[] = [],
 ): Promise<GoogleCalendarEvent | GoogleCalendarEvent[] | undefined> {
   // Can we authenticate with their calendar?
   const [oauthErr, oauth2Client] = await handleAsync(() => getOauthClient(uid));
   if (oauthErr || !oauth2Client) {
     logger.warn("Error getting OAuth client: ", oauthErr);
     await sendEmailResponse(sender, email, EMAIL_RESPONSES.oauthFailed, true);
-    sendEvent(uid, "calendarError", { reason: "oauth_failed" });
+    sendEvent(uid, "calendarError", {reason: "oauth_failed"});
     return;
   }
 
@@ -381,8 +381,8 @@ async function eventHandler(
     logger.log("Calendars for LLM:", JSON.stringify(calendarsForLLM, null, 2));
   } catch (calendarErr) {
     logger.warn(
-      "Error fetching calendars, continuing without calendar list: ",
-      calendarErr
+        "Error fetching calendars, continuing without calendar list: ",
+        calendarErr,
     );
     // Continue without calendar list - will default to primary calendar
   }
@@ -392,14 +392,14 @@ async function eventHandler(
   if (files && files.length > 0) {
     logger.debug("Checking attachments for an ICS file");
     const icsFile = files.find((file) =>
-      file.filename.filename.endsWith(".ics")
+      file.filename.filename.endsWith(".ics"),
     );
     if (icsFile) {
       logger.debug("ICS file found");
       const [icsErr, icsEvent] = await handleAsync(() => eventFromICS(icsFile));
       if (icsErr) {
         logger.warn("ICS error: ", icsErr);
-        sendEvent(uid, "icsProcessingFailed", { reason: "parse_failed" });
+        sendEvent(uid, "icsProcessingFailed", {reason: "parse_failed"});
       } else if (icsEvent) {
         event = {
           summary: icsEvent.summary,
@@ -422,19 +422,19 @@ async function eventHandler(
     // Can we get event details from the thread with AI?
     const headers = getEmailHeaders(email.headers, ["date", "subject", "from"]);
     const [processEmailErr, aiEvent] = await handleAsync(() =>
-      processEmail(email, headers, uid, imageUrls, calendarsForLLM)
+      processEmail(email, headers, uid, imageUrls, calendarsForLLM),
     );
     if (processEmailErr) {
       logger.warn("OpenAI error: ", processEmailErr);
       await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true);
-      sendEvent(uid, "dataQualityIssue", { reason: "ai_api_error" });
+      sendEvent(uid, "dataQualityIssue", {reason: "ai_api_error"});
       return;
     }
 
     if (!aiEvent) {
       logger.warn("No event data returned from AI");
       await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true);
-      sendEvent(uid, "dataQualityIssue", { reason: "no_ai_response" });
+      sendEvent(uid, "dataQualityIssue", {reason: "no_ai_response"});
       return;
     }
 
@@ -448,7 +448,7 @@ async function eventHandler(
       };
       logger.warn("Error in email contents: ", aiEvent);
       await sendEmailResponse(sender, email, response, true);
-      sendEvent(uid, "dataQualityIssue", { reason: "ai_returned_error" });
+      sendEvent(uid, "dataQualityIssue", {reason: "ai_returned_error"});
       return;
     } else {
       // Handle new array format
@@ -456,12 +456,12 @@ async function eventHandler(
         if (aiEvent.events.length === 0) {
           logger.warn("No events found in email");
           await sendEmailResponse(
-            sender,
-            email,
-            EMAIL_RESPONSES.unableToParse,
-            true
+              sender,
+              email,
+              EMAIL_RESPONSES.unableToParse,
+              true,
           );
-          sendEvent(uid, "dataQualityIssue", { reason: "no_events_found" });
+          sendEvent(uid, "dataQualityIssue", {reason: "no_events_found"});
           return;
         }
 
@@ -472,7 +472,7 @@ async function eventHandler(
           const timeValidation = validateEventTimes(ev);
           if (!timeValidation.isValid) {
             logger.warn(
-              `Invalid event times from AI for event ${i + 1}: ${timeValidation.error}`
+                `Invalid event times from AI for event ${i + 1}: ${timeValidation.error}`,
             );
             invalidEvents.push(i);
           }
@@ -481,7 +481,7 @@ async function eventHandler(
         // Remove invalid events
         if (invalidEvents.length > 0) {
           aiEvent.events = aiEvent.events.filter(
-            (_, index) => !invalidEvents.includes(index)
+              (_, index) => !invalidEvents.includes(index),
           );
         }
 
@@ -491,21 +491,21 @@ async function eventHandler(
             reason: "missing_required_fields",
           });
           await sendEmailResponse(
-            sender,
-            email,
-            EMAIL_RESPONSES.unableToParse,
-            true
+              sender,
+              email,
+              EMAIL_RESPONSES.unableToParse,
+              true,
           );
           return;
         }
 
         // Process multiple events
         return addEventsAndSendResponse(
-          oauth2Client,
-          aiEvent.events,
-          uid,
-          sender,
-          email
+            oauth2Client,
+            aiEvent.events,
+            uid,
+            sender,
+            email,
         );
       } else {
         // Old single event format (backward compatibility)
@@ -519,21 +519,21 @@ async function eventHandler(
             reason: "missing_required_fields",
           });
           await sendEmailResponse(
-            sender,
-            email,
-            EMAIL_RESPONSES.unableToParse,
-            true
+              sender,
+              email,
+              EMAIL_RESPONSES.unableToParse,
+              true,
           );
           return;
         }
 
         // Convert to array format
         return addEventsAndSendResponse(
-          oauth2Client,
-          [singleEvent],
-          uid,
-          sender,
-          email
+            oauth2Client,
+            [singleEvent],
+            uid,
+            sender,
+            email,
         );
       }
     }
@@ -545,15 +545,15 @@ async function eventHandler(
 
 function validateEventTimes(event: Event): EventValidationResult {
   if (!event.date || !event.start_time) {
-    return { isValid: false, error: "Missing required date or start_time" };
+    return {isValid: false, error: "Missing required date or start_time"};
   }
 
   // Try to parse the start time
   const startTime = `${event.date} ${event.start_time}`;
   const startDate = moment.tz(
-    startTime,
-    "DD MMMM YYYY HH:mm",
-    event.timeZone || "UTC"
+      startTime,
+      "DD MMMM YYYY HH:mm",
+      event.timeZone || "UTC",
   );
 
   if (!startDate.isValid()) {
@@ -567,33 +567,33 @@ function validateEventTimes(event: Event): EventValidationResult {
   if (event.end_time) {
     const endTime = `${event.date} ${event.end_time}`;
     const endDate = moment.tz(
-      endTime,
-      "DD MMMM YYYY HH:mm",
-      event.timeZone || "UTC"
+        endTime,
+        "DD MMMM YYYY HH:mm",
+        event.timeZone || "UTC",
     );
 
     if (!endDate.isValid()) {
       logger.warn(
-        `Invalid end time, will use default duration: ${event.end_time}`
+          `Invalid end time, will use default duration: ${event.end_time}`,
       );
       event.end_time = null; // Remove invalid end time
     } else if (endDate.isSameOrBefore(startDate)) {
       logger.warn(
-        `End time is not after start time, will use default duration: ${event.end_time}`
+          `End time is not after start time, will use default duration: ${event.end_time}`,
       );
       event.end_time = null; // Remove invalid end time
     }
   }
 
-  return { isValid: true };
+  return {isValid: true};
 }
 
 async function addEventsAndSendResponse(
-  oauth2Client: Auth.OAuth2Client,
-  events: Event[],
-  uid: string,
-  sender: string,
-  email: TransformedEmail
+    oauth2Client: Auth.OAuth2Client,
+    events: Event[],
+    uid: string,
+    sender: string,
+    email: TransformedEmail,
 ): Promise<GoogleCalendarEvent | GoogleCalendarEvent[] | undefined> {
   const successfulEvents: GoogleCalendarEvent[] = [];
   const failedEvents: FailedEvent[] = [];
@@ -605,7 +605,7 @@ async function addEventsAndSendResponse(
       const isValid = isValidEmail(attendee);
       if (!isValid) {
         logger.warn(
-          `Dropping invalid email address from attendees: ${attendee}`
+            `Dropping invalid email address from attendees: ${attendee}`,
         );
       }
       return isValid;
@@ -616,16 +616,16 @@ async function addEventsAndSendResponse(
 
     // Try to add the event to their calendar
     const [addEventErr, eventObject] = await handleAsync(() =>
-      addEvent(oauth2Client, event, uid)
+      addEvent(oauth2Client, event, uid),
     );
 
     if (addEventErr || !eventObject) {
       logger.warn(
-        `Error adding event "${event.summary}" to calendar: `,
-        addEventErr
+          `Error adding event "${event.summary}" to calendar: `,
+          addEventErr,
       );
       failedEvents.push({
-        event: { summary: event.summary, attendees: event.attendees },
+        event: {summary: event.summary, attendees: event.attendees},
         error: addEventErr?.message || "Unknown error",
       });
     } else {
@@ -647,7 +647,7 @@ async function addEventsAndSendResponse(
 
   // If all events failed, send oauth failed response
   if (successfulEvents.length === 0) {
-    sendEvent(uid, "calendarError", { reason: "oauth_failed" });
+    sendEvent(uid, "calendarError", {reason: "oauth_failed"});
     await sendEmailResponse(sender, email, EMAIL_RESPONSES.oauthFailed, true);
     return;
   }
@@ -657,8 +657,8 @@ async function addEventsAndSendResponse(
 
   for (const eventObject of successfulEvents) {
     const eventDate = moment(eventObject.start.dateTime)
-      .tz(eventObject.start.timeZone)
-      .format("dddd, MMMM Do [at] h:mm A z");
+        .tz(eventObject.start.timeZone)
+        .format("dddd, MMMM Do [at] h:mm A z");
 
     responseHtml += `<p><strong>${eventObject.summary}</strong><br>`;
     responseHtml += `Date: ${eventDate}<br>`;
@@ -674,21 +674,29 @@ async function addEventsAndSendResponse(
     // Check if any event has multiple attendees
     if (eventObject.attendees && eventObject.attendees.length > 1) {
       const attendeeEmails = eventObject.attendees
-        .map((a) => a.email)
-        .join(", ");
+          .map((a) => a.email)
+          .join(", ");
       responseHtml += `Attendees: ${attendeeEmails}<br>`;
     }
 
-    responseHtml += `<a href="${eventObject.htmlLink}" style="display:inline-block; padding:10px 20px; margin:5px 0; background-color:#3498db; color:white; text-align:center; text-decoration:none; font-weight:bold; border-radius:5px; border:none; cursor:pointer;">View Event</a>`;
+    const viewBtnStyle = "display:inline-block; padding:10px 20px; margin:5px 0; " +
+      "background-color:#3498db; color:white; text-align:center; text-decoration:none; " +
+      "font-weight:bold; border-radius:5px; border:none; cursor:pointer;";
+    responseHtml += `<a href="${eventObject.htmlLink}" style="${viewBtnStyle}">View Event</a>`;
 
     // Add invite button if there are multiple attendees and an invite link
     if (eventObject.inviteOthersLink) {
       const inviteesWithoutHost = eventObject.attendees?.filter(
-        (attendee) => attendee.email !== eventObject.organizer?.email
+          (attendee) => attendee.email !== eventObject.organizer?.email,
       );
       if (inviteesWithoutHost && inviteesWithoutHost.length > 0) {
-        responseHtml += `<br>You may want to invite: ${inviteesWithoutHost.map((a) => a.email).join(", ")}<br>`;
-        responseHtml += `<a href="${eventObject.inviteOthersLink}" style="display:inline-block; padding:10px 20px; margin:5px 0; background-color:#3498db; color:white; text-align:center; text-decoration:none; font-weight:bold; border-radius:5px; border:none; cursor:pointer;">Invite Guests</a>`;
+        const inviteeEmails = inviteesWithoutHost.map((a) => a.email).join(", ");
+        responseHtml += `<br>You may want to invite: ${inviteeEmails}<br>`;
+        const inviteBtnStyle = "display:inline-block; padding:10px 20px; margin:5px 0; " +
+          "background-color:#3498db; color:white; text-align:center; text-decoration:none; " +
+          "font-weight:bold; border-radius:5px; border:none; cursor:pointer;";
+        responseHtml += `<a href="${eventObject.inviteOthersLink}" style="${inviteBtnStyle}">` +
+          `Invite Guests</a>`;
       }
     }
 
@@ -711,15 +719,15 @@ async function addEventsAndSendResponse(
     const eventObject = successfulEvents[0];
 
     // Determine calendar name to display (only if not primary)
-    const calendarNameText = eventObject.isPrimaryCalendar
-      ? ""
-      : `<br>Calendar: ${eventObject.calendarName}`;
+    const calendarNameText = eventObject.isPrimaryCalendar ?
+      "" :
+      `<br>Calendar: ${eventObject.calendarName}`;
 
     let response: EmailResponseTemplate;
     if (eventObject.inviteOthersLink) {
       const inviteesWithoutHost =
         eventObject.inviteOthersAttendees?.filter(
-          (emailAddr) => emailAddr !== eventObject.organizer?.email
+            (emailAddr) => emailAddr !== eventObject.organizer?.email,
         ) || [];
 
       response = {
@@ -727,8 +735,8 @@ async function addEventsAndSendResponse(
         replace: {
           EVENT_LINK: eventObject.htmlLink,
           EVENT_DATE: moment(eventObject.start.dateTime)
-            .tz(eventObject.start.timeZone)
-            .format("dddd, MMMM Do [at] h:mm A z"),
+              .tz(eventObject.start.timeZone)
+              .format("dddd, MMMM Do [at] h:mm A z"),
           INVITE_LINK: eventObject.inviteOthersLink,
           EVENT_ATTENDEES: inviteesWithoutHost.join(", "),
           CALENDAR_NAME: calendarNameText,
@@ -740,11 +748,11 @@ async function addEventsAndSendResponse(
         replace: {
           EVENT_LINK: eventObject.htmlLink,
           EVENT_DATE: moment(eventObject.start.dateTime)
-            .tz(eventObject.start.timeZone)
-            .format("dddd, MMMM Do [at] h:mm A z"),
-          EVENT_ATTENDEES: eventObject.attendees
-            ? eventObject.attendees.map((attendee) => attendee.email).join(", ")
-            : "",
+              .tz(eventObject.start.timeZone)
+              .format("dddd, MMMM Do [at] h:mm A z"),
+          EVENT_ATTENDEES: eventObject.attendees ?
+            eventObject.attendees.map((attendee) => attendee.email).join(", ") :
+            "",
           CALENDAR_NAME: calendarNameText,
         },
       };
@@ -795,18 +803,18 @@ function getSubject(messageType: EmailResponseTemplate): string {
   let subject = template.subject || "";
   Object.keys(messageType.replace).forEach((key) => {
     subject = subject.replace(
-      new RegExp(`%${key}%`, "g"),
-      messageType.replace[key]
+        new RegExp(`%${key}%`, "g"),
+        messageType.replace[key],
     );
   });
   return subject;
 }
 
 async function sendEmailResponse(
-  sender: string,
-  originalEmail: TransformedEmail,
-  messageType: EmailResponseTemplate,
-  includeThread: boolean
+    sender: string,
+    originalEmail: TransformedEmail,
+    messageType: EmailResponseTemplate,
+    includeThread: boolean,
 ): Promise<void> {
   let html = getHtml(messageType);
   let subject = originalEmail.subject || "Re: ";
@@ -825,4 +833,4 @@ async function sendEmailResponse(
   });
 }
 
-export { handleEmail };
+export {handleEmail};

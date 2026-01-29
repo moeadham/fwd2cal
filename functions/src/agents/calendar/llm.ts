@@ -1,6 +1,6 @@
-import { logger } from "firebase-functions/v2";
-import { defaultCompletion, DEFAULT_TEMP } from "../../util/openai";
-import { prompts } from "./prompts";
+import {logger} from "firebase-functions/v2";
+import {defaultCompletion, DEFAULT_TEMP} from "../../util/openai";
+import {prompts} from "./prompts";
 import {
   EventDataSchema,
   TimezoneSchema,
@@ -17,11 +17,11 @@ import {
 } from "./types";
 
 async function processEmail(
-  email: EmailForProcessing,
-  headers: HeadersForProcessing,
-  uid: string | null = null,
-  imageUrls: string[] = [],
-  calendars: CalendarForLLM[] = []
+    email: EmailForProcessing,
+    headers: HeadersForProcessing,
+    uid: string | null = null,
+    imageUrls: string[] = [],
+    calendars: CalendarForLLM[] = [],
 ): Promise<EventData> {
   // Prepend calendar list if provided
   let calendarText = "";
@@ -67,30 +67,30 @@ async function processEmail(
       role: "system",
       content: prompts.getEventData.prompt,
     },
-    { role: "user", content: userContent },
+    {role: "user", content: userContent},
   ];
   const timezoneMessages: ChatMessage[] = [
     {
       role: "system",
       content: prompts.getEventTimezone.prompt,
     },
-    { role: "user", content: userContent },
+    {role: "user", content: userContent},
   ];
 
   const [eventResponse, timezoneResponse] = await Promise.all([
     defaultCompletion<EventData>(
-      eventMessages,
-      prompts.getEventData.model,
-      DEFAULT_TEMP,
-      EventDataSchema,
-      uid
+        eventMessages,
+        prompts.getEventData.model,
+        DEFAULT_TEMP,
+        EventDataSchema,
+        uid,
     ),
     defaultCompletion<Timezone>(
-      timezoneMessages,
-      prompts.getEventTimezone.model,
-      DEFAULT_TEMP,
-      TimezoneSchema,
-      uid
+        timezoneMessages,
+        prompts.getEventTimezone.model,
+        DEFAULT_TEMP,
+        TimezoneSchema,
+        uid,
     ),
   ]);
 
@@ -108,7 +108,7 @@ async function processEmail(
   });
 
   logger.debug(
-    `Timezone selection: ${timezoneResult.timezone}, ${timezoneResult.reason}`
+      `Timezone selection: ${timezoneResult.timezone}, ${timezoneResult.reason}`,
   );
 
   // Handle both old single event format and new array format
@@ -137,7 +137,7 @@ async function processEmail(
       attendees: (eventResult as unknown as Record<string, string[]>).attendees || [],
       timeZone: timezoneResult.timezone || undefined,
     };
-    return { events: [singleEvent] };
+    return {events: [singleEvent]};
   }
 
   return eventResult;
@@ -149,14 +149,14 @@ async function parseICS(ics: string): Promise<ICSParsedEvent> {
       role: "system",
       content: prompts.parseICS.prompt,
     },
-    { role: "user", content: ics },
+    {role: "user", content: ics},
   ];
   return (await defaultCompletion<ICSParsedEvent>(
-    messages,
-    prompts.parseICS.model,
-    DEFAULT_TEMP,
-    ICSParserSchema
+      messages,
+      prompts.parseICS.model,
+      DEFAULT_TEMP,
+      ICSParserSchema,
   )) as ICSParsedEvent;
 }
 
-export { processEmail, parseICS };
+export {processEmail, parseICS};

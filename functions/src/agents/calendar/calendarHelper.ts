@@ -1,12 +1,13 @@
-import { logger } from "firebase-functions/v2";
+import {logger} from "firebase-functions/v2";
 import moment from "moment-timezone";
-import { google, calendar_v3, Auth } from "googleapis";
+// eslint-disable-next-line camelcase
+import {google, calendar_v3, Auth} from "googleapis";
 import handleAsync from "../../util/handleAsync";
-import { getOauthClient } from "../../auth/authHandler";
+import {getOauthClient} from "../../auth/authHandler";
 import ical from "node-ical";
 import _ from "underscore";
-import { sendEvent } from "../../util/analytics";
-import { MAIN_EMAIL_ADDRESS } from "../../util/config";
+import {sendEvent} from "../../util/analytics";
+import {MAIN_EMAIL_ADDRESS} from "../../util/config";
 import {
   Event,
   GoogleCalendar,
@@ -21,44 +22,46 @@ import {
   ICalTimezone,
 } from "./types";
 import {RequestWithQuery} from "../../util/types";
-import { Response } from "express";
+import {Response} from "express";
 
 const DEFAULT_EVENT_LENGTH = 30;
 const ONLY_INVITE_HOST = true;
 
 function generateTimeObject(
-  event: Event,
-  primaryCalendar: GoogleCalendar | MappedCalendar,
-  uid: string
+    event: Event,
+    primaryCalendar: GoogleCalendar | MappedCalendar,
+    uid: string,
 ): TimeObject {
   const timezone = primaryCalendar.timeZone;
   let eventTimeZone = event.timeZone || timezone;
   logger.debug(
-    `Calendar timezone: ${timezone}, eventTimezone: ${eventTimeZone}`
+      `Calendar timezone: ${timezone}, eventTimezone: ${eventTimeZone}`,
   );
   try {
-    Intl.DateTimeFormat(undefined, { timeZone: eventTimeZone });
+    new Intl.DateTimeFormat(undefined, {timeZone: eventTimeZone});
   } catch {
     console.error("Invalid Time Zone in event object:", eventTimeZone);
-    sendEvent(uid, "dataQualityIssue", { reason: "invalid_timezone" });
+    sendEvent(uid, "dataQualityIssue", {reason: "invalid_timezone"});
     // Fallback to primary calendar's timezone if event's timezone is invalid
     eventTimeZone = timezone;
   }
-  const { date, start_time, end_time } = event;
-  const startTime = `${date} ${start_time}`;
+  // eslint-disable-next-line camelcase
+  const {date, start_time, end_time} = event;
+  const startTime = `${date} ${start_time}`; // eslint-disable-line camelcase
   const startDate = moment
-    .tz(startTime, "DD MMMM YYYY HH:mm", eventTimeZone)
-    .toDate();
-  const endTime = `${date} ${end_time}`;
+      .tz(startTime, "DD MMMM YYYY HH:mm", eventTimeZone)
+      .toDate();
+  const endTime = `${date} ${end_time}`; // eslint-disable-line camelcase
   let endDate: Date;
-  if (event.end_time) {
+  // eslint-disable-next-line camelcase
+  if (end_time) {
     try {
       endDate = moment.tz(endTime, "DD MMMM YYYY HH:mm", eventTimeZone).toDate();
       if (isNaN(endDate.getTime())) {
         throw new Error("Invalid end time");
       }
-    } catch (error) {
-      sendEvent(uid, "dataQualityIssue", { reason: "invalid_end_time" });
+    } catch (_error) {
+      sendEvent(uid, "dataQualityIssue", {reason: "invalid_end_time"});
       // Default 30 minutes to start_time
       endDate = new Date(startDate.getTime() + DEFAULT_EVENT_LENGTH * 60000);
     }
@@ -80,17 +83,17 @@ function generateTimeObject(
 }
 
 async function addEvent(
-  oauth2Client: Auth.OAuth2Client,
-  event: Event,
-  uid: string
+    oauth2Client: Auth.OAuth2Client,
+    event: Event,
+    uid: string,
 ): Promise<GoogleCalendarEvent> {
-  const calendar = google.calendar({ version: "v3", auth: oauth2Client });
+  const calendar = google.calendar({version: "v3", auth: oauth2Client});
   const calendarList = await calendar.calendarList.list();
   const primaryCalendar = calendarList.data.items?.find(
-    (cal) => cal.primary
+      (cal) => cal.primary,
   ) as GoogleCalendar | undefined;
   if (!primaryCalendar) {
-    sendEvent(uid, "calendarError", { reason: "no_primary_calendar" });
+    sendEvent(uid, "calendarError", {reason: "no_primary_calendar"});
     throw new Error("Primary calendar not found");
   }
 
@@ -98,14 +101,14 @@ async function addEvent(
   let targetCalendar: GoogleCalendar = primaryCalendar;
   if (event.selected_calendar_id) {
     const selectedCal = calendarList.data.items?.find(
-      (cal) => cal.id === event.selected_calendar_id
+        (cal) => cal.id === event.selected_calendar_id,
     ) as GoogleCalendar | undefined;
     if (selectedCal) {
       targetCalendar = selectedCal;
       logger.log(`Using selected calendar: ${targetCalendar.id}`);
     } else {
       logger.warn(
-        `Selected calendar ${event.selected_calendar_id} not found, using primary`
+          `Selected calendar ${event.selected_calendar_id} not found, using primary`,
       );
     }
   }
@@ -123,7 +126,7 @@ async function addEvent(
     summary: event.summary,
     status: "confirmed",
     description: eventDescription,
-    attendees: event.attendees.map((attendee) => ({ email: attendee })),
+    attendees: event.attendees.map((attendee) => ({email: attendee})),
     start: times.start,
     end: times.end,
     guestsCanInviteOthers: true,
@@ -137,13 +140,14 @@ async function addEvent(
   // This is needs a refactor.
   if (ONLY_INVITE_HOST) {
     requestBody.attendees = [
-      { email: targetCalendar.id, responseStatus: "accepted" },
+      {email: targetCalendar.id, responseStatus: "accepted"},
     ];
   }
   logger.log("Attempting to add event to google.");
 
   const maxRetries = 1;
   const retryDelay = 1000; // 1 second
+  // eslint-disable-next-line camelcase
   let insertEvent: calendar_v3.Schema$Event | undefined;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -151,6 +155,7 @@ async function addEvent(
       const response = await calendar.events.insert({
         calendarId: targetCalendar.id,
         conferenceDataVersion: 1,
+        // eslint-disable-next-line camelcase
         requestBody: requestBody as calendar_v3.Schema$Event,
         sendNotifications: true,
         sendUpdates: "all",
@@ -174,8 +179,10 @@ async function addEvent(
           err.response.status >= 500);
 
       if (attempt < maxRetries && isRetriableError) {
+        const attemptNum = attempt + 1;
+        const totalAttempts = maxRetries + 1;
         logger.warn(
-          `Calendar API error (attempt ${attempt + 1}/${maxRetries + 1}): ${err.message}. Retrying in ${retryDelay}ms...`
+            `Calendar API error (attempt ${attemptNum}/${totalAttempts}): ${err.message}. Retrying...`,
         );
         await new Promise((resolve) => setTimeout(resolve, retryDelay));
       } else {
@@ -188,7 +195,7 @@ async function addEvent(
           });
         } else {
           // Validation or other non-retriable error
-          sendEvent(uid, "calendarError", { reason: "validation_error" });
+          sendEvent(uid, "calendarError", {reason: "validation_error"});
         }
         throw error; // Re-throw the error after max retries or non-retriable error
       }
@@ -199,7 +206,7 @@ async function addEvent(
     throw new Error("Failed to insert event after retries");
   }
 
-  sendEvent(uid, "addEvent", { result: "success" });
+  sendEvent(uid, "addEvent", {result: "success"});
 
   const result: GoogleCalendarEvent = {
     kind: "calendar#event",
@@ -219,12 +226,12 @@ async function addEvent(
       email: a.email || "",
       responseStatus: a.responseStatus,
     })),
-    organizer: insertEvent.organizer
-      ? {
-          email: insertEvent.organizer.email || "",
-          displayName: insertEvent.organizer.displayName,
-        }
-      : undefined,
+    organizer: insertEvent.organizer ?
+      {
+        email: insertEvent.organizer.email || "",
+        displayName: insertEvent.organizer.displayName,
+      } :
+      undefined,
     location: insertEvent.location,
     calendarId: targetCalendar.id,
     calendarName: targetCalendar.summary,
@@ -291,7 +298,7 @@ async function eventFromICS(icsFile: ICSFile): Promise<ParsedICSEvent> {
   }
   if (event.attendee && event.attendee.length > 0 && event.attendee[0].val) {
     attendees.push(
-      ...event.attendee.map((attendee) => attendee.val.replace("MAILTO:", ""))
+        ...event.attendee.map((attendee) => attendee.val.replace("MAILTO:", "")),
     );
   }
 
@@ -312,36 +319,36 @@ async function eventFromICS(icsFile: ICSFile): Promise<ParsedICSEvent> {
 }
 
 async function getUserCalendars(
-  oauth2Client: Auth.OAuth2Client,
-  uid: string
+    oauth2Client: Auth.OAuth2Client,
+    uid: string,
 ): Promise<MappedCalendar[]> {
-  const calendar = google.calendar({ version: "v3", auth: oauth2Client });
+  const calendar = google.calendar({version: "v3", auth: oauth2Client});
   const calendarList = await calendar.calendarList.list();
 
   // Filter to only writable calendars (owner or writer)
   const calendars: MappedCalendar[] = (calendarList.data.items || [])
-    .filter(
-      (cal) => cal.accessRole === "owner" || cal.accessRole === "writer"
-    )
-    .map((cal) => ({
-      kind: cal.kind || "",
-      etag: cal.etag || "",
-      selected: cal.selected,
-      accessRole: cal.accessRole || "",
-      conferenceProperties: cal.conferenceProperties as
+      .filter(
+          (cal) => cal.accessRole === "owner" || cal.accessRole === "writer",
+      )
+      .map((cal) => ({
+        kind: cal.kind || "",
+        etag: cal.etag || "",
+        selected: cal.selected,
+        accessRole: cal.accessRole || "",
+        conferenceProperties: cal.conferenceProperties as
         | { allowedConferenceSolutionTypes: string[] }
         | undefined,
-      calendar_id: cal.id || "",
-      summary: cal.summary || "",
-      summaryOverride: cal.summaryOverride,
-      description: cal.description,
-      primary: cal.primary,
-      timeZone: cal.timeZone || "",
-      location: cal.location,
-      hidden: cal.hidden,
-      deleted: cal.deleted,
-      uid: uid,
-    }));
+        calendar_id: cal.id || "",
+        summary: cal.summary || "",
+        summaryOverride: cal.summaryOverride,
+        description: cal.description,
+        primary: cal.primary,
+        timeZone: cal.timeZone || "",
+        location: cal.location,
+        hidden: cal.hidden,
+        deleted: cal.deleted,
+        uid: uid,
+      }));
   return calendars;
 }
 
@@ -360,22 +367,22 @@ function formatCalendarForLLM(calendar: MappedCalendar): CalendarForLLM {
 }
 
 async function inviteAdditionalAttendees(
-  req: RequestWithQuery,
-  res: Response
+    req: RequestWithQuery,
+    res: Response,
 ): Promise<Response | void> {
-  let { uid, eventId, calendarId } = req.query;
-  let attendees = req.query.attendees;
+  const {uid, eventId, calendarId} = req.query;
+  const attendees = req.query.attendees;
   let attendeesList: string[] = [];
 
   if (typeof attendees === "string") {
     try {
       attendeesList = JSON.parse(attendees);
-    } catch (error) {
+    } catch (_error) {
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!emailRegex.test(attendees)) {
         console.error(
-          "Attendees string is not a valid single email address:",
-          attendees
+            "Attendees string is not a valid single email address:",
+            attendees,
         );
         return res.status(400).send({
           error: "Attendees string is not a valid single email address.",
@@ -389,7 +396,7 @@ async function inviteAdditionalAttendees(
   }
 
   if (!uid || !eventId || !calendarId) {
-    return res.status(400).send({ error: "Missing required parameters" });
+    return res.status(400).send({error: "Missing required parameters"});
   }
 
   // Can we authenticate with their calendar?
@@ -398,7 +405,7 @@ async function inviteAdditionalAttendees(
     logger.warn("Error getting oauth2Client", oauthErr);
     return res.redirect(302, "https://www.fwd2cal.com/404");
   }
-  const calendar = google.calendar({ version: "v3", auth: oauth2Client });
+  const calendar = google.calendar({version: "v3", auth: oauth2Client});
   const eventToUpdate = await calendar.events.get({
     calendarId: calendarId,
     eventId: eventId,

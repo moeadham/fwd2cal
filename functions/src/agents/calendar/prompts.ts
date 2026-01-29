@@ -1,4 +1,5 @@
-import { Prompts } from "./types";
+/* eslint-disable max-len */
+import {Prompts} from "./types";
 
 // Model configuration
 const DEFAULT_REASONING_MODEL = "openai/gpt-4.1-mini";
@@ -686,4 +687,4 @@ ICS File:
   },
 };
 
-export { prompts };
+export {prompts};

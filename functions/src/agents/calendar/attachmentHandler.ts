@@ -1,10 +1,10 @@
-import { logger } from "firebase-functions/v2";
+import {logger} from "firebase-functions/v2";
 import {
   ICSFile,
   ProcessedAttachments,
   AttachmentInfo,
 } from "./types";
-import { ResendClient } from "../../util/types";
+import {ResendClient} from "../../util/types";
 
 /**
  * Process attachments from a Resend email
@@ -12,8 +12,8 @@ import { ResendClient } from "../../util/types";
  * - Collects image URLs (png, jpg, jpeg, webp) for LLM vision processing
  */
 async function processAttachments(
-  resend: ResendClient,
-  emailId: string
+    resend: ResendClient,
+    emailId: string,
 ): Promise<ProcessedAttachments> {
   const icsFiles: ICSFile[] = [];
   const imageUrls: string[] = [];
@@ -21,21 +21,24 @@ async function processAttachments(
   // Get detailed attachment info from list endpoint
   let attachmentsList: AttachmentInfo[] = [];
   try {
-    logger.info("Fetching attachments for email", { emailId });
-    const { data, error } = await resend.emails.receiving.attachments.list({
+    logger.info("Fetching attachments for email", {emailId});
+    const {data, error} = await resend.emails.receiving.attachments.list({
       emailId: emailId,
     });
     if (error) {
-      logger.error("Failed to list attachments", { error: error.message });
+      logger.error("Failed to list attachments", {error: error.message});
     } else {
       // The response has nested data: {data: {object: 'list', data: [...]}}
       attachmentsList = data?.data || [];
-      logger.info("Attachments list received", { count: attachmentsList.length, attachments: attachmentsList.map(a => a.filename) });
+      logger.info("Attachments list received", {
+        count: attachmentsList.length,
+        attachments: attachmentsList.map((a) => a.filename),
+      });
     }
   } catch (listError) {
     const errorMessage =
       listError instanceof Error ? listError.message : String(listError);
-    logger.error("Failed to list attachments", { error: errorMessage });
+    logger.error("Failed to list attachments", {error: errorMessage});
   }
 
   // Process ICS attachments (download them from download_url)
@@ -59,7 +62,7 @@ async function processAttachments(
         icsFiles.push({
           fieldname: "attachment",
           file: Buffer.from(icsContent),
-          filename: { filename: attachmentInfo.filename },
+          filename: {filename: attachmentInfo.filename},
           encoding: "7bit",
           mimetype: attachmentInfo.content_type || "text/calendar",
         });
@@ -118,7 +121,7 @@ async function processAttachments(
     });
   }
 
-  return { icsFiles, imageUrls };
+  return {icsFiles, imageUrls};
 }
 
-export { processAttachments };
+export {processAttachments};

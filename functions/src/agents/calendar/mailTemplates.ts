@@ -1,13 +1,14 @@
-import { MailTemplates } from "./types";
+/* eslint-disable max-len */
+import {MailTemplates} from "./types";
 
 // Get base URL based on project ID
 const isDevProject = process.env.GCLOUD_PROJECT === "fwd2cal-dev-2578e";
-const signupUrl = isDevProject
-  ? "https://us-central1-fwd2cal-dev-2578e.cloudfunctions.net/v2signup"
-  : "https://www.fwd2cal.com/signup-consent";
-const appBaseUrl = isDevProject
-  ? "https://us-central1-fwd2cal-dev-2578e.cloudfunctions.net"
-  : "https://app.fwd2cal.com";
+const signupUrl = isDevProject ?
+  "https://us-central1-fwd2cal-dev-2578e.cloudfunctions.net/v2signup" :
+  "https://www.fwd2cal.com/signup-consent";
+const appBaseUrl = isDevProject ?
+  "https://us-central1-fwd2cal-dev-2578e.cloudfunctions.net" :
+  "https://app.fwd2cal.com";
 
 const mailTemplates: MailTemplates = {
   noUserFound: {
@@ -108,4 +109,4 @@ You may want disconnect fwd2cal from google <a href="https://myaccount.google.co
   },
 };
 
-export { mailTemplates };
+export {mailTemplates};
