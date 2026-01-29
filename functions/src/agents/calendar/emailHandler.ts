@@ -20,6 +20,8 @@ import {
   ENVIRONMENT_NAME,
   MAIN_EMAIL_ADDRESS,
   RESEND_REGISTERED_USERS_SEGMENT_ID,
+  getSupportEmail,
+  getAdminEmail,
 } from "../../util/config";
 import handleAsync from "../../util/handleAsync";
 import {
@@ -157,8 +159,8 @@ async function handleEmail(
   // Is this a support email?
   const to = getRecipientsFromRawEmail(email);
   if (
-    to.includes("support@fwd2cal.com") ||
-    to.includes("admin@fwd2cal.com") ||
+    to.includes(getSupportEmail()) ||
+    to.includes(getAdminEmail()) ||
     (email.subject &&
       email.subject.toLowerCase().startsWith("verify your email address"))
   ) {
@@ -754,10 +756,11 @@ async function addEventsAndSendResponse(
     await sendEmailResponse(sender, email, response, true);
   } else {
     // Multiple events - send custom HTML email
+    const supportEmail = getSupportEmail();
     const customHtml = `
 ${successfulEvents.length} events added to your calendar.
 ${responseHtml}
-<br><br>You can always ask for help: <a href="mailto:support@fwd2cal.com">support@fwd2cal.com</a><br>
+<br><br>You can always ask for help: <a href="mailto:${supportEmail}">${supportEmail}</a><br>
     `;
 
     await sendEmailResend({
@@ -781,6 +784,11 @@ function getHtml(messageType: EmailResponseTemplate): string {
   Object.keys(messageType.replace).forEach((key) => {
     html = html.replace(new RegExp(`%${key}%`, "g"), messageType.replace[key]);
   });
+  // Replace email placeholders with configured values
+  const supportEmail = getSupportEmail();
+  const mainEmail = MAIN_EMAIL_ADDRESS.value();
+  html = html.replace(/%SUPPORT_EMAIL%/g, supportEmail);
+  html = html.replace(/%MAIN_EMAIL%/g, mainEmail);
   return html;
 }
 
