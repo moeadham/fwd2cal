@@ -7,6 +7,17 @@ import {ResendEmailOptions, ResendAPIResponse, ResendClient} from "../types";
 
 let resend: Resend | null = null;
 
+// Retry configuration
+const RETRY_CONFIG = {
+  maxRetries: 3,
+  initialDelayMs: 1000,
+  maxDelayMs: 10000,
+};
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * Initialize Resend client (lazy initialization)
  */
@@ -88,42 +99,70 @@ async function sendEmailResend({
       messageKeys: Object.keys(message),
     });
 
-    const response = await client.emails.send(message);
+    // Retry loop with exponential backoff
+    let lastError: Error | null = null;
+    for (let attempt = 0; attempt <= RETRY_CONFIG.maxRetries; attempt++) {
+      if (attempt > 0) {
+        const delayMs = Math.min(
+            RETRY_CONFIG.initialDelayMs * Math.pow(2, attempt - 1),
+            RETRY_CONFIG.maxDelayMs,
+        );
+        logger.info("Retrying Resend API call", {attempt, delayMs, to, subject});
+        await sleep(delayMs);
+      }
 
-    // Log full response details
-    logger.info("Raw Resend API response", {
-      responseKeys: Object.keys(response || {}),
-      responseId: response?.id || "MISSING",
-      responseData: response?.data || "MISSING",
-      fullResponse: JSON.stringify(response),
-    });
+      const response = await client.emails.send(message);
 
-    // Check if Resend returned an error
-    // (they don't throw, they return {data, error})
-    if (response.error) {
-      logger.error("Resend API returned error", {
-        error: response.error,
+      // Log full response details
+      logger.info("Raw Resend API response", {
+        attempt,
+        responseKeys: Object.keys(response || {}),
+        responseId: response?.id || "MISSING",
+        responseData: response?.data || "MISSING",
+        fullResponse: JSON.stringify(response),
+      });
+
+      // Check if Resend returned an error
+      // (they don't throw, they return {data, error})
+      if (response.error) {
+        lastError = new Error(
+            `Resend API error: ${response.error.message || JSON.stringify(response.error)}`,
+        );
+        logger.warn("Resend API returned error", {
+          attempt,
+          maxRetries: RETRY_CONFIG.maxRetries,
+          error: response.error,
+          to,
+          from,
+          subject,
+        });
+        continue; // Retry
+      }
+
+      // Success
+      logger.info("Email sent successfully via Resend", {
+        attempt,
+        id: response.id || response.data?.id,
         to,
         from,
         subject,
+        hasId: !!(response.id || response.data?.id),
       });
-      sendEvent("email_service", "emailSendFailed", {
-        reason: "resend_api_error",
-      });
-      throw new Error(
-          `Resend API error: ${response.error.message || JSON.stringify(response.error)}`,
-      );
+
+      return response;
     }
 
-    logger.info("Email sent successfully via Resend", {
-      id: response.id || response.data?.id,
+    // All retries exhausted
+    logger.error("All Resend retries exhausted", {
+      maxRetries: RETRY_CONFIG.maxRetries,
       to,
       from,
       subject,
-      hasId: !!(response.id || response.data?.id),
     });
-
-    return response;
+    sendEvent("email_service", "emailSendFailed", {
+      reason: "resend_api_error",
+    });
+    throw lastError || new Error("Resend API failed after retries");
   } catch (error) {
     const errorMessage =
       error instanceof Error ? error.message : String(error);

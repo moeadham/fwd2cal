@@ -37,7 +37,11 @@ import {
   ResendClient,
 } from "./types";
 
-const CREDENTIALS_PATH = path.join("auth", "v2-google-auth-credentials.json");
+const isDevProject = process.env.GCLOUD_PROJECT === "fwd2cal-dev-2578e";
+const credentialsFileName = isDevProject ?
+  "v2-google-auth-credentials-fwd2cal-dev.json" :
+  "v2-google-auth-credentials.json";
+const CREDENTIALS_PATH = path.join("auth", credentialsFileName);
 const CREDENTIALS: GoogleOAuthCredentials = JSON.parse(
   fs.readFileSync(CREDENTIALS_PATH, { encoding: "utf-8" })
 );
@@ -65,8 +69,7 @@ const dispatchConfig: TaskQueueOptions = {
 exports.v2signup = onRequest(
   onRequestConfig,
   async (_req, res) => {
-    const redirectUriIndex =
-      ENVIRONMENT_NAME.value() === "production" ? 2 : 1;
+    const redirectUriIndex = ENVIRONMENT_NAME.value() === "production" ? 2 : 1;
     const signupUrl = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${CREDENTIALS.web.client_id}&redirect_uri=${CREDENTIALS.web.redirect_uris[redirectUriIndex]}&scope=https://www.googleapis.com/auth/calendar+https://www.googleapis.com/auth/userinfo.email+https://www.googleapis.com/auth/userinfo.profile+openid&access_type=offline&prompt=consent`;
     res.redirect(302, signupUrl);
   }

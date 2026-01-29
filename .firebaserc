@@ -1,5 +1,6 @@
 {
   "projects": {
-    "default": "fwd2cal"
+    "default": "fwd2cal",
+    "dev": "fwd2cal-dev-2578e"
   }
 }
