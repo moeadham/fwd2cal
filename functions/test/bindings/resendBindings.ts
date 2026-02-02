@@ -467,6 +467,71 @@ emailWithICSAttachment.attachmentsList = [
   },
 ];
 
+// Test: Email with PDF attachment containing event details
+// The email body intentionally has NO event details - event info is only in the PDF
+const emailWithPDFAttachment: ResendTestData = createResendTestData(
+  {
+    type: "email.received",
+    created_at: new Date().toISOString(),
+    data: {
+      email_id: "test-email-pdf",
+      message_id: `<test-pdf-${Date.now()}@mail.gmail.com>`,
+      from: TESTER_PRIMARY_GOOGLE_ACCT,
+      to: [MAIN_EMAIL_ADDRESS],
+      cc: [],
+      bcc: [],
+      subject: "Fwd: Conference Registration",
+      created_at: new Date().toISOString(),
+      attachments: [
+        {
+          id: "pdf-attachment-1",
+          filename: "conference_registration.pdf",
+          content_type: "application/pdf",
+          content_id: "<pdfattachment1>",
+          content_disposition: "attachment",
+          size: 15000,
+        },
+      ],
+    },
+  },
+  {
+    id: "test-email-pdf",
+    subject: "Fwd: Conference Registration",
+    from: TESTER_PRIMARY_GOOGLE_ACCT,
+    to: [MAIN_EMAIL_ADDRESS],
+    html: `<div dir="ltr"><p>Please see attached for the conference details.</p></div>`,
+    text: `Please see attached for the conference details.`,
+    headers: {
+      "authentication-results": generateAuthHeader(TESTER_PRIMARY_GOOGLE_ACCT),
+      "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
+      "to": MAIN_EMAIL_ADDRESS,
+      "subject": "Fwd: Conference Registration",
+      "date": "Mon, 1 Jul 2025 09:00:00 +0000",
+      "message-id": `<test-pdf-${Date.now()}@mail.gmail.com>`,
+      "in-reply-to": "<original-message-pdf>",
+      "references": "<original-message-pdf>",
+    },
+  },
+);
+
+// PDF test file with event details (Tech Conference 2026, July 15, 2026, 9:00 AM - 5:00 PM, San Francisco Convention Center)
+// File located at: test/bindings/conference_registration.pdf
+const PDF_FILE_PATH = require("path").join(__dirname, "conference_registration.pdf");
+
+// Add attachmentsList with file URL for PDF test
+emailWithPDFAttachment.attachmentsList = [
+  {
+    id: "pdf-attachment-1",
+    filename: "conference_registration.pdf",
+    content_type: "application/pdf",
+    content_id: "<pdfattachment1>",
+    content_disposition: "attachment",
+    size: 1500,
+    download_url: `file://${PDF_FILE_PATH}`,
+    expires_at: new Date(Date.now() + 3600000).toISOString(),
+  },
+];
+
 // Test 9: Multiple events in one email
 const multipleEventsEmail: ResendTestData = createResendTestData(
   {
@@ -710,6 +775,7 @@ export {
   basicDetailedEmail,
   basicEmailFuture,
   emailWithICSAttachment,
+  emailWithPDFAttachment,
   multipleEventsEmail,
   emailWithImageAttachment,
   familyEvent,

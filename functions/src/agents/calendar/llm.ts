@@ -14,6 +14,7 @@ import {
   ImageURLContent,
   EmailForProcessing,
   HeadersForProcessing,
+  ParsedDocument,
 } from "./types";
 
 async function processEmail(
@@ -22,6 +23,7 @@ async function processEmail(
     uid: string | null = null,
     imageUrls: string[] = [],
     calendars: CalendarForLLM[] = [],
+    documents: ParsedDocument[] = [],
 ): Promise<EventData> {
   // Prepend calendar list if provided
   let calendarText = "";
@@ -29,10 +31,21 @@ async function processEmail(
     calendarText = `available_calendars:\n${JSON.stringify(calendars, null, 2)}\n\nemail_text:\n`;
   }
 
+  // Format document text if provided
+  let documentText = "";
+  if (documents && documents.length > 0) {
+    documentText = "\n\n--- ATTACHED DOCUMENTS ---\n" +
+      documents.map((doc) => `## ${doc.filename}\n${doc.content}`).join("\n\n");
+    logger.info("Including document text in LLM request", {
+      documentCount: documents.length,
+      totalChars: documentText.length,
+    });
+  }
+
   const text = `${calendarText}Date: ${headers.date}
   Subject: ${headers.subject}
   From: ${headers.from}
-  ${email.text}`;
+  ${email.text}${documentText}`;
 
   // Build user message content - text + images
   let userContent: string | Array<TextContent | ImageURLContent>;

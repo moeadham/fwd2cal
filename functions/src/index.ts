@@ -358,8 +358,8 @@ async function handleResendInboundDispatch(
     headerCount: Object.keys(transformedEmail.headers).length,
   });
 
-  // Handle attachments (ICS files and images)
-  const {icsFiles, imageUrls} = await processAttachments(resend, email_id);
+  // Handle attachments (ICS files, images, and documents)
+  const {icsFiles, imageUrls, documents} = await processAttachments(resend, email_id);
 
   if (ENVIRONMENT_NAME.value() !== "production") {
     logger.log("RESEND WEBHOOK DATA", webhookData);
@@ -367,10 +367,11 @@ async function handleResendInboundDispatch(
     logger.log("TRANSFORMED EMAIL", transformedEmail);
     logger.log("ICS FILES", icsFiles);
     logger.log("IMAGE URLS", imageUrls);
+    logger.log("DOCUMENTS", documents.map((d) => d.filename));
   }
 
   // Process the email
-  const outcome = await handleEmail(transformedEmail, icsFiles, imageUrls);
+  const outcome = await handleEmail(transformedEmail, icsFiles, imageUrls, documents);
 
   // Get the sent email data from mock for testing (non-production only)
   let sentEmail = null;

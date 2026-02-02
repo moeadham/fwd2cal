@@ -375,10 +375,18 @@ export interface AttachmentInfo {
   download_url: string;
 }
 
+// Parsed document from attachment
+export interface ParsedDocument {
+  filename: string;
+  content: string;
+  mimeType: string;
+}
+
 // Processed attachments result
 export interface ProcessedAttachments {
   icsFiles: ICSFile[];
   imageUrls: string[];
+  documents: ParsedDocument[];
 }
 
 // Email response template

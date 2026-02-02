@@ -20,6 +20,7 @@ import {
   basicDetailedEmail,
   basicEmailFuture,
   emailWithICSAttachment,
+  emailWithPDFAttachment,
   multipleEventsEmail,
   emailWithImageAttachment,
   familyEvent,
@@ -313,6 +314,27 @@ describe(`fwd2cal (${EMAIL_SERVICE.toUpperCase()})`, function() {
     // Should get added to owners calendar.
     expect(res.body).to.be.an("object");
     expect((res.body.data as { result: string }).result).to.include("removed");
+  });
+
+  it("UT10.5 email with PDF attachment containing event", async function() {
+    const testMessage = emailWithPDFAttachment;
+
+    const res = await sendResendWebhook(testMessage, testMessage.attachmentsList);
+    expect(res).to.have.status(200);
+    console.log(res.body);
+    expect(res.body).to.be.an("object");
+    // Should successfully create event from PDF document
+    expect(res.body.data).to.not.have.property("error");
+    expect((res.body.data as { kind: string }).kind).to.equal("calendar#event");
+
+    // Verify sent email
+    expect(res.body.sentEmail).to.be.an("object");
+    expect(res.body.sentEmail.html).to.include("Event added");
+
+    // Verify threading headers
+    const incomingMessageId = testMessage.emailContent.headers["message-id"];
+    expect(res.body.sentEmail.headers["In-Reply-To"]).to.equal(incomingMessageId);
+    expect(res.body.sentEmail.headers["References"]).to.equal(`<original-message-pdf> ${incomingMessageId}`);
   });
 
   it("UT11 multiple events in one email", async function() {

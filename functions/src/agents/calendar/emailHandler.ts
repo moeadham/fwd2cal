@@ -48,6 +48,7 @@ import {
   CalendarForLLM,
   FailedEvent,
   EmailResponses,
+  ParsedDocument,
 } from "./types";
 import {Auth} from "googleapis";
 
@@ -133,6 +134,7 @@ async function handleEmail(
     email: TransformedEmail,
     files: ICSFile[],
     imageUrls: string[] = [],
+    documents: ParsedDocument[] = [],
 ): Promise<HandleEmailResult | GoogleCalendarEvent | GoogleCalendarEvent[] | undefined> {
   // Do we know this user?
   const sender = getSenderFromRawEmail(email);
@@ -186,15 +188,15 @@ async function handleEmail(
 
   switch (subjectAction) {
     case "addUser":
-      return await addEmailAddressToUser(email, sender, uid, files);
+      return await addEmailAddressToUser(email, sender, uid, files, imageUrls, documents);
     case "removeEmail":
-      return await removeEmailAddressFromUser(email, sender, uid, files);
+      return await removeEmailAddressFromUser(email, sender, uid, files, imageUrls, documents);
     case "deleteAccount":
       return await deleteUserAccount(email, sender, uid);
     case "addEvent":
-      return await eventHandler(email, sender, uid, files, imageUrls);
+      return await eventHandler(email, sender, uid, files, imageUrls, documents);
     default:
-      return await eventHandler(email, sender, uid, files, imageUrls);
+      return await eventHandler(email, sender, uid, files, imageUrls, documents);
   }
 }
 
@@ -263,6 +265,8 @@ async function removeEmailAddressFromUser(
     sender: string,
     uid: string,
     files: ICSFile[] = [],
+    imageUrls: string[] = [],
+    documents: ParsedDocument[] = [],
 ): Promise<HandleEmailResult | GoogleCalendarEvent | GoogleCalendarEvent[] | undefined> {
   const subject = email.subject;
   const emailRegex =
@@ -272,7 +276,7 @@ async function removeEmailAddressFromUser(
     logger.log(`Email that starts with 'remove' but doesn't
       have a valid email address after it.`);
     logger.log(`Subject: ${email.subject}`);
-    return await eventHandler(email, sender, uid, files);
+    return await eventHandler(email, sender, uid, files, imageUrls, documents);
   }
   const emailAddressToRemove = match[1];
   // Check if the email address is already added.
@@ -312,6 +316,8 @@ async function addEmailAddressToUser(
     sender: string,
     uid: string,
     files: ICSFile[] = [],
+    imageUrls: string[] = [],
+    documents: ParsedDocument[] = [],
 ): Promise<HandleEmailResult | GoogleCalendarEvent | GoogleCalendarEvent[] | undefined> {
   const subject = email.subject;
   const emailRegex = /^add\s+([a-zA-Z0-9._+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6})$/;
@@ -319,7 +325,7 @@ async function addEmailAddressToUser(
   if (!match) {
     logger.log(`Email that starts with 'add' but doesn't
       have a valid email address after it.`);
-    return await eventHandler(email, sender, uid, files);
+    return await eventHandler(email, sender, uid, files, imageUrls, documents);
   }
   const emailAddressToAdd = match[1];
   // Check if the email address is already added.
@@ -362,6 +368,7 @@ async function eventHandler(
     uid: string,
     files: ICSFile[] = [],
     imageUrls: string[] = [],
+    documents: ParsedDocument[] = [],
 ): Promise<GoogleCalendarEvent | GoogleCalendarEvent[] | undefined> {
   // Can we authenticate with their calendar?
   const [oauthErr, oauth2Client] = await handleAsync(() => getOauthClient(uid));
@@ -421,9 +428,24 @@ async function eventHandler(
   if (!event) {
     // Can we get event details from the thread with AI?
     const headers = getEmailHeaders(email.headers, ["date", "subject", "from"]);
-    const [processEmailErr, aiEvent] = await handleAsync(() =>
+
+    // First try without documents
+    let [processEmailErr, aiEvent] = await handleAsync(() =>
       processEmail(email, headers, uid, imageUrls, calendarsForLLM),
     );
+
+    // If no events found and we have documents, retry with documents
+    const noEventsFound = !processEmailErr && aiEvent &&
+      (aiEvent.error || !aiEvent.events || aiEvent.events.length === 0);
+    if (noEventsFound && documents.length > 0) {
+      logger.info("No events found in email text, retrying with document attachments", {
+        documentCount: documents.length,
+      });
+      [processEmailErr, aiEvent] = await handleAsync(() =>
+        processEmail(email, headers, uid, imageUrls, calendarsForLLM, documents),
+      );
+    }
+
     if (processEmailErr) {
       logger.warn("OpenAI error: ", processEmailErr);
       await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true);
