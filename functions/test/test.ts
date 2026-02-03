@@ -14,6 +14,7 @@ import {
   AttachmentWithUrl,
   emailFromMain,
   addEmailAddress,
+  addEmailAddressInBody,
   removeEmailAddress,
   deleteAccount,
   eventEmailFromSecondEmail,
@@ -181,6 +182,16 @@ describe(`fwd2cal (${EMAIL_SERVICE.toUpperCase()})`, function() {
     expect(res.body).to.be.an("object");
     expect((res.body.data as { verificationCode: string }).verificationCode).to.be.a("String");
     verificationCode = (res.body.data as { verificationCode: string }).verificationCode;
+  });
+
+  it("UT02b test adding email address from body (no subject)", async function() {
+    const testMessage = addEmailAddressInBody;
+    const res = await sendResendWebhook(testMessage);
+    expect(res).to.have.status(200);
+    console.log(res.body);
+    // Should detect add-email skill from body and get a verification code
+    expect(res.body).to.be.an("object");
+    expect((res.body.data as { verificationCode: string }).verificationCode).to.be.a("String");
   });
 
   it("UT03 try to email from secondary email address", async function() {

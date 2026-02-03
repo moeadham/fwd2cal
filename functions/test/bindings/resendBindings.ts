@@ -174,6 +174,44 @@ const addEmailAddress: ResendTestData = createResendTestData(
   },
 );
 
+// Test 2b: Add email address (in body only, no subject)
+const TESTER_BODYTEST_EMAIL = TESTER_PRIMARY_GOOGLE_ACCT.replace("@", "+bodytest@");
+const addEmailAddressInBody: ResendTestData = createResendTestData(
+  {
+    type: "email.received",
+    created_at: new Date().toISOString(),
+    data: {
+      email_id: "test-email-2b",
+      message_id: `<test-2b-${Date.now()}@mail.gmail.com>`,
+      from: TESTER_PRIMARY_GOOGLE_ACCT,
+      to: [MAIN_EMAIL_ADDRESS],
+      cc: [],
+      bcc: [],
+      subject: "Request",
+      created_at: new Date().toISOString(),
+      attachments: [],
+    },
+  },
+  {
+    id: "test-email-2b",
+    subject: "Request",
+    from: TESTER_PRIMARY_GOOGLE_ACCT,
+    to: [MAIN_EMAIL_ADDRESS],
+    html: `<div dir="ltr">Please add ${TESTER_BODYTEST_EMAIL} to my account.</div>`,
+    text: `Please add ${TESTER_BODYTEST_EMAIL} to my account.`,
+    headers: {
+      "authentication-results": generateAuthHeader(TESTER_PRIMARY_GOOGLE_ACCT),
+      "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
+      "to": MAIN_EMAIL_ADDRESS,
+      "subject": "Request",
+      "date": "Thu, 28 Mar 2025 10:45:00 +0000",
+      "message-id": `<test-2b-${Date.now()}@mail.gmail.com>`,
+      "in-reply-to": "<original-message-2b>",
+      "references": "<original-message-2b>",
+    },
+  },
+);
+
 // Test 3: Remove email address
 const removeEmailAddress: ResendTestData = createResendTestData(
   {
@@ -769,6 +807,7 @@ export {
   AttachmentWithUrl,
   emailFromMain,
   addEmailAddress,
+  addEmailAddressInBody,
   removeEmailAddress,
   deleteAccount,
   eventEmailFromSecondEmail,

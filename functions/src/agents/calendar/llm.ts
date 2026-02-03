@@ -5,9 +5,11 @@ import {
   EventDataSchema,
   TimezoneSchema,
   ICSParserSchema,
+  SkillSelectionSchema,
   EventData,
   Timezone,
   ICSParsedEvent,
+  SkillSelection,
   ChatMessage,
   CalendarForLLM,
   TextContent,
@@ -172,4 +174,35 @@ async function parseICS(ics: string): Promise<ICSParsedEvent> {
   )) as ICSParsedEvent;
 }
 
-export {processEmail, parseICS};
+async function selectSkill(
+    subject: string,
+    body: string,
+    skillsContext: string,
+    uid: string | null = null,
+): Promise<SkillSelection> {
+  // Replace placeholder in prompt with actual skills context
+  const systemPrompt = prompts.selectSkill.prompt.replace(
+      "{skills_context}",
+      skillsContext,
+  );
+
+  const userContent = `Subject: ${subject}\n\nBody:\n${body}`;
+
+  const messages: ChatMessage[] = [
+    {
+      role: "system",
+      content: systemPrompt,
+    },
+    {role: "user", content: userContent},
+  ];
+
+  return (await defaultCompletion<SkillSelection>(
+      messages,
+      prompts.selectSkill.model,
+      DEFAULT_TEMP,
+      SkillSelectionSchema,
+      uid,
+  )) as SkillSelection;
+}
+
+export {processEmail, parseICS, selectSkill};

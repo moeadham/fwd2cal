@@ -2,7 +2,7 @@
   "name": "fwd2cal",
   "description": "fwd an email and its added to your calendar",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && ./scripts/copy-skills.sh",
     "build:watch": "tsc -p tsconfig.build.json --watch",
     "test": "./test.sh",
     "lint": "eslint 'src/**/*.ts'",
@@ -22,6 +22,7 @@
     "firebase-admin": "^13.6.0",
     "firebase-functions": "^7.0.3",
     "googleapis": "^134.0.0",
+    "gray-matter": "^4.0.3",
     "js-tiktoken": "^1.0.10",
     "mammoth": "^1.11.0",
     "moment-timezone": "^0.5.45",

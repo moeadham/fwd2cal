@@ -7,7 +7,8 @@ import {
   deleteUser,
 } from "../../util/firestoreHandler";
 import {getOauthClient, deleteAccount} from "../../auth/authHandler";
-import {processEmail} from "./llm";
+import {processEmail, selectSkill} from "./llm";
+import {getSkills, getSkillsContext, fastMatchSkill} from "./skills";
 import {
   addEvent,
   eventFromICS,
@@ -181,19 +182,20 @@ async function handleEmail(
     return {result: `${sender} has been invited to signup`};
   }
 
-  const subjectAction = understandSubject(email.subject);
-  logger.log(`Request from ${sender} to ${subjectAction}`);
-  // Track all received emails with the action type
-  sendEvent(uid, "emailReceived", {action: subjectAction});
+  const skillResult = await detectSkill(email.subject, email.text, uid);
+  logger.log(`Request from ${sender} to ${skillResult.skillId}`);
+  // Track all received emails with the skill type
+  sendEvent(uid, "emailReceived", {action: skillResult.skillId});
 
-  switch (subjectAction) {
-    case "addUser":
-      return await addEmailAddressToUser(email, sender, uid, files, imageUrls, documents);
-    case "removeEmail":
-      return await removeEmailAddressFromUser(email, sender, uid, files, imageUrls, documents);
-    case "deleteAccount":
+  switch (skillResult.skillId) {
+    case "add-email":
+      return await addEmailAddressToUser(email, sender, uid, files, imageUrls, documents, skillResult.extractedValue);
+    case "remove-email":
+      return await removeEmailAddressFromUser(
+          email, sender, uid, files, imageUrls, documents, skillResult.extractedValue);
+    case "delete-account":
       return await deleteUserAccount(email, sender, uid);
-    case "addEvent":
+    case "add-event":
       return await eventHandler(email, sender, uid, files, imageUrls, documents);
     default:
       return await eventHandler(email, sender, uid, files, imageUrls, documents);
@@ -217,20 +219,62 @@ async function sendToSupport(
   return {result: `email forwarded to support group.`};
 }
 
-function understandSubject(subject: string): string {
-  if (!subject) subject = "";
-  subject = subject.toLowerCase();
-  if (subject.startsWith("add")) {
-    return "addUser";
-  } else if (subject.startsWith("remove")) {
-    return "removeEmail";
-  } else if (subject.startsWith("delete account")) {
-    return "deleteAccount";
-  } else if (subject.startsWith("fwd")) {
-    return "addEvent";
-  } else {
-    return "addEvent";
+interface SkillResult {
+  skillId: string;
+  extractedValue?: string;
+}
+
+/**
+ * Detect the appropriate skill based on email subject and body.
+ * Uses hybrid approach: fast regex matching first, LLM fallback for ambiguous cases.
+ */
+async function detectSkill(
+    subject: string,
+    body: string,
+    uid: string | null = null,
+): Promise<SkillResult> {
+  const normalizedSubject = (subject || "").trim();
+  const normalizedBody = (body || "").trim();
+
+  const skills = getSkills();
+
+  // Fast path - regex matching on subject and body
+  const fastMatch = fastMatchSkill(normalizedSubject, normalizedBody, skills);
+  if (fastMatch) {
+    logger.log(`Fast match in ${fastMatch.matchedIn}: "${fastMatch.skillId}"`);
+    return {
+      skillId: fastMatch.skillId,
+      extractedValue: fastMatch.extractedValue,
+    };
   }
+
+  // LLM fallback for ambiguous cases
+  try {
+    const bodyExcerpt = normalizedBody.substring(0, 500);
+    const skillsContext = getSkillsContext();
+    const selection = await selectSkill(
+        normalizedSubject,
+        bodyExcerpt,
+        skillsContext,
+        uid,
+    );
+    logger.log(
+        `LLM skill selection: ${selection.skill_id} ` +
+        `(confidence: ${selection.confidence}, reason: ${selection.reasoning})`,
+    );
+
+    if (selection.confidence > 0.3) {
+      return {
+        skillId: selection.skill_id,
+        extractedValue: selection.extracted_value || undefined,
+      };
+    }
+  } catch (error) {
+    logger.error("Skill selection error, defaulting to add-event:", error);
+  }
+
+  // Default skill
+  return {skillId: "add-event"};
 }
 
 async function deleteUserAccount(
@@ -267,18 +311,24 @@ async function removeEmailAddressFromUser(
     files: ICSFile[] = [],
     imageUrls: string[] = [],
     documents: ParsedDocument[] = [],
+    extractedEmail?: string,
 ): Promise<HandleEmailResult | GoogleCalendarEvent | GoogleCalendarEvent[] | undefined> {
-  const subject = email.subject;
-  const emailRegex =
-    /^remove\s+([a-zA-Z0-9._+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6})$/;
-  const match = subject.match(emailRegex);
-  if (!match) {
-    logger.log(`Email that starts with 'remove' but doesn't
-      have a valid email address after it.`);
+  // Use extracted email from skill matcher, or try to parse from subject
+  let emailAddressToRemove = extractedEmail;
+  if (!emailAddressToRemove) {
+    const subject = email.subject;
+    const emailRegex =
+      /^remove\s+([a-zA-Z0-9._+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6})$/i;
+    const match = subject.match(emailRegex);
+    if (match) {
+      emailAddressToRemove = match[1];
+    }
+  }
+  if (!emailAddressToRemove) {
+    logger.log(`remove-email skill matched but no valid email address found`);
     logger.log(`Subject: ${email.subject}`);
     return await eventHandler(email, sender, uid, files, imageUrls, documents);
   }
-  const emailAddressToRemove = match[1];
   // Check if the email address is already added.
   // If not, add it to the pending email address list.
   const existingUid = await getUserFromEmail(emailAddressToRemove);
@@ -318,16 +368,22 @@ async function addEmailAddressToUser(
     files: ICSFile[] = [],
     imageUrls: string[] = [],
     documents: ParsedDocument[] = [],
+    extractedEmail?: string,
 ): Promise<HandleEmailResult | GoogleCalendarEvent | GoogleCalendarEvent[] | undefined> {
-  const subject = email.subject;
-  const emailRegex = /^add\s+([a-zA-Z0-9._+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6})$/;
-  const match = subject.match(emailRegex);
-  if (!match) {
-    logger.log(`Email that starts with 'add' but doesn't
-      have a valid email address after it.`);
+  // Use extracted email from skill matcher, or try to parse from subject
+  let emailAddressToAdd = extractedEmail;
+  if (!emailAddressToAdd) {
+    const subject = email.subject;
+    const emailRegex = /^add\s+([a-zA-Z0-9._+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6})$/i;
+    const match = subject.match(emailRegex);
+    if (match) {
+      emailAddressToAdd = match[1];
+    }
+  }
+  if (!emailAddressToAdd) {
+    logger.log(`add-email skill matched but no valid email address found`);
     return await eventHandler(email, sender, uid, files, imageUrls, documents);
   }
-  const emailAddressToAdd = match[1];
   // Check if the email address is already added.
   // If not, add it to the pending email address list.
   const existingUid = await getUserFromEmail(emailAddressToAdd);

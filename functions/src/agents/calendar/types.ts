@@ -33,6 +33,15 @@ export const TimezoneSchema = z.object({
   timezone: z.string().nullable().describe("IANA Time Zone Database formatted string"),
 });
 
+// Skill selection schema for LLM intent detection
+export const SkillSelectionSchema = z.object({
+  skill_id: z.string().describe("The skill ID to activate"),
+  confidence: z.number().min(0).max(1).describe("Confidence score from 0 to 1"),
+  reasoning: z.string().describe("Brief explanation of why this skill was selected"),
+  extracted_value: z.string().nullable().optional()
+      .describe("Any value extracted from the content, e.g., email address"),
+});
+
 // ICS Parser schema - complex Google Calendar event format
 export const ICSParserSchema = z.object({
   kind: z.string().nullable().optional().describe("Type of the resource (calendar#event)"),
@@ -185,6 +194,7 @@ export type Event = z.infer<typeof EventSchema>;
 export type EventData = z.infer<typeof EventDataSchema>;
 export type Timezone = z.infer<typeof TimezoneSchema>;
 export type ICSParsedEvent = z.infer<typeof ICSParserSchema>;
+export type SkillSelection = z.infer<typeof SkillSelectionSchema>;
 
 // ============================================================================
 // CALENDAR TYPES
@@ -487,6 +497,7 @@ export interface Prompts {
   getEventData: PromptConfig;
   getEventTimezone: PromptConfig;
   parseICS: PromptConfig;
+  selectSkill: PromptConfig;
 }
 
 // OpenAI completion response
