@@ -20,6 +20,7 @@ lsof -ti :8085 | xargs kill
 lsof -ti :4500 | xargs kill
 lsof -ti :4400 | xargs kill
 lsof -ti :5000 | xargs kill
+lsof -ti :5002 | xargs kill
 lsof -ti :8080 | xargs kill
 
 echo "Building TypeScript..."
@@ -36,7 +37,7 @@ fi
 echo "Starting firebase emulator"
 firebase emulators:start > /dev/stdout &
 LOGS_PID=$!
-sleep 20
+sleep 30
 
 echo "running tests"
 ./node_modules/.bin/mocha --require ts-node/register test/test.ts --timeout 99999999999 --bail "$@" || TEST_FAILED=true

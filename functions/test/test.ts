@@ -33,7 +33,7 @@ const EMAIL_SERVICE = "resend";
 
 chai.use(chaiHttp);
 const expect = chai.expect;
-const apiURL = "http://127.0.0.1:5002"; // URL of your Vercel dev server
+const apiURL = "http://127.0.0.1:5002"; // URL of Firebase hosting emulator
 
 // Resend webhook endpoint
 const CALLBACK_ENDPOINT = "/v2/resendInboundCallback";
