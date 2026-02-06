@@ -23,6 +23,30 @@ const MAIN_EMAIL_ADDRESS = defineString("MAIN_EMAIL_ADDRESS", {
   default: "calendar@fwd2cal.com",
 });
 
+const SKILL_CONFIDENCE_THRESHOLD = defineString("SKILL_CONFIDENCE_THRESHOLD", {
+  default: "0.3",
+});
+
+const SKILL_BODY_EXCERPT_LENGTH = defineString("SKILL_BODY_EXCERPT_LENGTH", {
+  default: "500",
+});
+
+const DEFAULT_EVENT_LENGTH_MINUTES = defineString("DEFAULT_EVENT_LENGTH_MINUTES", {
+  default: "30",
+});
+
+const MAX_CHARS_PER_DOCUMENT = defineString("MAX_CHARS_PER_DOCUMENT", {
+  default: "3000",
+});
+
+const MAX_TOTAL_DOCUMENT_CHARS = defineString("MAX_TOTAL_DOCUMENT_CHARS", {
+  default: "8000",
+});
+
+const MAX_CHARS_PER_SHEET = defineString("MAX_CHARS_PER_SHEET", {
+  default: "1500",
+});
+
 /**
  * Extracts the domain from an email address.
  * @param email - The email address (e.g., "calendar@fwd2cal.com")
@@ -56,6 +80,12 @@ export {
   RESEND_API_KEY,
   RESEND_SIGNING_SECRET,
   RESEND_REGISTERED_USERS_SEGMENT_ID,
+  SKILL_CONFIDENCE_THRESHOLD,
+  SKILL_BODY_EXCERPT_LENGTH,
+  DEFAULT_EVENT_LENGTH_MINUTES,
+  MAX_CHARS_PER_DOCUMENT,
+  MAX_TOTAL_DOCUMENT_CHARS,
+  MAX_CHARS_PER_SHEET,
   getSupportEmail,
   getAdminEmail,
 };

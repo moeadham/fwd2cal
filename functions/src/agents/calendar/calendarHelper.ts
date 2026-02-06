@@ -7,7 +7,7 @@ import {getOauthClient} from "../../auth/authHandler";
 import ical from "node-ical";
 import _ from "underscore";
 import {sendEvent} from "../../util/analytics";
-import {MAIN_EMAIL_ADDRESS} from "../../util/config";
+import {MAIN_EMAIL_ADDRESS, DEFAULT_EVENT_LENGTH_MINUTES} from "../../util/config";
 import {
   Event,
   GoogleCalendar,
@@ -24,7 +24,6 @@ import {
 import {RequestWithQuery} from "../../util/types";
 import {Response} from "express";
 
-const DEFAULT_EVENT_LENGTH = 30;
 const ONLY_INVITE_HOST = true;
 
 function generateTimeObject(
@@ -52,6 +51,7 @@ function generateTimeObject(
       .tz(startTime, "DD MMMM YYYY HH:mm", eventTimeZone)
       .toDate();
   const endTime = `${date} ${end_time}`; // eslint-disable-line camelcase
+  const defaultEventLength = parseInt(DEFAULT_EVENT_LENGTH_MINUTES.value());
   let endDate: Date;
   // eslint-disable-next-line camelcase
   if (end_time) {
@@ -62,12 +62,12 @@ function generateTimeObject(
       }
     } catch (_error) {
       sendEvent(uid, "dataQualityIssue", {reason: "invalid_end_time"});
-      // Default 30 minutes to start_time
-      endDate = new Date(startDate.getTime() + DEFAULT_EVENT_LENGTH * 60000);
+      // Default to configured event length
+      endDate = new Date(startDate.getTime() + defaultEventLength * 60000);
     }
   } else {
-    // Default 30 minutes to start_time
-    endDate = new Date(startDate.getTime() + DEFAULT_EVENT_LENGTH * 60000);
+    // Default to configured event length
+    endDate = new Date(startDate.getTime() + defaultEventLength * 60000);
   }
   const timeObject: TimeObject = {
     start: {

@@ -21,6 +21,8 @@ import {
   ENVIRONMENT_NAME,
   MAIN_EMAIL_ADDRESS,
   RESEND_REGISTERED_USERS_SEGMENT_ID,
+  SKILL_CONFIDENCE_THRESHOLD,
+  SKILL_BODY_EXCERPT_LENGTH,
   getSupportEmail,
   getAdminEmail,
 } from "../../util/config";
@@ -250,7 +252,8 @@ async function detectSkill(
 
   // LLM fallback for ambiguous cases
   try {
-    const bodyExcerpt = normalizedBody.substring(0, 500);
+    const excerptLength = parseInt(SKILL_BODY_EXCERPT_LENGTH.value());
+    const bodyExcerpt = normalizedBody.substring(0, excerptLength);
     const skillsContext = getSkillsContext();
     const selection = await selectSkill(
         normalizedSubject,
@@ -263,7 +266,8 @@ async function detectSkill(
         `(confidence: ${selection.confidence}, reason: ${selection.reasoning})`,
     );
 
-    if (selection.confidence > 0.3) {
+    const threshold = parseFloat(SKILL_CONFIDENCE_THRESHOLD.value());
+    if (selection.confidence > threshold) {
       return {
         skillId: selection.skill_id,
         extractedValue: selection.extracted_value || undefined,

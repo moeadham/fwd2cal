@@ -10,6 +10,11 @@ import {PDFParse} from "pdf-parse";
 import mammoth from "mammoth";
 import * as XLSX from "xlsx";
 import * as fs from "fs/promises";
+import {
+  MAX_CHARS_PER_DOCUMENT,
+  MAX_TOTAL_DOCUMENT_CHARS,
+  MAX_CHARS_PER_SHEET,
+} from "../../util/config";
 
 interface FetchResponse {
   ok: boolean;
@@ -64,11 +69,6 @@ const DOCUMENT_MIME_TYPES: Record<string, string> = {
   "text/plain": "txt",
 };
 
-// Character limit per document (~2 pages)
-const MAX_CHARS_PER_DOC = 3000;
-// Total character limit for all documents combined
-const MAX_TOTAL_DOC_CHARS = 8000;
-
 /**
  * Parse a PDF file, extracting text from the first 2 pages
  */
@@ -76,7 +76,7 @@ async function parsePDF(buffer: Buffer): Promise<string> {
   const parser = new PDFParse({data: buffer});
   const result = await parser.getText({last: 2});
   await parser.destroy();
-  return result.text.slice(0, MAX_CHARS_PER_DOC);
+  return result.text.slice(0, parseInt(MAX_CHARS_PER_DOCUMENT.value()));
 }
 
 /**
@@ -84,7 +84,7 @@ async function parsePDF(buffer: Buffer): Promise<string> {
  */
 async function parseDOCX(buffer: Buffer): Promise<string> {
   const result = await mammoth.extractRawText({buffer});
-  return result.value.slice(0, MAX_CHARS_PER_DOC);
+  return result.value.slice(0, parseInt(MAX_CHARS_PER_DOCUMENT.value()));
 }
 
 /**
@@ -95,22 +95,22 @@ function parseExcel(buffer: Buffer): string {
   const sheets = workbook.SheetNames.slice(0, 2);
   return sheets.map((name) => {
     const csv = XLSX.utils.sheet_to_csv(workbook.Sheets[name]);
-    return `## Sheet: ${name}\n${csv.slice(0, 1500)}`;
-  }).join("\n\n").slice(0, MAX_CHARS_PER_DOC);
+    return `## Sheet: ${name}\n${csv.slice(0, parseInt(MAX_CHARS_PER_SHEET.value()))}`;
+  }).join("\n\n").slice(0, parseInt(MAX_CHARS_PER_DOCUMENT.value()));
 }
 
 /**
  * Parse a CSV file
  */
 function parseCSV(buffer: Buffer): string {
-  return buffer.toString("utf-8").slice(0, MAX_CHARS_PER_DOC);
+  return buffer.toString("utf-8").slice(0, parseInt(MAX_CHARS_PER_DOCUMENT.value()));
 }
 
 /**
  * Parse a plain text file
  */
 function parseTXT(buffer: Buffer): string {
-  return buffer.toString("utf-8").slice(0, MAX_CHARS_PER_DOC);
+  return buffer.toString("utf-8").slice(0, parseInt(MAX_CHARS_PER_DOCUMENT.value()));
 }
 
 /**
@@ -252,13 +252,14 @@ async function processAttachments(
   }
 
   // Process document attachments (PDF, DOCX, Excel, CSV, TXT)
+  const maxTotalChars = parseInt(MAX_TOTAL_DOCUMENT_CHARS.value());
   let totalDocChars = 0;
   for (const attachmentInfo of attachmentsList) {
     // Stop if we've reached the total character limit
-    if (totalDocChars >= MAX_TOTAL_DOC_CHARS) {
+    if (totalDocChars >= maxTotalChars) {
       logger.info("Reached total document character limit, skipping remaining documents", {
         totalChars: totalDocChars,
-        limit: MAX_TOTAL_DOC_CHARS,
+        limit: maxTotalChars,
       });
       break;
     }
@@ -281,7 +282,7 @@ async function processAttachments(
         let content = await parseDocument(buffer, docType);
 
         // Truncate if adding this would exceed total limit
-        const remainingChars = MAX_TOTAL_DOC_CHARS - totalDocChars;
+        const remainingChars = maxTotalChars - totalDocChars;
         if (content.length > remainingChars) {
           content = content.slice(0, remainingChars);
         }
