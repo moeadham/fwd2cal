@@ -17,3 +17,4 @@ checkBody: true
 1. Extract email address from matched pattern
 2. Verify user owns the email address
 3. Remove the email association
+4. Send confirmation email

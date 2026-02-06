@@ -16,7 +16,7 @@ checkBody: true
 - Pattern: "delete account" in subject or body
 
 ## Execution
-1. Delete user from Firestore
-2. Revoke OAuth tokens
+1. Delete user data from Firestore (EmailAddress, PendingEmailAddress, Users)
+2. Delete Firebase Auth user
 3. Remove from email segments
 4. Send confirmation email
