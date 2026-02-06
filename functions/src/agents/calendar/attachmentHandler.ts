@@ -75,7 +75,7 @@ const DOCUMENT_MIME_TYPES: Record<string, string> = {
  */
 async function parsePDF(buffer: Buffer): Promise<string> {
   const parser = new PDFParse({data: buffer});
-  const result = await parser.getText({last: 2});
+  const result = await parser.getText({first: 2});
   await parser.destroy();
   return result.text.slice(0, parseInt(MAX_CHARS_PER_DOCUMENT.value()));
 }
