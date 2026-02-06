@@ -14,6 +14,7 @@ import {
   MAX_CHARS_PER_DOCUMENT,
   MAX_TOTAL_DOCUMENT_CHARS,
   MAX_CHARS_PER_SHEET,
+  MAX_ATTACHMENT_BYTES,
 } from "../../util/config";
 
 interface FetchResponse {
@@ -268,6 +269,16 @@ async function processAttachments(
     const docType = DOCUMENT_MIME_TYPES[contentType];
 
     if (docType) {
+      const maxBytes = parseInt(MAX_ATTACHMENT_BYTES.value());
+      if (attachmentInfo.size && attachmentInfo.size > maxBytes) {
+        logger.warn("Skipping oversized document attachment", {
+          filename: attachmentInfo.filename,
+          size: attachmentInfo.size,
+          limit: maxBytes,
+        });
+        continue;
+      }
+
       try {
         const response = await fetchUrl(attachmentInfo.download_url);
         if (!response.ok) {

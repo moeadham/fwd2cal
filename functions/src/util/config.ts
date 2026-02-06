@@ -47,6 +47,10 @@ const MAX_CHARS_PER_SHEET = defineString("MAX_CHARS_PER_SHEET", {
   default: "1500",
 });
 
+const MAX_ATTACHMENT_BYTES = defineString("MAX_ATTACHMENT_BYTES", {
+  default: "10485760", // 10MB
+});
+
 /**
  * Extracts the domain from an email address.
  * @param email - The email address (e.g., "calendar@fwd2cal.com")
@@ -86,6 +90,7 @@ export {
   MAX_CHARS_PER_DOCUMENT,
   MAX_TOTAL_DOCUMENT_CHARS,
   MAX_CHARS_PER_SHEET,
+  MAX_ATTACHMENT_BYTES,
   getSupportEmail,
   getAdminEmail,
 };
