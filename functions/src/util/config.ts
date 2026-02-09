@@ -51,6 +51,10 @@ const MAX_ATTACHMENT_BYTES = defineString("MAX_ATTACHMENT_BYTES", {
   default: "10485760", // 10MB
 });
 
+const MAX_TOTAL_DOCUMENT_BYTES = defineString("MAX_TOTAL_DOCUMENT_BYTES", {
+  default: "52428800", // 50MB
+});
+
 /**
  * Extracts the domain from an email address.
  * @param email - The email address (e.g., "calendar@fwd2cal.com")
@@ -91,6 +95,7 @@ export {
   MAX_TOTAL_DOCUMENT_CHARS,
   MAX_CHARS_PER_SHEET,
   MAX_ATTACHMENT_BYTES,
+  MAX_TOTAL_DOCUMENT_BYTES,
   getSupportEmail,
   getAdminEmail,
 };

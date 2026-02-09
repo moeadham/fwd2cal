@@ -15,6 +15,7 @@ import {
   MAX_TOTAL_DOCUMENT_CHARS,
   MAX_CHARS_PER_SHEET,
   MAX_ATTACHMENT_BYTES,
+  MAX_TOTAL_DOCUMENT_BYTES,
 } from "../../util/config";
 
 interface FetchResponse {
@@ -92,7 +93,7 @@ async function parseDOCX(buffer: Buffer): Promise<string> {
  * Parse an Excel file, converting first 2 sheets to CSV text
  */
 function parseExcel(buffer: Buffer): string {
-  const workbook = XLSX.read(buffer);
+  const workbook = XLSX.read(buffer, {sheets: [0, 1]});
   const sheets = workbook.SheetNames.slice(0, 2);
   return sheets.map((name) => {
     const csv = XLSX.utils.sheet_to_csv(workbook.Sheets[name]);
@@ -254,13 +255,24 @@ async function processAttachments(
 
   // Process document attachments (PDF, DOCX, Excel, CSV, TXT)
   const maxTotalChars = parseInt(MAX_TOTAL_DOCUMENT_CHARS.value());
+  const maxTotalBytes = parseInt(MAX_TOTAL_DOCUMENT_BYTES.value());
   let totalDocChars = 0;
+  let totalDocBytes = 0;
   for (const attachmentInfo of attachmentsList) {
     // Stop if we've reached the total character limit
     if (totalDocChars >= maxTotalChars) {
       logger.info("Reached total document character limit, skipping remaining documents", {
         totalChars: totalDocChars,
         limit: maxTotalChars,
+      });
+      break;
+    }
+
+    // Stop if we've reached the total download size limit
+    if (totalDocBytes >= maxTotalBytes) {
+      logger.info("Reached total document byte limit, skipping remaining documents", {
+        totalBytes: totalDocBytes,
+        limit: maxTotalBytes,
       });
       break;
     }
@@ -279,6 +291,18 @@ async function processAttachments(
         continue;
       }
 
+      // Check if downloading this attachment would exceed total byte limit
+      const estimatedSize = attachmentInfo.size || 0;
+      if (estimatedSize && totalDocBytes + estimatedSize > maxTotalBytes) {
+        logger.warn("Skipping document - would exceed total byte limit", {
+          filename: attachmentInfo.filename,
+          size: estimatedSize,
+          currentTotal: totalDocBytes,
+          limit: maxTotalBytes,
+        });
+        continue;
+      }
+
       try {
         const response = await fetchUrl(attachmentInfo.download_url);
         if (!response.ok) {
@@ -290,6 +314,7 @@ async function processAttachments(
           continue;
         }
         const buffer = await response.buffer();
+        totalDocBytes += buffer.length;
         let content = await parseDocument(buffer, docType);
 
         // Truncate if adding this would exceed total limit
