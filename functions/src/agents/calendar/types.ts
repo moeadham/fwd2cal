@@ -383,6 +383,7 @@ export interface AttachmentInfo {
   content_type: string;
   size: number;
   download_url: string;
+  content_id?: string;
 }
 
 // Parsed document from attachment

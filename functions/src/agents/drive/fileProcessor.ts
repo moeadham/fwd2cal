@@ -80,6 +80,14 @@ async function listAttachments(
 
   const attachments: DriveAttachment[] = [];
   for (const info of attachmentsList) {
+    // Skip embedded images (e.g. email signatures, logos, tracking pixels)
+    if (info.content_id && info.content_type?.startsWith("image/")) {
+      logger.info("Skipping embedded image for drive", {
+        filename: info.filename,
+        content_id: info.content_id,
+      });
+      continue;
+    }
     if (info.size && info.size > maxUploadBytes) {
       logger.warn("Skipping oversized attachment for drive", {
         filename: info.filename,
