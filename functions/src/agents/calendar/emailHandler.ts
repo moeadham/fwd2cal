@@ -8,7 +8,8 @@ import {
 } from "../../util/firestoreHandler";
 import {getOauthClient, deleteAccount} from "../../auth/authHandler";
 import {processEmail, selectSkill} from "./llm";
-import {getSkills, getSkillsContext, fastMatchSkill} from "./skills";
+import {getSkills, getSkillsContext} from "./skills";
+import {fastMatchSkill} from "../../util/skills/matcher";
 import {
   addEvent,
   eventFromICS,

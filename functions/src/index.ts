@@ -14,9 +14,11 @@ import {inviteAdditionalAttendees} from "./agents/calendar/calendarHelper";
 import {
   ENVIRONMENT_NAME,
   MAIN_EMAIL_ADDRESS,
+  DRIVE_EMAIL_ADDRESS,
   RESEND_API_KEY,
   RESEND_SIGNING_SECRET,
 } from "./util/config";
+import {handleDriveEmail} from "./agents/drive/driveHandler";
 import {
   getMockResendClient,
   setMockData,
@@ -68,6 +70,11 @@ const dispatchConfig: TaskQueueOptions = {
   timeoutSeconds: 1800,
 };
 
+const driveDispatchConfig: TaskQueueOptions = {
+  ...dispatchConfig,
+  memory: "1GiB",
+};
+
 exports.v2signup = onRequest(
     onRequestConfig,
     async (_req, res) => {
@@ -100,7 +107,11 @@ exports.v2oauthCallback = onRequest(
         res.status(error.code || 500).send(error.message);
         return;
       }
-      res.redirect(302, "https://www.fwd2cal.com/thanks");
+      const isDriveSignup = req.query.state === "drive";
+      const redirectUrl = isDriveSignup ?
+        "https://www.fwd2cal.com/drive-thanks" :
+        "https://www.fwd2cal.com/thanks";
+      res.redirect(302, redirectUrl);
     },
 );
 
@@ -171,29 +182,40 @@ exports.v2resendInboundCallback = onRequest(
           return;
         }
 
-        // Filter emails not addressed to this environment
+        // Route emails based on recipient address
         const recipients = webhookData.data.to || [];
         const mainEmail = MAIN_EMAIL_ADDRESS.value();
-        const isForThisEnvironment = recipients.some(
+        const driveEmail = DRIVE_EMAIL_ADDRESS.value();
+
+        const isCalendarEmail = recipients.some(
             (addr: string) => addr.toLowerCase() === mainEmail.toLowerCase(),
         );
+        const isDriveEmail = recipients.some(
+            (addr: string) => addr.toLowerCase() === driveEmail.toLowerCase(),
+        );
 
-        if (!isForThisEnvironment) {
+        if (isCalendarEmail) {
+          await dispatchTask({
+            functionName: "v2resendInboundDispatch",
+            data: webhookData,
+          });
+          res.status(200).json({message: "thanks", webhookData});
+        } else if (isDriveEmail) {
+          await dispatchTask({
+            functionName: "v2driveInboundDispatch",
+            data: webhookData,
+          });
+          res.status(200).json({message: "thanks", webhookData});
+        } else {
           logger.log(
-              `Email not for this environment. Recipients: ${recipients.join(", ")}, Expected: ${mainEmail}`,
+              "Email not for this environment." +
+              ` Recipients: ${recipients.join(", ")},` +
+              ` Expected: ${mainEmail} or ${driveEmail}`,
           );
-          res.status(200).json({message: "Email not for this environment, skipping"});
-          return;
+          res.status(200).json({
+            message: "Email not for this environment, skipping",
+          });
         }
-        // Dispatch the task with data.
-        await dispatchTask({
-          functionName: "v2resendInboundDispatch",
-          data: webhookData,
-        });
-        res.status(200).json({
-          message: "thanks",
-          webhookData,
-        });
       } catch (error) {
         const err = error as Error;
         logger.error("Error processing Resend webhook", {error: err.message});
@@ -409,6 +431,149 @@ exports.v2inviteAdditionalAttendees = onRequest(
       }
     },
 );
+
+// ============================================================================
+// DRIVE AGENT FUNCTIONS
+// ============================================================================
+
+exports.v2driveSignup = onRequest(
+    onRequestConfig,
+    async (_req, res) => {
+      const redirectUriIndex = ENVIRONMENT_NAME.value() === "production" ? 2 : 1;
+      const scopes = [
+        "https://www.googleapis.com/auth/calendar",
+        "https://www.googleapis.com/auth/userinfo.email",
+        "https://www.googleapis.com/auth/userinfo.profile",
+        "openid",
+        "https://www.googleapis.com/auth/drive",
+      ].join("+");
+      const signupUrl = "https://accounts.google.com/o/oauth2/v2/auth" +
+        `?response_type=code` +
+        `&client_id=${CREDENTIALS.web.client_id}` +
+        `&redirect_uri=${CREDENTIALS.web.redirect_uris[redirectUriIndex]}` +
+        `&scope=${scopes}` +
+        `&access_type=offline` +
+        `&prompt=consent` +
+        `&state=drive`;
+      res.redirect(302, signupUrl);
+    },
+);
+
+exports.v2driveInboundDispatch = onTaskDispatched(
+    driveDispatchConfig,
+    async (req: TaskRequest): Promise<void> => {
+      await handleDriveInboundDispatch(req);
+    },
+);
+
+exports.v2testDriveInboundDispatch = onRequest(
+    onRequestConfig,
+    async (req, res) => {
+      try {
+        res.status(200).json(await handleDriveInboundDispatch(req.body));
+      } catch (err) {
+        const error = err as Error;
+        logger.error("Error in testDriveInboundDispatch", err);
+        res.status(500).json({error: error.message});
+      }
+    },
+);
+
+async function handleDriveInboundDispatch(
+    req: TaskRequest,
+): Promise<DispatchResult> {
+  const webhookData = req.data;
+
+  // eslint-disable-next-line camelcase
+  const {email_id, from, to, subject, attachments} = webhookData.data;
+  const isTestMode =
+    ENVIRONMENT_NAME.value() === "local" ||
+    ENVIRONMENT_NAME.value() === "test";
+  const resend: ResendClient = isTestMode ?
+    getMockResendClient() :
+    (new Resend(RESEND_API_KEY.value()) as unknown as ResendClient);
+
+  if (isTestMode && webhookData.mockData) {
+    const emailId = webhookData.data.email_id;
+    setMockData(
+        emailId,
+        webhookData.mockData.emailContent,
+        webhookData.mockData.attachmentsList || [],
+    );
+  }
+
+  logger.info("Processing Drive email", {
+    email_id, // eslint-disable-line camelcase
+    from,
+    to,
+    subject,
+    attachmentCount: attachments ? attachments.length : 0,
+  });
+
+  addContactToResend(from);
+
+  // Fetch full email content from Resend API
+  let emailData;
+  try {
+    const {data, error} = await resend.emails.receiving.get(email_id);
+    emailData = data;
+    if (error) {
+      logger.error("Drive: Failed to fetch email content", {
+        error: error.message,
+        email_id, // eslint-disable-line camelcase
+      });
+      return {message: "error", error: "Failed to fetch email content"};
+    }
+  } catch (emailError) {
+    const err = emailError as Error;
+    logger.error("Drive: Failed to fetch email content", {
+      error: err.message,
+      email_id, // eslint-disable-line camelcase
+    });
+    return {message: "error", error: "Failed to fetch email content"};
+  }
+
+  // Extract SPF and DKIM results
+  const authResults = emailData.headers?.["authentication-results"] || "";
+  const spfResult = authResults.includes("spf=pass") ? "pass" : "fail";
+  const dkimResult = authResults.includes("dkim=pass") ?
+    (authResults.match(/dkim=pass header\.i=(@[^\s;]+)/) || [
+      null,
+      "@unknown",
+    ])[1] + " : pass" :
+    "fail";
+
+  // Transform to internal email format
+  const transformedEmail: TransformedEmail = {
+    subject: emailData.subject,
+    text: emailData.text || "",
+    html: emailData.html || "",
+    from: emailData.from,
+    to: Array.isArray(emailData.to) ? emailData.to : [emailData.to],
+    headers: emailData.headers || {},
+    SPF: spfResult as "pass" | "fail",
+    dkim: `{${dkimResult}}`,
+  };
+
+  if (ENVIRONMENT_NAME.value() !== "production") {
+    logger.log("DRIVE WEBHOOK DATA", webhookData);
+    logger.log("DRIVE TRANSFORMED EMAIL", transformedEmail);
+  }
+
+  // Process with the drive handler
+  const outcome = await handleDriveEmail(transformedEmail, resend, email_id);
+
+  let sentEmail = null;
+  if (ENVIRONMENT_NAME.value() !== "production") {
+    sentEmail = getLastSentEmail(transformedEmail.from);
+  }
+
+  return {
+    message: "thanks",
+    data: outcome,
+    sentEmail: sentEmail,
+  };
+}
 
 exports.v2refreshTokensScheduled = onSchedule(
     {

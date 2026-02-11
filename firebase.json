@@ -88,6 +88,10 @@
       {
         "source": "/v2/resendInboundCallback",
         "function": "v2resendInboundCallback"
+      },
+      {
+        "source": "/v2/driveSignup",
+        "function": "v2driveSignup"
       }
     ]
   }

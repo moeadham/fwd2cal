@@ -10,7 +10,7 @@ let _skillsContext: string | null = null;
 export function getSkills(): Skill[] {
   if (_skills === null) {
     _skills = loadSkillsFromDir(path.join(__dirname));
-    logger.info(`Loaded ${_skills.length} calendar skills`);
+    logger.info(`Loaded ${_skills.length} drive skills`);
   }
   return _skills;
 }

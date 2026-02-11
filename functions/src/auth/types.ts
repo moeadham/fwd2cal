@@ -10,6 +10,7 @@ export interface UserDocument {
   refresh_token: string;
   expiry_date: number;
   token_scope: string;
+  driveEnabled?: boolean;
 }
 
 // Email address document from Firestore

@@ -6,9 +6,6 @@ import {
   ParsedDocument,
 } from "./types";
 import {ResendClient} from "../../util/types";
-import {PDFParse} from "pdf-parse";
-import mammoth from "mammoth";
-import * as XLSX from "xlsx";
 import * as fs from "fs/promises";
 import {
   MAX_CHARS_PER_DOCUMENT,
@@ -17,6 +14,7 @@ import {
   MAX_ATTACHMENT_BYTES,
   MAX_TOTAL_DOCUMENT_BYTES,
 } from "../../util/config";
+import {DOCUMENT_MIME_TYPES, parseDocument} from "../../util/documentParser";
 
 interface FetchResponse {
   ok: boolean;
@@ -59,81 +57,6 @@ async function fetchUrl(url: string): Promise<FetchResponse> {
     arrayBuffer: () => response.arrayBuffer(),
     status: response.status,
   };
-}
-
-// Supported document MIME types
-const DOCUMENT_MIME_TYPES: Record<string, string> = {
-  "application/pdf": "pdf",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
-  "application/vnd.ms-excel": "xls",
-  "text/csv": "csv",
-  "text/plain": "txt",
-};
-
-/**
- * Parse a PDF file, extracting text from the first 2 pages
- */
-async function parsePDF(buffer: Buffer): Promise<string> {
-  const parser = new PDFParse({data: buffer});
-  const result = await parser.getText({first: 2});
-  await parser.destroy();
-  return result.text.slice(0, parseInt(MAX_CHARS_PER_DOCUMENT.value()));
-}
-
-/**
- * Parse a DOCX file, extracting raw text
- */
-async function parseDOCX(buffer: Buffer): Promise<string> {
-  const result = await mammoth.extractRawText({buffer});
-  return result.value.slice(0, parseInt(MAX_CHARS_PER_DOCUMENT.value()));
-}
-
-/**
- * Parse an Excel file, converting first 2 sheets to CSV text
- */
-function parseExcel(buffer: Buffer): string {
-  const workbook = XLSX.read(buffer, {sheets: [0, 1]});
-  const sheets = workbook.SheetNames.slice(0, 2);
-  return sheets.map((name) => {
-    const csv = XLSX.utils.sheet_to_csv(workbook.Sheets[name]);
-    return `## Sheet: ${name}\n${csv.slice(0, parseInt(MAX_CHARS_PER_SHEET.value()))}`;
-  }).join("\n\n").slice(0, parseInt(MAX_CHARS_PER_DOCUMENT.value()));
-}
-
-/**
- * Parse a CSV file
- */
-function parseCSV(buffer: Buffer): string {
-  return buffer.toString("utf-8").slice(0, parseInt(MAX_CHARS_PER_DOCUMENT.value()));
-}
-
-/**
- * Parse a plain text file
- */
-function parseTXT(buffer: Buffer): string {
-  return buffer.toString("utf-8").slice(0, parseInt(MAX_CHARS_PER_DOCUMENT.value()));
-}
-
-/**
- * Route to the appropriate parser based on document type
- */
-async function parseDocument(buffer: Buffer, docType: string): Promise<string> {
-  switch (docType) {
-    case "pdf":
-      return parsePDF(buffer);
-    case "docx":
-      return parseDOCX(buffer);
-    case "xlsx":
-    case "xls":
-      return parseExcel(buffer);
-    case "csv":
-      return parseCSV(buffer);
-    case "txt":
-      return parseTXT(buffer);
-    default:
-      return "";
-  }
 }
 
 /**
@@ -315,7 +238,9 @@ async function processAttachments(
         }
         const buffer = await response.buffer();
         totalDocBytes += buffer.length;
-        let content = await parseDocument(buffer, docType);
+        const maxCharsPerDoc = parseInt(MAX_CHARS_PER_DOCUMENT.value());
+        const maxCharsSheet = parseInt(MAX_CHARS_PER_SHEET.value());
+        let content = await parseDocument(buffer, docType, maxCharsPerDoc, maxCharsSheet);
 
         // Truncate if adding this would exceed total limit
         const remainingChars = maxTotalChars - totalDocChars;

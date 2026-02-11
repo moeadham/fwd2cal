@@ -5,6 +5,7 @@ import {
   addUserEmailAddress,
   updateUserTokens,
   getPendingEmailAddressByCode,
+  setDriveEnabled,
 } from "../util/firestoreHandler";
 import {google, Auth} from "googleapis";
 import {CREDENTIALS, getRedirectUriIndex} from "./credentials";
@@ -163,6 +164,14 @@ async function signupCallbackHandler(
 
     await storeUser(tokens as OAuthTokens, userRecord);
     await addUserEmailAddress(userRecord, [{email: userEmail, default: true}]);
+
+    // If this is a Drive signup, enable Drive for the user
+    if (query.state === "drive") {
+      await setDriveEnabled(userRecord.uid, true);
+      sendEvent(userRecord.uid, "drive_sign_up");
+      logger.log("Drive enabled for user:", userRecord.uid);
+    }
+
     sendEvent(userRecord.uid, "sign_up");
     sendEvent(userEmail, "signupConversion");
 

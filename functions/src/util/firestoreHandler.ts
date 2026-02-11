@@ -176,6 +176,18 @@ async function getPendingEmailAddressByCode(
   } as PendingEmailAddressDocument;
 }
 
+async function setDriveEnabled(uid: string, enabled: boolean): Promise<void> {
+  try {
+    await getFirestore().collection("Users").doc(uid).update({
+      driveEnabled: enabled,
+    });
+  } catch (error) {
+    logger.error(`Database error in setDriveEnabled for uid ${uid}:`, error);
+    sendEvent(uid, "databaseError", {operation: "setDriveEnabled"});
+    throw error;
+  }
+}
+
 async function deleteUser(uid: string): Promise<void> {
   // Delete all email addresses associated to the uid.
   const batch = getFirestore().batch();
@@ -211,5 +223,6 @@ export {
   addPendingEmailAddress,
   getPendingEmailAddressByCode,
   removeEmailAddress,
+  setDriveEnabled,
   deleteUser,
 };

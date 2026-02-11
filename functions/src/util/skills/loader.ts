@@ -5,10 +5,10 @@ import {logger} from "firebase-functions/v2";
 import {Skill, SkillFrontmatter} from "./types";
 
 /**
- * Load all skills from SKILL.md files in the skills directory.
+ * Load all skills from SKILL.md files in the given directory.
+ * Each subdirectory containing a SKILL.md file is treated as a skill.
  */
-export function loadSkills(): Skill[] {
-  const skillsDir = path.join(__dirname);
+export function loadSkillsFromDir(skillsDir: string): Skill[] {
   const skills: Skill[] = [];
 
   try {
@@ -51,7 +51,7 @@ export function loadSkills(): Skill[] {
       }
     }
   } catch (err) {
-    logger.error("Error reading skills directory:", err);
+    logger.error(`Error reading skills directory ${skillsDir}:`, err);
   }
 
   return skills;

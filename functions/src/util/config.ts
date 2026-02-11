@@ -55,6 +55,14 @@ const MAX_TOTAL_DOCUMENT_BYTES = defineString("MAX_TOTAL_DOCUMENT_BYTES", {
   default: "52428800", // 50MB
 });
 
+const DRIVE_EMAIL_ADDRESS = defineString("DRIVE_EMAIL_ADDRESS", {
+  default: "drive@fwd2cal.com",
+});
+
+const MAX_DRIVE_UPLOAD_BYTES = defineString("MAX_DRIVE_UPLOAD_BYTES", {
+  default: "26214400", // 25MB
+});
+
 /**
  * Extracts the domain from an email address.
  * @param email - The email address (e.g., "calendar@fwd2cal.com")
@@ -96,6 +104,8 @@ export {
   MAX_CHARS_PER_SHEET,
   MAX_ATTACHMENT_BYTES,
   MAX_TOTAL_DOCUMENT_BYTES,
+  DRIVE_EMAIL_ADDRESS,
+  MAX_DRIVE_UPLOAD_BYTES,
   getSupportEmail,
   getAdminEmail,
 };

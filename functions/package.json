@@ -5,6 +5,7 @@
     "build": "tsc -p tsconfig.build.json && ./scripts/copy-skills.sh",
     "build:watch": "tsc -p tsconfig.build.json --watch",
     "test": "./test.sh",
+    "test:drive": "./test-drive.sh",
     "lint": "eslint 'src/**/*.ts'",
     "serve": "npm run build && firebase emulators:start",
     "shell": "npm run build && firebase functions:shell",
