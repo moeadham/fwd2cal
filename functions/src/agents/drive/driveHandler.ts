@@ -391,10 +391,18 @@ async function resolveTargetFolder(
   if (isNewPath(placement.folder_path)) {
     const parts = placement.folder_path.split("/").filter(Boolean);
     let currentParentId = rootFolderId;
+    let currentPath = "";
     for (const part of parts) {
-      currentParentId = await createFolder(
-          oauth2Client, part, currentParentId,
-      );
+      currentPath = currentPath ? `${currentPath}/${part}` : part;
+      const existing = folderTree.length > 0 ?
+        findFolderByPath(folderTree, currentPath) : null;
+      if (existing) {
+        currentParentId = existing.id;
+      } else {
+        currentParentId = await createFolder(
+            oauth2Client, part, currentParentId,
+        );
+      }
     }
     return {
       targetFolderId: currentParentId,
