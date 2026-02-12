@@ -384,6 +384,7 @@ export interface AttachmentInfo {
   size: number;
   download_url: string;
   content_id?: string;
+  content_disposition?: string;
 }
 
 // Parsed document from attachment
