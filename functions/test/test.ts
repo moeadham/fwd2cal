@@ -112,7 +112,7 @@ async function sendResendWebhook(testData: ResendTestData, attachmentsList: Atta
   const webhookData = callbackResponse.body.webhookData;
   const DISPATCH_URL = `http://127.0.0.1:5001`;
   const DISPATCH_REGION = `us-central1`;
-  const APP_ID = `fwd2cal`;
+  const APP_ID = process.env.GCLOUD_PROJECT || `fwd2cal-dev-2578e`;
   const response = await chaiWithHttp
     .request(`${DISPATCH_URL}/${APP_ID}/${DISPATCH_REGION}`)
     .post("/v2testResendInboundDispatch").set("Content-Type", "application/json")
