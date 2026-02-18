@@ -6,6 +6,7 @@ import handleAsync from "../../util/handleAsync";
 import {getOauthClient} from "../../auth/authHandler";
 import ical from "node-ical";
 import _ from "underscore";
+import {findIana} from "windows-iana";
 import {sendEvent} from "../../util/analytics";
 import {MAIN_EMAIL_ADDRESS, DEFAULT_EVENT_LENGTH_MINUTES} from "../../util/config";
 import {
@@ -25,6 +26,32 @@ import {RequestWithQuery} from "../../util/types";
 import {Response} from "express";
 
 const ONLY_INVITE_HOST = true;
+
+/**
+ * Resolve a timezone string to a valid IANA timezone.
+ * Handles Windows-format timezone names (e.g. "Eastern Standard Time").
+ * Returns undefined if the timezone cannot be resolved.
+ */
+function resolveTimezone(tzid: string | undefined): string | undefined {
+  if (!tzid) return undefined;
+
+  // Check if it's already a valid IANA timezone
+  try {
+    new Intl.DateTimeFormat(undefined, {timeZone: tzid});
+    return tzid;
+  } catch {
+    // Not a valid IANA timezone, try Windows mapping
+  }
+
+  const ianaResults = findIana(tzid);
+  if (ianaResults && ianaResults.length > 0) {
+    logger.info(`Resolved Windows timezone "${tzid}" to IANA "${ianaResults[0]}"`);
+    return ianaResults[0];
+  }
+
+  logger.warn(`Unknown timezone format: "${tzid}", falling back to calendar timezone`);
+  return undefined;
+}
 
 function generateTimeObject(
     event: Event,
@@ -253,7 +280,12 @@ async function eventFromICS(icsFile: ICSFile): Promise<ParsedICSEvent> {
   }
   let timezone: string | undefined;
   if (timezones.length !== 0) {
-    timezone = timezones[0].tzid;
+    timezone = resolveTimezone(timezones[0].tzid);
+  }
+  if (!timezone) {
+    throw new Error(
+        `Unable to resolve timezone from ICS file: "${timezones[0]?.tzid || "none"}"`,
+    );
   }
   const events = _.select(_.values(ics) as ICalEvent[], (x) => {
     return x.type === "VEVENT";
@@ -266,10 +298,9 @@ async function eventFromICS(icsFile: ICSFile): Promise<ParsedICSEvent> {
     throw new Error("Event not found");
   }
 
-  const tz = timezone || "UTC";
-  const start = moment(event.start).tz(tz).format("HH:mm");
-  const end = moment(event.end).tz(tz).format("HH:mm");
-  const date = moment(event.start).tz(tz).format("DD MMMM YYYY");
+  const start = moment(event.start).tz(timezone).format("HH:mm");
+  const end = moment(event.end).tz(timezone).format("HH:mm");
+  const date = moment(event.start).tz(timezone).format("DD MMMM YYYY");
 
   let summary: string;
   if (event.summary && typeof event.summary === "object" && "val" in event.summary) {
@@ -294,11 +325,11 @@ async function eventFromICS(icsFile: ICSFile): Promise<ParsedICSEvent> {
 
   const attendees: string[] = [];
   if (event.organizer?.val) {
-    attendees.push(event.organizer.val.replace("MAILTO:", ""));
+    attendees.push(event.organizer.val.replace(/^mailto:/i, ""));
   }
   if (event.attendee && event.attendee.length > 0 && event.attendee[0].val) {
     attendees.push(
-        ...event.attendee.map((attendee) => attendee.val.replace("MAILTO:", "")),
+        ...event.attendee.map((attendee) => attendee.val.replace(/^mailto:/i, "")),
     );
   }
 
