@@ -728,10 +728,29 @@ async function addEventsAndSendResponse(
     }
   }
 
-  // If all events failed, send oauth failed response
+  // If all events failed, send appropriate error response
   if (successfulEvents.length === 0) {
-    sendEvent(uid, "calendarError", {reason: "oauth_failed"});
-    await sendEmailResponse(sender, email, EMAIL_RESPONSES.oauthFailed, true);
+    const isAuthError = failedEvents.some(
+        (f) => f.error.includes("invalid_grant") ||
+          f.error.includes("Token has been expired") ||
+          f.error.includes("No refresh token"),
+    );
+    if (isAuthError) {
+      sendEvent(uid, "calendarError", {reason: "oauth_failed"});
+      await sendEmailResponse(sender, email, EMAIL_RESPONSES.oauthFailed, true);
+    } else {
+      sendEvent(uid, "calendarError", {reason: "event_creation_failed"});
+      const errorDetails = failedEvents
+          .map((f) => `${f.event.summary}: ${f.error}`).join("; ");
+      const response: EmailResponseTemplate = {
+        ...EMAIL_RESPONSES.aiParseError,
+        replace: {
+          PARSE_ERROR_DESCRIPTION:
+            `Failed to create event(s): ${errorDetails}`,
+        },
+      };
+      await sendEmailResponse(sender, email, response, true);
+    }
     return;
   }
 
