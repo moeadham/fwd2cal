@@ -1,29 +1,22 @@
 import {logger} from "firebase-functions/v2";
 import {onTaskDispatched, TaskQueueOptions} from "firebase-functions/v2/tasks";
 import {onRequest, HttpsOptions} from "firebase-functions/v2/https";
-import {Resend} from "resend";
 
 import {handleDriveEmail} from "./driveHandler";
 import {signupCallbackHandler} from "../../auth/authHandler";
 import {getAgentCredentials, getRedirectUriIndex} from "../../auth/credentials";
+import {ENVIRONMENT_NAME} from "../../util/config";
 import {
-  ENVIRONMENT_NAME,
-  RESEND_API_KEY,
-} from "../../util/config";
-import {
-  TransformedEmail,
-  ResendClient,
   TaskRequest,
   DispatchResult,
 } from "../../util/types";
-import {
-  getMockResendClient,
-  setMockData,
-  getLastSentEmail,
-} from "../../util/resendMock";
-import {addContactToResend} from "../../util/resend";
+import {getLastSentEmail} from "../../util/resendMock";
 import {setDriveEnabled} from "../../util/firestoreHandler";
 import {sendEvent} from "../../util/analytics";
+import {
+  fetchAndTransformEmail,
+  EmailFetchError,
+} from "../../resend/emailFetcher";
 
 // Global configuration for onRequest functions
 const onRequestConfig: HttpsOptions = {
@@ -117,76 +110,18 @@ async function handleDriveInboundDispatch(
 ): Promise<DispatchResult> {
   const webhookData = req.data;
 
-  // eslint-disable-next-line camelcase
-  const {email_id, from, to, subject, attachments} = webhookData.data;
-  const isTestMode =
-    ENVIRONMENT_NAME.value() === "local" ||
-    ENVIRONMENT_NAME.value() === "test";
-  const resend: ResendClient = isTestMode ?
-    getMockResendClient() :
-    (new Resend(RESEND_API_KEY.value()) as unknown as ResendClient);
-
-  if (isTestMode && webhookData.mockData) {
-    const emailId = webhookData.data.email_id;
-    setMockData(
-        emailId,
-        webhookData.mockData.emailContent,
-        webhookData.mockData.attachmentsList || [],
-    );
-  }
-
-  logger.info("Processing Drive email", {
-    email_id, // eslint-disable-line camelcase
-    from,
-    to,
-    subject,
-    attachmentCount: attachments ? attachments.length : 0,
-  });
-
-  addContactToResend(from);
-
-  // Fetch full email content from Resend API
-  let emailData;
+  let transformedEmail;
+  let resend;
   try {
-    const {data, error} = await resend.emails.receiving.get(email_id);
-    emailData = data;
-    if (error) {
-      logger.error("Drive: Failed to fetch email content", {
-        error: error.message,
-        email_id, // eslint-disable-line camelcase
-      });
-      return {message: "error", error: "Failed to fetch email content"};
+    const result = await fetchAndTransformEmail(webhookData);
+    transformedEmail = result.transformedEmail;
+    resend = result.resend;
+  } catch (error) {
+    if (error instanceof EmailFetchError) {
+      return {message: "error", error: error.message};
     }
-  } catch (emailError) {
-    const err = emailError as Error;
-    logger.error("Drive: Failed to fetch email content", {
-      error: err.message,
-      email_id, // eslint-disable-line camelcase
-    });
-    return {message: "error", error: "Failed to fetch email content"};
+    throw error;
   }
-
-  // Extract SPF and DKIM results
-  const authResults = emailData.headers?.["authentication-results"] || "";
-  const spfResult = authResults.includes("spf=pass") ? "pass" : "fail";
-  const dkimResult = authResults.includes("dkim=pass") ?
-    (authResults.match(/dkim=pass header\.i=(@[^\s;]+)/) || [
-      null,
-      "@unknown",
-    ])[1] + " : pass" :
-    "fail";
-
-  // Transform to internal email format
-  const transformedEmail: TransformedEmail = {
-    subject: emailData.subject,
-    text: emailData.text || "",
-    html: emailData.html || "",
-    from: emailData.from,
-    to: Array.isArray(emailData.to) ? emailData.to : [emailData.to],
-    headers: emailData.headers || {},
-    SPF: spfResult as "pass" | "fail",
-    dkim: `{${dkimResult}}`,
-  };
 
   if (ENVIRONMENT_NAME.value() !== "production") {
     logger.log("DRIVE WEBHOOK DATA", webhookData);
@@ -194,6 +129,8 @@ async function handleDriveInboundDispatch(
   }
 
   // Process with the drive handler
+  // eslint-disable-next-line camelcase
+  const {email_id} = webhookData.data;
   const outcome = await handleDriveEmail(transformedEmail, resend, email_id);
 
   let sentEmail = null;
