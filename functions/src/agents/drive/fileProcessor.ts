@@ -4,7 +4,7 @@ import {Readable} from "stream";
 import {ReadableStream as WebReadableStream} from "stream/web";
 import {DriveAttachment} from "./types";
 import {ResendClient} from "../../util/types";
-import {AttachmentInfo} from "../calendar/types";
+import {AttachmentInfo} from "../../util/types";
 import {DOCUMENT_MIME_TYPES, parseDocument} from "../../util/documentParser";
 import {
   MAX_CHARS_PER_DOCUMENT,

@@ -1,5 +1,63 @@
 import {Request} from "express";
-import {AttachmentInfo, TransformedEmail} from "../agents/calendar/types";
+
+// ============================================================================
+// SHARED EMAIL TYPES
+// ============================================================================
+
+// Transformed email from Resend webhook
+export interface TransformedEmail {
+  subject: string;
+  text: string;
+  html: string;
+  from: string;
+  to: string[];
+  headers: Record<string, string>;
+  SPF: "pass" | "fail";
+  dkim: string;
+}
+
+// Attachment info from Resend
+export interface AttachmentInfo {
+  id: string;
+  filename: string;
+  content_type: string;
+  size: number;
+  download_url: string;
+  content_id?: string;
+  content_disposition?: string;
+}
+
+// Email thread headers for reply
+export interface EmailThreadHeaders {
+  "In-Reply-To"?: string;
+  References?: string;
+  [key: string]: string | undefined;
+}
+
+// ============================================================================
+// SHARED LLM TYPES
+// ============================================================================
+
+// OpenAI message content types
+export interface TextContent {
+  type: "text";
+  text: string;
+}
+
+export interface ImageURLContent {
+  type: "image_url";
+  image_url: {
+    url: string;
+  };
+}
+
+export type MessageContent = string | Array<TextContent | ImageURLContent>;
+
+// OpenAI chat message
+export interface ChatMessage {
+  role: "system" | "user" | "assistant";
+  content: MessageContent;
+}
 
 // ============================================================================
 // COMMON TYPES

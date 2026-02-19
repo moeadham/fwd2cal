@@ -6,7 +6,7 @@ import {
   MockSentEmail,
   TestData,
 } from "./types";
-import {AttachmentInfo, TransformedEmail} from "../agents/calendar/types";
+import {AttachmentInfo, TransformedEmail} from "./types";
 
 /**
  * Mock Resend client for testing

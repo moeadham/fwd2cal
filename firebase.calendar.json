@@ -1,0 +1,50 @@
+{
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "calendar",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log",
+        "src",
+        "lib/agents/drive"
+      ],
+      "predeploy": [
+        "npm --prefix \"$RESOURCE_DIR\" run lint",
+        "npm --prefix \"$RESOURCE_DIR\" run build"
+      ]
+    }
+  ],
+  "hosting": {
+    "public": "public",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "rewrites": [
+      {
+        "source": "/v2/signup",
+        "function": "v2signup"
+      },
+      {
+        "source": "/v2/oauthCallback",
+        "function": "v2oauthCallback"
+      },
+      {
+        "source": "/v2/resendInboundCallback",
+        "function": "v2resendInboundCallback"
+      },
+      {
+        "source": "/v2/verifyAdditionalEmail",
+        "function": "v2verifyAdditionalEmail"
+      },
+      {
+        "source": "/v2/inviteAdditionalAttendees",
+        "function": "v2inviteAdditionalAttendees"
+      }
+    ]
+  }
+}

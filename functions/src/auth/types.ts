@@ -1,4 +1,10 @@
 // ============================================================================
+// AGENT TYPES
+// ============================================================================
+
+export type AgentName = "calendar" | "drive";
+
+// ============================================================================
 // USER AND OAUTH TYPES
 // ============================================================================
 
@@ -61,6 +67,7 @@ export interface UserWithExpiringTokens {
   access_token: string;
   refresh_token: string;
   expiry_date: number;
+  driveEnabled?: boolean;
 }
 
 // Email item for adding to user

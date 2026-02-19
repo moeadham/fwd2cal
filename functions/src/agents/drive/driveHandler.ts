@@ -13,8 +13,7 @@ import {
   getEmailThreadHeaders,
   threadEmailHtml,
 } from "../../util/emailUtils";
-import {TransformedEmail} from "../calendar/types";
-import {ResendClient} from "../../util/types";
+import {TransformedEmail, ResendClient} from "../../util/types";
 import {DriveProcessingResult, ProcessedDriveFile, DriveFolder} from "./types";
 import {driveMailTemplates} from "./mailTemplates";
 import {listAttachments, downloadAttachmentBuffer, extractContentSummary, streamFromUrl} from "./fileProcessor";
@@ -110,7 +109,7 @@ async function handleDriveEmail(
   // Get OAuth client
   let oauth2Client;
   try {
-    oauth2Client = await getOauthClient(uid);
+    oauth2Client = await getOauthClient(uid, "drive");
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     logger.error("Drive: OAuth failed", {uid, error: errMsg});

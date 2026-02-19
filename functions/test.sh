@@ -35,7 +35,7 @@ if [ -f .env.local ]; then
 fi
 
 echo "Starting firebase emulator"
-firebase emulators:start > /dev/stdout &
+firebase emulators:start --project fwd2cal-dev-2578e > /dev/stdout &
 LOGS_PID=$!
 sleep 30
 

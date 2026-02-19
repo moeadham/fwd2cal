@@ -14,6 +14,8 @@ ui-debug.log
 functions/firestore-debug.log
 functions/ui-debug.log
 functions/auth/*
+functions/src/agents/*/auth/*
+!functions/src/agents/*/auth/.gitkeep
 functions/.runtimeconfig.json
 functions/firebase-debug.log
 

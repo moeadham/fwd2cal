@@ -431,7 +431,7 @@ async function inviteAdditionalAttendees(
   }
 
   // Can we authenticate with their calendar?
-  const [oauthErr, oauth2Client] = await handleAsync(() => getOauthClient(uid));
+  const [oauthErr, oauth2Client] = await handleAsync(() => getOauthClient(uid, "calendar"));
   if (oauthErr || !oauth2Client) {
     logger.warn("Error getting oauth2Client", oauthErr);
     return res.redirect(302, "https://www.fwd2cal.com/404");

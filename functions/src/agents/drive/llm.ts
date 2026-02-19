@@ -2,7 +2,7 @@ import {logger} from "firebase-functions/v2";
 import {defaultCompletion, DEFAULT_TEMP} from "../../util/openai";
 import {prompts} from "./prompts";
 import {BatchFilePlacementSchema, BatchFilePlacement, FilePlacementItem} from "./types";
-import {ChatMessage} from "../calendar/types";
+import {ChatMessage} from "../../util/types";
 
 interface FileInfo {
   fileName: string;

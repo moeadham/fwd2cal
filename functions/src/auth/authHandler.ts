@@ -5,10 +5,9 @@ import {
   addUserEmailAddress,
   updateUserTokens,
   getPendingEmailAddressByCode,
-  setDriveEnabled,
 } from "../util/firestoreHandler";
 import {google, Auth} from "googleapis";
-import {CREDENTIALS, getRedirectUriIndex} from "./credentials";
+import {getAgentCredentials, getRedirectUriIndex} from "./credentials";
 import {
   ENVIRONMENT_NAME,
   RESEND_REGISTERED_USERS_SEGMENT_ID,
@@ -18,12 +17,15 @@ import {logger} from "firebase-functions/v2";
 import {isUUID} from "validator";
 import {sendEvent} from "../util/analytics";
 import {addContactToResend, addContactToSegment} from "../util/resend";
-import {OAuthTokens, FirebaseUserRecord} from "./types";
+import {OAuthTokens, FirebaseUserRecord, AgentName} from "./types";
 import {RequestWithQuery} from "../util/types";
 import {Response} from "express";
 
-async function refreshOAuthTokens(uid: string): Promise<void> {
-  const oauth2Client = await getOauthClient(uid);
+async function refreshOAuthTokens(
+    uid: string,
+    agentName: AgentName,
+): Promise<void> {
+  const oauth2Client = await getOauthClient(uid, agentName);
   let tokens: OAuthTokens;
   try {
     tokens = await refreshAccessToken(oauth2Client);
@@ -50,13 +52,17 @@ async function refreshAccessToken(
   });
 }
 
-async function getOauthClient(uid: string): Promise<Auth.OAuth2Client> {
+async function getOauthClient(
+    uid: string,
+    agentName: AgentName,
+): Promise<Auth.OAuth2Client> {
+  const credentials = getAgentCredentials(agentName);
   const userData = await getUserFromUID(uid);
   const redirectUriIndex = getRedirectUriIndex(ENVIRONMENT_NAME.value());
   const oauth2Client = new google.auth.OAuth2(
-      CREDENTIALS.web.client_id,
-      CREDENTIALS.web.client_secret,
-      CREDENTIALS.web.redirect_uris[redirectUriIndex],
+      credentials.web.client_id,
+      credentials.web.client_secret,
+      credentials.web.redirect_uris[redirectUriIndex],
   );
   oauth2Client.setCredentials({
     access_token: userData.access_token,
@@ -74,7 +80,8 @@ async function oauthCronJob(): Promise<void> {
     );
     for (const user of users) {
       try {
-        await refreshOAuthTokens(user.id);
+        const agentName: AgentName = user.driveEnabled ? "drive" : "calendar";
+        await refreshOAuthTokens(user.id, agentName);
       } catch (error) {
         logger.warn(`Failed to refresh tokens for user ${user.id}:`, error);
         sendEvent(user.id, "tokenRefreshFailed");
@@ -98,13 +105,15 @@ async function deleteAccount(uid: string): Promise<void> {
 
 async function signupCallbackHandler(
     query: Record<string, string>,
+    agentName: AgentName,
 ): Promise<FirebaseUserRecord> {
+  const credentials = getAgentCredentials(agentName);
   logger.log("oauthCallback", query);
   const redirectUriIndex = getRedirectUriIndex(ENVIRONMENT_NAME.value());
   const oauth2Client = new google.auth.OAuth2(
-      CREDENTIALS.web.client_id,
-      CREDENTIALS.web.client_secret,
-      CREDENTIALS.web.redirect_uris[redirectUriIndex],
+      credentials.web.client_id,
+      credentials.web.client_secret,
+      credentials.web.redirect_uris[redirectUriIndex],
   );
   try {
     const {tokens} = await oauth2Client.getToken({code: query.code});
@@ -164,13 +173,6 @@ async function signupCallbackHandler(
 
     await storeUser(tokens as OAuthTokens, userRecord);
     await addUserEmailAddress(userRecord, [{email: userEmail, default: true}]);
-
-    // If this is a Drive signup, enable Drive for the user
-    if (query.state === "drive") {
-      await setDriveEnabled(userRecord.uid, true);
-      sendEvent(userRecord.uid, "drive_sign_up");
-      logger.log("Drive enabled for user:", userRecord.uid);
-    }
 
     sendEvent(userRecord.uid, "sign_up");
     sendEvent(userEmail, "signupConversion");

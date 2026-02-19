@@ -2,7 +2,7 @@
   "name": "fwd2cal",
   "description": "fwd an email and its added to your calendar",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && ./scripts/copy-skills.sh",
+    "build": "tsc -p tsconfig.build.json && ./scripts/copy-assets.sh",
     "build:watch": "tsc -p tsconfig.build.json --watch",
     "test": "./test.sh",
     "test:drive": "./test-drive.sh",
@@ -11,6 +11,8 @@
     "shell": "npm run build && firebase functions:shell",
     "start": "npm run shell",
     "deploy": "npm run build && firebase deploy",
+    "deploy:calendar": "./scripts/deploy-agent.sh calendar",
+    "deploy:drive": "./scripts/deploy-agent.sh drive",
     "logs": "firebase functions:log",
     "clean": "rm -rf lib"
   },

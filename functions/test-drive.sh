@@ -29,8 +29,7 @@ if [ -f .env.local ]; then
 fi
 
 echo "Starting firebase emulator (using dev project)"
-firebase use dev
-firebase emulators:start > /dev/stdout &
+firebase emulators:start --project fwd2cal-dev-2578e > /dev/stdout &
 LOGS_PID=$!
 sleep 30
 
@@ -39,9 +38,6 @@ echo "running drive tests"
 
 # Stop the logs stream
 kill $LOGS_PID
-
-# Restore default project
-firebase use default
 
 # Exit with error if tests failed
 if [ "$TEST_FAILED" = true ]; then

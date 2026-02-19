@@ -2,7 +2,7 @@ import OpenAI from "openai";
 import {zodResponseFormat} from "openai/helpers/zod";
 import {logger} from "firebase-functions/v2";
 import tokenHelper from "./tokenHelper";
-import {ChatMessage} from "../agents/calendar/types";
+import {ChatMessage} from "./types";
 import {OPENROUTER_API_KEY} from "./config";
 import {sendEvent} from "./analytics";
 import {z} from "zod";

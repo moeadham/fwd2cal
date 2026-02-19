@@ -1,5 +1,16 @@
 import {z} from "zod";
 
+// Re-export shared types so existing internal imports continue to work
+export {
+  TransformedEmail,
+  AttachmentInfo,
+  EmailThreadHeaders,
+  ChatMessage,
+  TextContent,
+  ImageURLContent,
+  MessageContent,
+} from "../../util/types";
+
 // ============================================================================
 // ZOD SCHEMAS
 // ============================================================================
@@ -345,18 +356,6 @@ export interface ICalTimezone {
 // EMAIL TYPES
 // ============================================================================
 
-// Transformed email from Resend webhook
-export interface TransformedEmail {
-  subject: string;
-  text: string;
-  html: string;
-  from: string;
-  to: string[];
-  headers: Record<string, string>;
-  SPF: "pass" | "fail";
-  dkim: string;
-}
-
 // Email headers
 export interface EmailHeaders {
   date?: string;
@@ -374,17 +373,6 @@ export interface ICSFile {
   filename: { filename: string };
   encoding: string;
   mimetype: string;
-}
-
-// Attachment info from Resend
-export interface AttachmentInfo {
-  id: string;
-  filename: string;
-  content_type: string;
-  size: number;
-  download_url: string;
-  content_id?: string;
-  content_disposition?: string;
 }
 
 // Parsed document from attachment
@@ -439,13 +427,6 @@ export interface HandleEmailResult {
   verificationCode?: string;
 }
 
-// Email thread headers for reply
-export interface EmailThreadHeaders {
-  "In-Reply-To"?: string;
-  References?: string;
-  [key: string]: string | undefined;
-}
-
 // Maps email response types to templates
 export interface EmailResponses {
   [key: string]: EmailResponseTemplate;
@@ -466,27 +447,6 @@ export interface HeadersForProcessing {
 // ============================================================================
 // OPENAI/LLM TYPES
 // ============================================================================
-
-// OpenAI message content types
-export interface TextContent {
-  type: "text";
-  text: string;
-}
-
-export interface ImageURLContent {
-  type: "image_url";
-  image_url: {
-    url: string;
-  };
-}
-
-export type MessageContent = string | Array<TextContent | ImageURLContent>;
-
-// OpenAI chat message
-export interface ChatMessage {
-  role: "system" | "user" | "assistant";
-  content: MessageContent;
-}
 
 // Prompt configuration
 export interface PromptConfig {

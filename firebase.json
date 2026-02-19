@@ -92,6 +92,10 @@
       {
         "source": "/v2/driveSignup",
         "function": "v2driveSignup"
+      },
+      {
+        "source": "/v2/driveOauthCallback",
+        "function": "v2driveOauthCallback"
       }
     ]
   }
