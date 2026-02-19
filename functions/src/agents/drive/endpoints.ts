@@ -51,11 +51,11 @@ export const v2driveSignup = onRequest(
       const credentials = getAgentCredentials("drive");
       const redirectUriIndex = getRedirectUriIndex(ENVIRONMENT_NAME.value());
       const scopes = [
-        "https://www.googleapis.com/auth/calendar",
         "https://www.googleapis.com/auth/userinfo.email",
         "https://www.googleapis.com/auth/userinfo.profile",
         "openid",
-        "https://www.googleapis.com/auth/drive",
+        "https://www.googleapis.com/auth/drive.metadata",
+        "https://www.googleapis.com/auth/drive.file",
       ].join("+");
       const signupUrl = "https://accounts.google.com/o/oauth2/v2/auth" +
         `?response_type=code` +
