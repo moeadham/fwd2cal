@@ -195,6 +195,156 @@ async function getRootFolderId(
   return response.data.id || "root";
 }
 
+/**
+ * Move a file to a new folder in Google Drive
+ */
+async function moveFile(
+    oauth2Client: Auth.OAuth2Client,
+    fileId: string,
+    newParentId: string,
+    oldParentId: string,
+): Promise<{id: string; webViewLink: string}> {
+  const drive = getDriveClient(oauth2Client);
+  const response = await drive.files.update({
+    fileId,
+    addParents: newParentId,
+    removeParents: oldParentId,
+    fields: "id, webViewLink, parents",
+  });
+
+  if (!response.data.id) {
+    throw new Error("Drive move failed: no file ID returned");
+  }
+
+  logger.info("Drive: File moved", {fileId, newParentId, oldParentId});
+  return {
+    id: response.data.id,
+    webViewLink: response.data.webViewLink || "",
+  };
+}
+
+/**
+ * Place a hidden marker file `.sorted.by.fwd2drive.com` in a folder.
+ * Skips if marker already exists in that folder.
+ */
+async function placeMarkerFile(
+    oauth2Client: Auth.OAuth2Client,
+    folderId: string,
+): Promise<void> {
+  const drive = getDriveClient(oauth2Client);
+  const existing = await drive.files.list({
+    q: `name = '.sorted.by.fwd2drive.com' and '${folderId}' in parents and trashed = false`,
+    fields: "files(id)",
+    pageSize: 1,
+  });
+  if (existing.data.files?.length) return;
+
+  await drive.files.create({
+    requestBody: {
+      name: ".sorted.by.fwd2drive.com",
+      parents: [folderId],
+      mimeType: "text/plain",
+    },
+    media: {mimeType: "text/plain", body: ""},
+  });
+  logger.info("Drive: Marker file placed", {folderId});
+}
+
+/**
+ * Find all agent-managed folders by searching for the marker file.
+ * Returns folder names (e.g. ["001-Invoices", "002-Receipts"]).
+ */
+async function findAgentManagedFolders(
+    oauth2Client: Auth.OAuth2Client,
+): Promise<Array<{id: string; name: string}>> {
+  const drive = getDriveClient(oauth2Client);
+  const results: Array<{id: string; name: string}> = [];
+
+  let pageToken: string | undefined;
+  do {
+    const response = await drive.files.list({
+      q: "name = '.sorted.by.fwd2drive.com' and trashed = false",
+      fields: "nextPageToken, files(id, parents)",
+      pageSize: 100,
+      pageToken,
+    });
+
+    const markerFiles = response.data.files || [];
+    for (const marker of markerFiles) {
+      const parentId = marker.parents?.[0];
+      if (!parentId) continue;
+
+      // Fetch the parent folder name
+      try {
+        const folder = await drive.files.get({
+          fileId: parentId,
+          fields: "id, name",
+        });
+        if (folder.data.id && folder.data.name) {
+          results.push({id: folder.data.id, name: folder.data.name});
+        }
+      } catch (_err) {
+        logger.warn("Drive: Could not fetch marker parent folder", {parentId});
+      }
+    }
+    pageToken = response.data.nextPageToken || undefined;
+  } while (pageToken);
+
+  logger.info("Drive: Found agent-managed folders", {
+    count: results.length,
+    folders: results.map((f) => f.name),
+  });
+  return results;
+}
+
+/**
+ * Rename a folder in Google Drive.
+ */
+async function renameFolder(
+    oauth2Client: Auth.OAuth2Client,
+    folderId: string,
+    newName: string,
+): Promise<void> {
+  const drive = getDriveClient(oauth2Client);
+  await drive.files.update({
+    fileId: folderId,
+    requestBody: {name: newName},
+  });
+  logger.info("Drive: Folder renamed", {folderId, newName});
+}
+
+/**
+ * Count non-marker files in a folder.
+ */
+async function getFolderFileCount(
+    oauth2Client: Auth.OAuth2Client,
+    folderId: string,
+): Promise<number> {
+  const drive = getDriveClient(oauth2Client);
+  const response = await drive.files.list({
+    q: `'${folderId}' in parents and trashed = false` +
+      ` and name != '.sorted.by.fwd2drive.com'`,
+    fields: "files(id)",
+    pageSize: 100,
+  });
+  return response.data.files?.length || 0;
+}
+
+/**
+ * Get a folder's parent ID.
+ */
+async function getDriveFolderParent(
+    oauth2Client: Auth.OAuth2Client,
+    folderId: string,
+): Promise<{parentId: string | null}> {
+  const drive = getDriveClient(oauth2Client);
+  const response = await drive.files.get({
+    fileId: folderId,
+    fields: "parents",
+  });
+  return {parentId: response.data.parents?.[0] || null};
+}
+
 export {
   getDriveClient,
   getDriveFolderTree,
@@ -203,4 +353,10 @@ export {
   createFolder,
   findFolderInTree,
   getRootFolderId,
+  moveFile,
+  placeMarkerFile,
+  findAgentManagedFolders,
+  renameFolder,
+  getFolderFileCount,
+  getDriveFolderParent,
 };

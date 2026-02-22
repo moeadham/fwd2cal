@@ -12,7 +12,8 @@ export const FilePlacementItemSchema = z.object({
       "The human-readable path of the chosen folder (e.g., 'Documents/Work/Projects')",
   ),
   suggested_name: z.string().describe(
-      "A unique, descriptive filename without extension (e.g., '2024-03-15 Amazon Invoice Laptop')",
+      "A unique, descriptive filename without extension, ALWAYS prefixed with " +
+      "YYYY.MM.DD date (e.g., '2024.03.15 Amazon Invoice Laptop')",
   ),
   reason: z.string().describe("Brief reasoning for why this folder and name were chosen"),
 });
@@ -29,6 +30,46 @@ export type BatchFilePlacement = z.infer<typeof BatchFilePlacementSchema>;
 // Keep single-file alias for backward compatibility
 export const FilePlacementSchema = FilePlacementItemSchema;
 export type FilePlacement = FilePlacementItem;
+
+// File proposal result (Phase 1 — before Drive access)
+export const FileProposalItemSchema = z.object({
+  file_index: z.number().describe("The 0-based index of the file from the input list"),
+  suggested_name: z.string().describe(
+      "A descriptive filename with extension, ALWAYS prefixed with " +
+      "YYYY.MM.DD date (e.g., '2024.03.15 Amazon Invoice Laptop.pdf')",
+  ),
+  reason: z.string().describe("Brief reasoning for the suggested name"),
+});
+
+export const FileProposalSchema = z.object({
+  folder_name: z.string().describe(
+      "Folder name with numeric prefix (e.g., '001-Invoices'). Reuse an existing agent folder if the category matches.",
+  ),
+  is_existing_folder: z.boolean().describe(
+      "True if reusing a previously created agent folder, false if suggesting a new one",
+  ),
+  proposals: z.array(FileProposalItemSchema).describe("Naming proposal for each file"),
+});
+
+export type FileProposal = z.infer<typeof FileProposalSchema>;
+
+// Move instruction result (reply handler)
+export const MoveInstructionItemSchema = z.object({
+  file_index: z.number().describe("The 0-based index of the file to move"),
+  folder_id: z.string().describe(
+      "The Google Drive folder ID to move to, or 'root' for a new folder",
+  ),
+  folder_path: z.string().describe(
+      "The folder path to move to (new folder name if folder_id is 'root')",
+  ),
+  reason: z.string().describe("Brief reasoning for the move"),
+});
+
+export const MoveInstructionSchema = z.object({
+  moves: z.array(MoveInstructionItemSchema).describe("Move instruction for each file"),
+});
+
+export type MoveInstruction = z.infer<typeof MoveInstructionSchema>;
 
 // ============================================================================
 // DRIVE TYPES
@@ -83,6 +124,8 @@ export interface DrivePromptConfig {
 
 export interface DrivePrompts {
   pickFilePlacement: DrivePromptConfig;
+  proposeFilePlacement: DrivePromptConfig;
+  interpretMoveInstructions: DrivePromptConfig;
 }
 
 // ============================================================================
@@ -97,8 +140,27 @@ export interface DriveMailTemplate {
 export interface DriveMailTemplates {
   fileUploaded: DriveMailTemplate;
   multipleFilesUploaded: DriveMailTemplate;
+  fileProposal: DriveMailTemplate;
+  multipleFileProposal: DriveMailTemplate;
+  fileMoved: DriveMailTemplate;
   driveAuthFailed: DriveMailTemplate;
   noAttachments: DriveMailTemplate;
   notDriveUser: DriveMailTemplate;
   uploadFailed: DriveMailTemplate;
+}
+
+// ============================================================================
+// EMBEDDED DATA (carried in email HTML for reply/move detection)
+// ============================================================================
+
+export interface DriveEmbeddedFileData {
+  id: string;
+  folderId: string;
+  folderPath: string;
+  filename: string;
+  webLink: string;
+}
+
+export interface DriveEmbeddedData {
+  files: DriveEmbeddedFileData[];
 }
