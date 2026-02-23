@@ -15,6 +15,7 @@ import {
   MAX_TOTAL_DOCUMENT_BYTES,
 } from "../../util/config";
 import {DOCUMENT_MIME_TYPES, parseDocument} from "../../util/documentParser";
+import {collectImageUrls} from "../../util/imageUtils";
 
 interface FetchResponse {
   ok: boolean;
@@ -138,43 +139,13 @@ async function processAttachments(
   }
 
   // Process image attachments (get URLs only, up to 50MB total)
-  const imageExtensions = [".png", ".jpg", ".jpeg", ".webp"];
-  let totalImageSize = 0;
-  const maxImagePayloadSize = 50 * 1024 * 1024; // 50MB in bytes
-
-  for (const attachmentInfo of attachmentsList) {
-    const filename = attachmentInfo.filename?.toLowerCase() || "";
-    const isImage = imageExtensions.some((ext) => filename.endsWith(ext));
-
-    if (isImage) {
-      const imageSize = attachmentInfo.size || 0;
-
-      // Check if adding this image would exceed the limit
-      if (totalImageSize + imageSize <= maxImagePayloadSize) {
-        imageUrls.push(attachmentInfo.download_url);
-        totalImageSize += imageSize;
-        logger.info("Added image URL for LLM processing", {
-          filename: attachmentInfo.filename,
-          size: imageSize,
-          totalSize: totalImageSize,
-        });
-      } else {
-        logger.warn("Skipping image - would exceed 50MB limit", {
-          filename: attachmentInfo.filename,
-          size: imageSize,
-          currentTotal: totalImageSize,
-        });
-        break; // Stop processing more images
-      }
-    }
-  }
-
-  if (imageUrls.length > 0) {
-    logger.info("Collected image URLs for LLM", {
-      count: imageUrls.length,
-      totalSize: totalImageSize,
-    });
-  }
+  imageUrls.push(...collectImageUrls(
+      attachmentsList.map((a) => ({
+        filename: a.filename,
+        size: a.size || 0,
+        downloadUrl: a.download_url,
+      })),
+  ));
 
   // Process document attachments (PDF, DOCX, Excel, CSV, TXT)
   const maxTotalChars = parseInt(MAX_TOTAL_DOCUMENT_CHARS.value());

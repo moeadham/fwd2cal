@@ -49,8 +49,12 @@ async function fetchUrl(url: string): Promise<FetchResponse> {
   };
 }
 
+// Inline images below this size are likely logos or tracking pixels
+const MIN_INLINE_IMAGE_BYTES = 10 * 1024; // 10KB
+
 /**
  * List attachment metadata from a Resend email (no downloading).
+ * Includes significant inline images (>10KB) — skips small logos/tracking pixels.
  */
 async function listAttachments(
     resend: ResendClient,
@@ -80,13 +84,15 @@ async function listAttachments(
 
   const attachments: DriveAttachment[] = [];
   for (const info of attachmentsList) {
-    // Skip embedded/inline images (e.g. email signatures, logos, tracking pixels)
+    // Skip small inline images (logos, tracking pixels)
     if (info.content_disposition === "inline" && info.content_type?.startsWith("image/")) {
-      logger.info("Skipping embedded image for drive", {
-        filename: info.filename,
-        content_id: info.content_id,
-      });
-      continue;
+      if (!info.size || info.size < MIN_INLINE_IMAGE_BYTES) {
+        logger.info("Skipping small inline image (logo/tracking pixel)", {
+          filename: info.filename,
+          size: info.size,
+        });
+        continue;
+      }
     }
     if (info.size && info.size > maxUploadBytes) {
       logger.warn("Skipping oversized attachment for drive", {

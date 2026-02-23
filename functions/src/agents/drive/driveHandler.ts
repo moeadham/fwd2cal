@@ -21,6 +21,7 @@ import {
 } from "./types";
 import {driveMailTemplates, driveSignupUrl} from "./mailTemplates";
 import {listAttachments, downloadAttachmentBuffer, extractContentSummary, streamFromUrl} from "./fileProcessor";
+import {collectImageUrls} from "../../util/imageUtils";
 import {
   getDriveFolderTree,
   uploadFile,
@@ -206,11 +207,12 @@ async function callProposalWithFallback(
     nextPrefix: string,
     uid: string | null,
     attachments: DriveAttachment[],
+    imageUrls: string[] = [],
 ): Promise<FileProposal> {
   try {
     return await proposeFilePlacement(
         fileInfos, emailSubject, emailBody,
-        agentFolderNames, nextPrefix, uid,
+        agentFolderNames, nextPrefix, uid, imageUrls,
     );
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
@@ -436,12 +438,13 @@ async function handleDriveEmail(
 
   // Download and extract content summaries for LLM preview
   const fileInfos = await buildFileInfos(attachments);
+  const imageUrls = collectImageUrls(attachments);
 
   // LLM: propose folder + filenames (no agent folders available without OAuth)
   const nextPrefix = getNextFolderPrefix([]);
   const proposal = await callProposalWithFallback(
       fileInfos, email.subject || "", email.text || "",
-      [], nextPrefix, uid, attachments,
+      [], nextPrefix, uid, attachments, imageUrls,
   );
   logger.info("Drive: LLM proposal", {
     folder: proposal.folder_name,
@@ -568,9 +571,10 @@ async function processUpload(
   } else {
     // Extract content summaries and propose placement via LLM
     const fileInfos = await buildFileInfos(attachments);
+    const imageUrls = collectImageUrls(attachments);
     proposal = await callProposalWithFallback(
         fileInfos, originalEmail.subject || "", originalEmail.text || "",
-        agentFolderNames, nextPrefix, uid, attachments,
+        agentFolderNames, nextPrefix, uid, attachments, imageUrls,
     );
   }
 

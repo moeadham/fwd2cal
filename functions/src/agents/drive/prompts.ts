@@ -35,7 +35,8 @@ Return a single folder_name and a naming proposal for EACH file (matching by fil
 - ALWAYS prefix suggested_name with a date in YYYY.MM.DD format (e.g., "2024.03.15 Amazon Invoice Laptop.pdf"). Use the most relevant date from the document content, email subject, or email body. If no specific date is found, use the email date.
 - Keep suggested_name concise but descriptive
 - Each file MUST have a UNIQUE suggested_name
-- Consider the email subject/body as additional context`,
+- Consider the email subject/body as additional context
+- If images are included, examine them for text content (invoices, receipts, letters, forms, etc.) and use any extracted information for folder categorization and filename suggestions`,
   },
 
   interpretMoveInstructions: {

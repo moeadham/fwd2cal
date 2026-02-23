@@ -9,7 +9,7 @@ import {
   DriveEmbeddedFileData,
   FileInfo,
 } from "./types";
-import {ChatMessage} from "../../util/types";
+import {ChatMessage, TextContent, ImageURLContent} from "../../util/types";
 
 /**
  * Propose a folder name (NNN-Category) and filenames before Drive access.
@@ -22,30 +22,48 @@ async function proposeFilePlacement(
     agentFolderNames: string[],
     nextPrefix: string,
     uid: string | null = null,
+    imageUrls: string[] = [],
 ): Promise<FileProposal> {
-  let userContent = `## Existing Agent-Managed Folders\n`;
+  let userText = `## Existing Agent-Managed Folders\n`;
   if (agentFolderNames.length > 0) {
-    userContent += agentFolderNames.map((f) => `- ${f}`).join("\n") + "\n";
+    userText += agentFolderNames.map((f) => `- ${f}`).join("\n") + "\n";
   } else {
-    userContent += "(none — this is a new user)\n";
+    userText += "(none — this is a new user)\n";
   }
-  userContent += `\nNext available folder prefix: ${nextPrefix}\n\n`;
+  userText += `\nNext available folder prefix: ${nextPrefix}\n\n`;
 
-  userContent += `## Files (${files.length} total)\n`;
+  userText += `## Files (${files.length} total)\n`;
   for (let i = 0; i < files.length; i++) {
-    userContent += `\n### File ${i}\n`;
-    userContent += `Filename: ${files[i].fileName}\n`;
-    userContent += `MIME Type: ${files[i].mimeType}\n`;
-    userContent += `Size: ${files[i].fileSize} bytes\n`;
+    userText += `\n### File ${i}\n`;
+    userText += `Filename: ${files[i].fileName}\n`;
+    userText += `MIME Type: ${files[i].mimeType}\n`;
+    userText += `Size: ${files[i].fileSize} bytes\n`;
     if (files[i].contentSummary) {
-      userContent += `Content Summary: ${files[i].contentSummary}\n`;
+      userText += `Content Summary: ${files[i].contentSummary}\n`;
     }
   }
 
   if (emailSubject || emailBody) {
-    userContent += `\n## Email Context\n`;
-    if (emailSubject) userContent += `Subject: ${emailSubject}\n`;
-    if (emailBody) userContent += `Body: ${emailBody.slice(0, 500)}\n`;
+    userText += `\n## Email Context\n`;
+    if (emailSubject) userText += `Subject: ${emailSubject}\n`;
+    if (emailBody) userText += `Body: ${emailBody.slice(0, 500)}\n`;
+  }
+
+  // Build user message content - text + images (mirrors calendar agent pattern)
+  let userContent: string | Array<TextContent | ImageURLContent>;
+  if (imageUrls.length > 0) {
+    const contentArray: Array<TextContent | ImageURLContent> = [
+      {type: "text", text: userText},
+    ];
+    imageUrls.forEach((url) => {
+      contentArray.push({type: "image_url", image_url: {url}});
+    });
+    userContent = contentArray;
+    logger.info("Including images in Drive proposal LLM request", {
+      imageCount: imageUrls.length,
+    });
+  } else {
+    userContent = userText;
   }
 
   const messages: ChatMessage[] = [

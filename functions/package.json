@@ -19,7 +19,7 @@
   "engines": {
     "node": "22"
   },
-  "main": "lib/agents/drive/index.js",
+  "main": "lib/index.js",
   "dependencies": {
     "axios": "1.13.2",
     "firebase-admin": "^13.6.0",
