@@ -227,7 +227,7 @@ async function placeMarkerFile(
 
 /**
  * Find all agent-managed folders by searching for the marker file.
- * Returns folder names (e.g. ["001-Invoices", "002-Receipts"]).
+ * Returns folder names (e.g. ["01-Invoices", "02-Receipts"]).
  */
 async function findAgentManagedFolders(
     oauth2Client: Auth.OAuth2Client,
@@ -331,6 +331,78 @@ async function getDriveFolderParent(
   return {parentId: response.data.parents?.[0] || null};
 }
 
+/**
+ * List ALL files and folders in the user's Drive (paginated).
+ * Requires full `drive` scope (not just `drive.file`).
+ */
+async function listAllDriveFiles(
+    oauth2Client: Auth.OAuth2Client,
+): Promise<Array<{
+  id: string;
+  name: string;
+  mimeType: string;
+  parents: string[];
+  modifiedTime: string;
+  size: string;
+  webViewLink: string;
+}>> {
+  const drive = getDriveClient(oauth2Client);
+  const files: Array<{
+    id: string;
+    name: string;
+    mimeType: string;
+    parents: string[];
+    modifiedTime: string;
+    size: string;
+    webViewLink: string;
+  }> = [];
+
+  let pageToken: string | undefined;
+  do {
+    const response = await drive.files.list({
+      q: "trashed = false and 'me' in owners",
+      fields: "nextPageToken, files(id, name, mimeType, parents, modifiedTime, size, webViewLink)",
+      pageSize: 1000,
+      pageToken: pageToken,
+    });
+
+    const pageFiles = response.data.files || [];
+    for (const file of pageFiles) {
+      if (file.id && file.name) {
+        files.push({
+          id: file.id,
+          name: file.name,
+          mimeType: file.mimeType || "",
+          parents: file.parents || [],
+          modifiedTime: file.modifiedTime || "",
+          size: file.size || "0",
+          webViewLink: file.webViewLink || "",
+        });
+      }
+    }
+    pageToken = response.data.nextPageToken || undefined;
+  } while (pageToken);
+
+  logger.info("Retrieved all Drive files", {count: files.length});
+  return files;
+}
+
+/**
+ * Rename a file in Google Drive (update name only).
+ */
+async function renameFile(
+    oauth2Client: Auth.OAuth2Client,
+    fileId: string,
+    newName: string,
+): Promise<void> {
+  const drive = getDriveClient(oauth2Client);
+  await drive.files.update({
+    fileId: fileId,
+    requestBody: {name: newName},
+  });
+  logger.info("Drive: File renamed", {fileId, newName});
+}
+
 export {
   getDriveClient,
   getDriveFolderTree,
@@ -344,4 +416,6 @@ export {
   renameFolder,
   getFolderFileCount,
   getDriveFolderParent,
+  listAllDriveFiles,
+  renameFile,
 };

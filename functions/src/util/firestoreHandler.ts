@@ -213,6 +213,57 @@ async function deleteUser(uid: string): Promise<void> {
   // You still need to delete the user from firebase.
 }
 
+// ============================================================================
+// ORGANIZE PROPOSAL PERSISTENCE
+// ============================================================================
+
+async function saveOrganizeProposal(
+    data: Record<string, unknown>,
+): Promise<string> {
+  try {
+    const docRef = await getFirestore()
+        .collection("OrganizeProposals")
+        .add(data);
+    logger.info("Saved organize proposal", {proposalId: docRef.id});
+    return docRef.id;
+  } catch (error) {
+    logger.error("Database error in saveOrganizeProposal:", error);
+    throw error;
+  }
+}
+
+async function getOrganizeProposal(
+    proposalId: string,
+): Promise<Record<string, unknown> | null> {
+  try {
+    const doc = await getFirestore()
+        .collection("OrganizeProposals")
+        .doc(proposalId)
+        .get();
+    if (!doc.exists) return null;
+    return {id: doc.id, ...doc.data()} as Record<string, unknown>;
+  } catch (error) {
+    logger.error("Database error in getOrganizeProposal:", error);
+    throw error;
+  }
+}
+
+async function updateOrganizeProposalStatus(
+    proposalId: string,
+    status: string,
+    extra?: Record<string, unknown>,
+): Promise<void> {
+  try {
+    await getFirestore()
+        .collection("OrganizeProposals")
+        .doc(proposalId)
+        .update({status, ...extra});
+  } catch (error) {
+    logger.error("Database error in updateOrganizeProposalStatus:", error);
+    throw error;
+  }
+}
+
 export {
   getUserFromUID,
   getUserFromEmail,
@@ -225,4 +276,7 @@ export {
   removeEmailAddress,
   setDriveEnabled,
   deleteUser,
+  saveOrganizeProposal,
+  getOrganizeProposal,
+  updateOrganizeProposalStatus,
 };

@@ -107,6 +107,13 @@ export interface AnalyticsEventParams {
 // RESEND API TYPES
 // ============================================================================
 
+// Resend outbound attachment
+export interface ResendOutboundAttachment {
+  content: string | Buffer;
+  filename: string;
+  content_type?: string;
+}
+
 // Resend email options
 export interface ResendEmailOptions {
   to: string;
@@ -115,6 +122,7 @@ export interface ResendEmailOptions {
   text?: string;
   html: string;
   headers?: Record<string, string>;
+  attachments?: ResendOutboundAttachment[];
 }
 
 // Resend API response
@@ -198,6 +206,7 @@ export interface ResendSendMessage {
   text?: string;
   html: string;
   headers?: Record<string, string>;
+  attachments?: ResendOutboundAttachment[];
 }
 
 // Mock sent email storage

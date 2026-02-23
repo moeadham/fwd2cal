@@ -2,6 +2,11 @@
 import {DriveMailTemplates} from "./types";
 
 const isDevProject = process.env.GCLOUD_PROJECT === "fwd2cal-dev-2578e";
+
+export const driveFullScopeSignupUrl = isDevProject ?
+  "https://us-central1-fwd2cal-dev-2578e.cloudfunctions.net/v2driveFullScopeSignup" :
+  "https://www.fwd2cal.com/drive-full-scope-consent";
+
 export const driveSignupUrl = isDevProject ?
   "https://us-central1-fwd2cal-dev-2578e.cloudfunctions.net/v2driveSignup" :
   "https://www.fwd2cal.com/drive-signup-consent";
@@ -86,6 +91,67 @@ const driveMailTemplates: DriveMailTemplates = {
     html: `Sorry - there was an error moving your file in Google Drive. Please try replying again with your move instructions.
 
 <br><br><b>Did you know?</b> fwd2drive can organize your entire drive. Just email &quot;organize my drive please&quot; to <a href="mailto:drive@fwd2drive.com">drive@fwd2drive.com</a>.
+<br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
+  },
+  organizeAuthRequired: {
+    html: `We'd love to help organize your entire Google Drive!
+<br><br>To do this, we need expanded access to view and move all your files (not just the ones we've uploaded).
+<br><br><a href="%FULL_SCOPE_SIGNUP_LINK%" style="display:inline-block; padding:10px 20px; margin:5px 0; background-color:#3498db; color:white; text-align:center; text-decoration:none; font-weight:bold; border-radius:5px; border:none; cursor:pointer;">Grant Full Drive Access</a>
+<br><br>We take your privacy seriously. We will only propose changes &mdash; nothing moves until you approve.
+<br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
+  },
+  organizeProposal: {
+    html: `Here's our proposal to organize your Google Drive:
+<br><br>
+<b>Summary:</b> %SUMMARY%
+<br><br>
+<b>%TOTAL_FILES% files scanned</b> &nbsp;|&nbsp; <b>%FILES_TO_CHANGE% files to reorganize</b> &nbsp;|&nbsp; <b>%FILES_TO_KEEP% files already organized</b>
+<br><br>
+<hr style="border:none;border-top:1px solid #eee;margin:16px 0;">
+<b>Proposed folder structure:</b>
+<br><br>
+<div style="font-family:monospace;background:#f7f7f7;padding:16px;border-radius:8px;font-size:13px;line-height:1.6;">
+%FOLDER_TREE%
+</div>
+<br>
+<hr style="border:none;border-top:1px solid #eee;margin:16px 0;">
+<b>File changes preview:</b>
+<br><br>
+%FILE_CHANGES_PREVIEW%
+<br>
+<hr style="border:none;border-top:1px solid #eee;margin:16px 0;">
+<b>Cost:</b> %TOTAL_COST% (%COST_PER_FILE% per file &times; %FILES_TO_CHANGE% files)
+<br><br>
+<em>Execution is coming soon! For now, this is a preview of what we would do.</em>
+%EMBEDDED_DATA%
+<br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
+  },
+  organizeError: {
+    html: `Sorry &mdash; there was an error while scanning your Google Drive. Please try again by sending another &quot;organize my drive&quot; email.
+<br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
+  },
+  organizeNoFiles: {
+    html: `Your Google Drive appears to be empty or contains no files we can organize. Start by forwarding some files to <a href="mailto:drive@fwd2drive.com">drive@fwd2drive.com</a> and we'll keep them tidy for you!
+<br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
+  },
+  organizeComplete: {
+    html: `Your Google Drive has been reorganized!
+<br><br>
+<b>Summary:</b> %SUMMARY%
+<br><br>
+<b>%FILES_CHANGED% files reorganized</b>
+<br><br>
+<div style="font-family:monospace;background:#f7f7f7;padding:16px;border-radius:8px;font-size:13px;line-height:1.6;">
+%FOLDER_TREE%
+</div>
+<br>
+If you'd like to undo this, just reply to this email with &quot;undo&quot; within 30 days.
+%EMBEDDED_DATA%
+<br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
+  },
+  organizeUndone: {
+    html: `Your Google Drive has been restored to its previous state.
+<br><br>All files have been moved back to their original locations and renamed to their original names.
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
   },
 };

@@ -4,6 +4,7 @@ import {onRequest, HttpsOptions} from "firebase-functions/v2/https";
 import {Resend} from "resend";
 
 import {handleDriveEmail, processUpload} from "./driveHandler";
+import {handleOrganizeDrive} from "./organizeHandler";
 import {driveSignupUrl} from "./mailTemplates";
 import {signupCallbackHandler} from "../../auth/authHandler";
 import {getAgentCredentials, getRedirectUriIndex} from "../../auth/credentials";
@@ -28,10 +29,10 @@ import {FileProposal} from "./types";
  */
 function parseOAuthState(
     state: string,
-): {emailId: string; proposal?: FileProposal} {
+): {emailId: string; proposal?: FileProposal; organize?: boolean} {
   const json = Buffer.from(state, "base64url").toString();
   const parsed = JSON.parse(json);
-  return {emailId: parsed.emailId, proposal: parsed.proposal};
+  return {emailId: parsed.emailId, proposal: parsed.proposal, organize: parsed.organize};
 }
 
 // Global configuration for onRequest functions
@@ -82,6 +83,32 @@ export const v2driveSignup = onRequest(
     },
 );
 
+export const v2driveFullScopeSignup = onRequest(
+    onRequestConfig,
+    async (req, res) => {
+      const credentials = getAgentCredentials("drive");
+      const redirectUriIndex = getRedirectUriIndex(ENVIRONMENT_NAME.value());
+      const scopes = [
+        "https://www.googleapis.com/auth/userinfo.email",
+        "https://www.googleapis.com/auth/userinfo.profile",
+        "openid",
+        "https://www.googleapis.com/auth/drive",
+      ].join("+");
+      const state = req.query.state as string | undefined;
+      let signupUrl = "https://accounts.google.com/o/oauth2/v2/auth" +
+        `?response_type=code` +
+        `&client_id=${credentials.web.client_id}` +
+        `&redirect_uri=${credentials.web.redirect_uris[redirectUriIndex]}` +
+        `&scope=${scopes}` +
+        `&access_type=offline` +
+        `&prompt=consent`;
+      if (state) {
+        signupUrl += `&state=${encodeURIComponent(state)}`;
+      }
+      res.redirect(302, signupUrl);
+    },
+);
+
 export const v2driveOauthCallback = onRequest(
     onRequestConfig,
     async (req, res) => {
@@ -105,11 +132,17 @@ export const v2driveOauthCallback = onRequest(
       const state = req.query.state as string | undefined;
       if (state) {
         try {
-          const {emailId, proposal} = parseOAuthState(state);
-          const {resend, transformedEmail} = await fetchEmailById(emailId);
-          await processUpload(emailId, uid, resend, transformedEmail, proposal);
+          const {emailId, proposal, organize} = parseOAuthState(state);
+          if (organize) {
+            // Organize-drive flow: trigger full-drive scan + proposal
+            const {transformedEmail} = await fetchEmailById(emailId);
+            await handleOrganizeDrive(transformedEmail, emailId);
+          } else {
+            const {resend, transformedEmail} = await fetchEmailById(emailId);
+            await processUpload(emailId, uid, resend, transformedEmail, proposal);
+          }
         } catch (err) {
-          logger.error("Drive: Failed to process upload after OAuth", {
+          logger.error("Drive: Failed to process after OAuth", {
             state,
             error: err instanceof Error ? err.message : String(err),
           });

@@ -16,7 +16,7 @@ export const FileProposalItemSchema = z.object({
 
 export const FileProposalSchema = z.object({
   folder_name: z.string().describe(
-      "Folder name with numeric prefix (e.g., '001-Invoices'). Reuse an existing agent folder if the category matches.",
+      "Folder name with numeric prefix (e.g., '01-Invoices'). Reuse an existing agent folder if the category matches.",
   ),
   is_existing_folder: z.boolean().describe(
       "True if reusing a previously created agent folder, false if suggesting a new one",
@@ -86,6 +86,121 @@ export interface DriveProcessingResult {
 }
 
 // ============================================================================
+// ORGANIZE-DRIVE TYPES
+// ============================================================================
+
+// A single file or folder from Drive (flat list entry for full-drive scan)
+export interface DriveFileEntry {
+  id: string;
+  name: string;
+  mimeType: string;
+  parentId: string | null;
+  parentPath: string;
+  modifiedTime: string;
+  size: number;
+  webViewLink: string;
+  isFolder: boolean;
+}
+
+// Proposed folder in the new structure
+export const OrganizeFolderSchema = z.object({
+  folder_name: z.string().describe(
+      "Folder name with NN - Category format (e.g., '01 - Personal', '02 - Work')",
+  ),
+  description: z.string().describe("Brief description of what this folder contains"),
+  subfolders: z.array(z.object({
+    subfolder_name: z.string().describe("Subfolder name"),
+    description: z.string().describe("Brief description"),
+  })).nullable().describe("Optional subfolders within this category, null if none"),
+});
+
+// Proposed action for a single file
+export const OrganizeFileActionSchema = z.object({
+  file_id: z.string().describe("Google Drive file ID"),
+  current_name: z.string().describe("Current filename"),
+  current_path: z.string().describe("Current folder path"),
+  new_name: z.string().describe(
+      "Proposed new filename in YYYY.MM.DD - description.ext format",
+  ),
+  new_folder: z.string().describe(
+      "Target folder name (NN - Category or NN - Category/Subfolder)",
+  ),
+  action: z.enum(["move", "rename", "move_and_rename", "keep"]).describe(
+      "What action to take on this file",
+  ),
+  reason: z.string().describe("Brief reasoning"),
+});
+
+// Full reorganization proposal
+export const DriveOrganizeProposalSchema = z.object({
+  proposed_folders: z.array(OrganizeFolderSchema).describe(
+      "The proposed top-level folder structure",
+  ),
+  file_actions: z.array(OrganizeFileActionSchema).describe(
+      "Proposed action for each file in the drive",
+  ),
+  summary: z.string().describe(
+      "Brief natural-language summary of the proposed changes",
+  ),
+});
+
+export type DriveOrganizeProposal = z.infer<typeof DriveOrganizeProposalSchema>;
+
+// Organize processing result
+export interface OrganizeProcessingResult {
+  totalFiles: number;
+  filesToMove: number;
+  filesToRename: number;
+  totalCost: number;
+  proposalSent: boolean;
+  error?: string;
+}
+
+// Cost calculation result
+export interface OrganizeCostBreakdown {
+  totalFiles: number;
+  filesToMove: number;
+  filesToRename: number;
+  filesToKeep: number;
+  costPerFile: number;
+  totalCost: number;
+}
+
+// Organize proposal stored in Firestore
+export interface OrganizeProposalDoc {
+  uid: string;
+  senderEmail: string;
+  emailId: string;
+  status: "pending" | "approved" | "executing" | "completed" | "undone";
+  createdAt: string;
+  expiresAt: string;
+  proposal: DriveOrganizeProposal;
+  cost: OrganizeCostBreakdown;
+  snapshotId?: string;
+}
+
+// Snapshot for undo (stored in Firestore)
+export interface OrganizeSnapshotAction {
+  fileId: string;
+  originalName: string;
+  originalParentId: string;
+  originalParentPath: string;
+  newName?: string;
+  newParentId?: string;
+}
+
+export interface OrganizeSnapshot {
+  uid: string;
+  timestamp: string;
+  actions: OrganizeSnapshotAction[];
+}
+
+// Embedded data for organize proposal (in email HTML)
+export interface OrganizeEmbeddedData {
+  proposalId: string;
+}
+
+// ============================================================================
 // LLM TYPES
 // ============================================================================
 
@@ -98,6 +213,7 @@ export interface DrivePromptConfig {
 export interface DrivePrompts {
   proposeFilePlacement: DrivePromptConfig;
   interpretMoveInstructions: DrivePromptConfig;
+  proposeOrganization: DrivePromptConfig;
 }
 
 // ============================================================================
@@ -120,6 +236,12 @@ export interface DriveMailTemplates {
   noAttachments: DriveMailTemplate;
   uploadFailed: DriveMailTemplate;
   moveFailed: DriveMailTemplate;
+  organizeAuthRequired: DriveMailTemplate;
+  organizeProposal: DriveMailTemplate;
+  organizeError: DriveMailTemplate;
+  organizeNoFiles: DriveMailTemplate;
+  organizeComplete: DriveMailTemplate;
+  organizeUndone: DriveMailTemplate;
 }
 
 // ============================================================================

@@ -36,6 +36,9 @@ import {
   getDriveFolderParent,
 } from "./driveHelper";
 import {proposeFilePlacement, interpretMoveInstructions} from "./llm";
+import {fastMatchSkill} from "../../util/skills/matcher";
+import {getSkills} from "./skills";
+import {handleOrganizeDrive} from "./organizeHandler";
 import {Auth} from "googleapis";
 
 
@@ -118,13 +121,13 @@ async function sendDriveEmailResponse(
 function getNextFolderPrefix(existingFolders: string[]): string {
   let maxNum = 0;
   for (const name of existingFolders) {
-    const match = name.match(/^(\d{3})-/);
+    const match = name.match(/^(\d{2,3})-/);
     if (match) {
       const num = parseInt(match[1], 10);
       if (num > maxNum) maxNum = num;
     }
   }
-  return String(maxNum + 1).padStart(3, "0");
+  return String(maxNum + 1).padStart(2, "0");
 }
 
 /**
@@ -241,9 +244,9 @@ async function resolveTargetFolder(
     rootFolderId: string,
 ): Promise<{folderId: string; folderPath: string}> {
   const proposedCategory = proposal.folder_name
-      .replace(/^\d{3}-/, "").toLowerCase();
+      .replace(/^\d{2,3}-/, "").toLowerCase();
   const existingMatch = agentFolders.find((f) => {
-    const cat = f.name.replace(/^\d{3}-/, "").toLowerCase();
+    const cat = f.name.replace(/^\d{2,3}-/, "").toLowerCase();
     return cat === proposedCategory;
   });
 
@@ -254,7 +257,7 @@ async function resolveTargetFolder(
     targetFolderId = existingMatch.id;
     targetFolderPath = existingMatch.name;
     // Rename if existing folder is missing NNN- prefix
-    if (!/^\d{3}-/.test(targetFolderPath)) {
+    if (!/^\d{2,3}-/.test(targetFolderPath)) {
       const fixedName = `${nextPrefix}-${targetFolderPath}`;
       await renameFolder(oauth2Client, targetFolderId, fixedName);
       targetFolderPath = fixedName;
@@ -273,7 +276,7 @@ async function resolveTargetFolder(
     }
   } else {
     // Ensure new folder name always has NNN- prefix
-    const hasPrefix = /^\d{3}-/.test(proposal.folder_name);
+    const hasPrefix = /^\d{2,3}-/.test(proposal.folder_name);
     const folderName = hasPrefix ?
       proposal.folder_name : `${nextPrefix}-${proposal.folder_name}`;
     targetFolderId = await createFolder(
@@ -398,6 +401,15 @@ async function handleDriveEmail(
   if (!verifyEmail(email)) {
     logger.warn("Drive: Unverified email", {sender});
     return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: [], error: "Unverified email"};
+  }
+
+  // Check for organize-drive skill match
+  const skills = getSkills();
+  const skillMatch = fastMatchSkill(email.subject || "", "", skills);
+  if (skillMatch?.skillId === "organize-drive") {
+    logger.info("Drive: organize-drive skill matched", {sender, matchedIn: skillMatch.matchedIn});
+    await handleOrganizeDrive(email, emailId);
+    return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: []};
   }
 
   // Check if this is a REPLY to an existing upload (move request)
@@ -767,7 +779,7 @@ async function handleMoveReply(
     if (needsNewFolder) {
       const targetCategory = move.folder_path || move.folder_id;
       // Ensure targetName always has NNN- prefix
-      const hasPrefix = /^\d{3}-/.test(targetCategory);
+      const hasPrefix = /^\d{2,3}-/.test(targetCategory);
       const targetName = hasPrefix ? targetCategory :
         `${getNextFolderPrefix(agentFolders.map((f) => f.name))}-${targetCategory}`;
 
@@ -839,7 +851,7 @@ async function handleMoveReply(
 
     // Safety net: ensure folder name has NNN- prefix — only rename managed folders
     const isManaged = agentFolders.some((f) => f.id === newFolderId);
-    if (!/^\d{3}-/.test(newFolderPath) && isManaged) {
+    if (!/^\d{2,3}-/.test(newFolderPath) && isManaged) {
       const safePfx = getNextFolderPrefix(agentFolders.map((f) => f.name));
       logger.warn("Drive: Managed folder missing NNN- prefix, renaming", {
         original: newFolderPath, prefix: safePfx,

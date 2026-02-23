@@ -88,6 +88,32 @@ function getAdminEmail(): string {
   return `admin@${getEmailDomain(MAIN_EMAIL_ADDRESS.value())}`;
 }
 
+const ORGANIZE_DRIVE_COST_PER_FILE = defineString("ORGANIZE_DRIVE_COST_PER_FILE", {
+  default: "0.05",
+});
+
+const ORGANIZE_DRIVE_MAX_FILES = defineInt("ORGANIZE_DRIVE_MAX_FILES", {
+  default: 5000,
+});
+
+const ORGANIZE_DRIVE_FULL_LISTING_THRESHOLD = defineInt(
+    "ORGANIZE_DRIVE_FULL_LISTING_THRESHOLD", {
+      default: 500,
+    },
+);
+
+const ORGANIZE_DRIVE_MAX_PREVIEW_ROWS = defineInt(
+    "ORGANIZE_DRIVE_MAX_PREVIEW_ROWS", {
+      default: 20,
+    },
+);
+
+const ORGANIZE_DRIVE_CHUNK_SIZE = defineInt(
+    "ORGANIZE_DRIVE_CHUNK_SIZE", {
+      default: 100,
+    },
+);
+
 export {
   ENVIRONMENT_NAME,
   OPENROUTER_API_KEY,
@@ -106,6 +132,11 @@ export {
   MAX_TOTAL_DOCUMENT_BYTES,
   DRIVE_EMAIL_ADDRESS,
   MAX_DRIVE_UPLOAD_BYTES,
+  ORGANIZE_DRIVE_COST_PER_FILE,
+  ORGANIZE_DRIVE_MAX_FILES,
+  ORGANIZE_DRIVE_FULL_LISTING_THRESHOLD,
+  ORGANIZE_DRIVE_MAX_PREVIEW_ROWS,
+  ORGANIZE_DRIVE_CHUNK_SIZE,
   getSupportEmail,
   getAdminEmail,
 };
