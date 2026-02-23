@@ -28,6 +28,7 @@ Return a single folder_name and a naming proposal for EACH file (matching by fil
   - Medical records → "NNN-Medical"
   - Insurance → "NNN-Insurance"
   - Legal → "NNN-Legal"
+  - Photos or images without text content → "NNN-Photos"
 - ALL files from the same email go to the SAME folder
 
 ## Filename rules:
@@ -36,7 +37,7 @@ Return a single folder_name and a naming proposal for EACH file (matching by fil
 - Keep suggested_name concise but descriptive
 - Each file MUST have a UNIQUE suggested_name
 - Consider the email subject/body as additional context
-- If images are included, examine them for text content (invoices, receipts, letters, forms, etc.) and use any extracted information for folder categorization and filename suggestions`,
+- If images are included, examine them for text content (invoices, receipts, letters, forms, etc.) and use any extracted information for folder categorization and filename suggestions. Images without meaningful text (photos, screenshots of scenery, etc.) should go in "NNN-Photos"`,
   },
 
   interpretMoveInstructions: {
