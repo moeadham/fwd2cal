@@ -2,7 +2,7 @@
 import {DriveMailTemplates} from "./types";
 
 const isDevProject = process.env.GCLOUD_PROJECT === "fwd2cal-dev-2578e";
-const driveSignupUrl = isDevProject ?
+export const driveSignupUrl = isDevProject ?
   "https://us-central1-fwd2cal-dev-2578e.cloudfunctions.net/v2driveSignup" :
   "https://www.fwd2cal.com/drive-signup-consent";
 
@@ -56,6 +56,14 @@ const driveMailTemplates: DriveMailTemplates = {
 <br><br><b>Did you know?</b> fwd2drive can organize your entire drive. Just email &quot;organize my drive please&quot; to <a href="mailto:drive@fwd2drive.com">drive@fwd2drive.com</a>.
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
   },
+  multipleFilesMoved: {
+    html: `Done! Your files have been moved.
+<br><br>%FILE_LIST%
+<br><br>Want them somewhere else? Just reply again and we'll move them.
+%EMBEDDED_DATA%
+<br><br><b>Did you know?</b> fwd2drive can organize your entire drive. Just email &quot;organize my drive please&quot; to <a href="mailto:drive@fwd2drive.com">drive@fwd2drive.com</a>.
+<br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
+  },
   driveAuthFailed: {
     html: `Sorry - there was an issue authenticating with Google Drive. Please click <a href="${driveSignupUrl}">to authorize Google Drive again</a>, and then forward your file another time.
 
@@ -68,17 +76,14 @@ const driveMailTemplates: DriveMailTemplates = {
 <br><br><b>Did you know?</b> fwd2drive can organize your entire drive. Just email &quot;organize my drive please&quot; to <a href="mailto:drive@fwd2drive.com">drive@fwd2drive.com</a>.
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
   },
-  notDriveUser: {
-    html: `Welcome!<br><br>
-To use fwd2cal Drive, please sign up by clicking the link below.<br><br>
-<a href="${driveSignupUrl}">Sign Up for Drive</a><br><br>
-Once signed up, forward any email with attachments and they'll be automatically organized in your Google Drive.
+  uploadFailed: {
+    html: `Sorry - there was an error uploading your file to Google Drive. Please try forwarding it again.
 
 <br><br><b>Did you know?</b> fwd2drive can organize your entire drive. Just email &quot;organize my drive please&quot; to <a href="mailto:drive@fwd2drive.com">drive@fwd2drive.com</a>.
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
   },
-  uploadFailed: {
-    html: `Sorry - there was an error uploading your file to Google Drive. Please try forwarding it again.
+  moveFailed: {
+    html: `Sorry - there was an error moving your file in Google Drive. Please try replying again with your move instructions.
 
 <br><br><b>Did you know?</b> fwd2drive can organize your entire drive. Just email &quot;organize my drive please&quot; to <a href="mailto:drive@fwd2drive.com">drive@fwd2drive.com</a>.
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,

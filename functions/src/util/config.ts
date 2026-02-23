@@ -4,7 +4,7 @@
  * Export params directly - call .value() only inside function handlers
  */
 
-import {defineString} from "firebase-functions/params";
+import {defineString, defineInt} from "firebase-functions/params";
 
 const ENVIRONMENT_NAME = defineString("ENVIRONMENT_NAME", {
   default: "production",
@@ -59,8 +59,8 @@ const DRIVE_EMAIL_ADDRESS = defineString("DRIVE_EMAIL_ADDRESS", {
   default: "drive@fwd2cal.com",
 });
 
-const MAX_DRIVE_UPLOAD_BYTES = defineString("MAX_DRIVE_UPLOAD_BYTES", {
-  default: "26214400", // 25MB
+const MAX_DRIVE_UPLOAD_BYTES = defineInt("MAX_DRIVE_UPLOAD_BYTES", {
+  default: 26214400, // 25MB
 });
 
 /**

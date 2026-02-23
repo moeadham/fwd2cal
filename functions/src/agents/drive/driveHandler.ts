@@ -15,8 +15,11 @@ import {
   threadEmailHtml,
 } from "../../util/emailUtils";
 import {TransformedEmail, ResendClient} from "../../util/types";
-import {DriveProcessingResult, ProcessedDriveFile, DriveFolder, DriveEmbeddedData, FileProposal} from "./types";
-import {driveMailTemplates} from "./mailTemplates";
+import {
+  DriveProcessingResult, ProcessedDriveFile, DriveFolder,
+  DriveEmbeddedData, DriveAttachment, FileProposal, FileInfo,
+} from "./types";
+import {driveMailTemplates, driveSignupUrl} from "./mailTemplates";
 import {listAttachments, downloadAttachmentBuffer, extractContentSummary, streamFromUrl} from "./fileProcessor";
 import {
   getDriveFolderTree,
@@ -31,12 +34,9 @@ import {
   getFolderFileCount,
   getDriveFolderParent,
 } from "./driveHelper";
-import {proposeFilePlacement, interpretMoveInstructions, FileInfo} from "./llm";
+import {proposeFilePlacement, interpretMoveInstructions} from "./llm";
+import {Auth} from "googleapis";
 
-const isDevProject = process.env.GCLOUD_PROJECT === "fwd2cal-dev-2578e";
-const signupBaseUrl = isDevProject ?
-  "https://us-central1-fwd2cal-dev-2578e.cloudfunctions.net/v2driveSignup" :
-  "https://www.fwd2cal.com/drive-signup-consent";
 
 // ============================================================================
 // HELPERS
@@ -163,12 +163,213 @@ function findFolderByName(
     targetName: string,
 ): DriveFolder | null {
   const lower = targetName.toLowerCase();
-  for (const root of roots) {
-    if (root.name.toLowerCase() === lower) return root;
-    const found = findFolderByName(root.children, lower);
-    if (found) return found;
+  function search(nodes: DriveFolder[]): DriveFolder | null {
+    for (const node of nodes) {
+      if (node.name.toLowerCase() === lower) return node;
+      const found = search(node.children);
+      if (found) return found;
+    }
+    return null;
   }
-  return null;
+  return search(roots);
+}
+
+/**
+ * Download attachments and extract content summaries for LLM processing.
+ */
+async function buildFileInfos(
+    attachments: DriveAttachment[],
+): Promise<FileInfo[]> {
+  return Promise.all(attachments.map(async (attachment) => {
+    const buffer = await downloadAttachmentBuffer(
+        attachment.downloadUrl, attachment.filename,
+    );
+    const contentSummary = buffer ?
+      await extractContentSummary(buffer, attachment.contentType) : "";
+    return {
+      fileName: attachment.filename,
+      mimeType: attachment.contentType,
+      fileSize: attachment.size,
+      contentSummary,
+    };
+  }));
+}
+
+/**
+ * Call proposeFilePlacement with a fallback if LLM fails.
+ */
+async function callProposalWithFallback(
+    fileInfos: FileInfo[],
+    emailSubject: string,
+    emailBody: string,
+    agentFolderNames: string[],
+    nextPrefix: string,
+    uid: string | null,
+    attachments: DriveAttachment[],
+): Promise<FileProposal> {
+  try {
+    return await proposeFilePlacement(
+        fileInfos, emailSubject, emailBody,
+        agentFolderNames, nextPrefix, uid,
+    );
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    logger.error("Drive: LLM proposal failed", {error: errMsg});
+    return {
+      folder_name: `${nextPrefix}-Documents`,
+      is_existing_folder: false,
+      proposals: attachments.map((att, i) => ({
+        file_index: i,
+        suggested_name: att.filename,
+        reason: "LLM failed, using original filename",
+      })),
+    };
+  }
+}
+
+/**
+ * Resolve the target folder for file uploads.
+ * Matches existing agent folders by category or creates a new one.
+ */
+async function resolveTargetFolder(
+    oauth2Client: Auth.OAuth2Client,
+    proposal: FileProposal,
+    agentFolders: Array<{id: string; name: string}>,
+    nextPrefix: string,
+    rootFolderId: string,
+): Promise<{folderId: string; folderPath: string}> {
+  const proposedCategory = proposal.folder_name
+      .replace(/^\d{3}-/, "").toLowerCase();
+  const existingMatch = agentFolders.find((f) => {
+    const cat = f.name.replace(/^\d{3}-/, "").toLowerCase();
+    return cat === proposedCategory;
+  });
+
+  let targetFolderId: string;
+  let targetFolderPath: string;
+
+  if (existingMatch) {
+    targetFolderId = existingMatch.id;
+    targetFolderPath = existingMatch.name;
+    // Rename if existing folder is missing NNN- prefix
+    if (!/^\d{3}-/.test(targetFolderPath)) {
+      const fixedName = `${nextPrefix}-${targetFolderPath}`;
+      await renameFolder(oauth2Client, targetFolderId, fixedName);
+      targetFolderPath = fixedName;
+    }
+    // Ensure folder is at root level (not nested under another folder)
+    try {
+      const folderInfo = await getDriveFolderParent(oauth2Client, targetFolderId);
+      if (folderInfo.parentId && folderInfo.parentId !== rootFolderId) {
+        await moveFile(oauth2Client, targetFolderId, rootFolderId, folderInfo.parentId);
+      }
+    } catch (err) {
+      logger.debug("Drive: Could not check/move folder to root", {
+        folderId: targetFolderId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  } else {
+    // Ensure new folder name always has NNN- prefix
+    const hasPrefix = /^\d{3}-/.test(proposal.folder_name);
+    const folderName = hasPrefix ?
+      proposal.folder_name : `${nextPrefix}-${proposal.folder_name}`;
+    targetFolderId = await createFolder(
+        oauth2Client, folderName, rootFolderId,
+    );
+    targetFolderPath = folderName;
+  }
+
+  await placeMarkerFile(oauth2Client, targetFolderId);
+  return {folderId: targetFolderId, folderPath: targetFolderPath};
+}
+
+/**
+ * Upload a single attachment to Drive with fallback to root on failure.
+ */
+async function uploadSingleFile(
+    oauth2Client: Auth.OAuth2Client,
+    attachment: DriveAttachment,
+    suggestedName: string,
+    targetFolderId: string,
+    targetFolderPath: string,
+    rootFolderId: string,
+): Promise<ProcessedDriveFile> {
+  try {
+    const stream = await streamFromUrl(attachment.downloadUrl);
+    const uploaded = await uploadFile(
+        oauth2Client, targetFolderId, suggestedName,
+        attachment.contentType, stream,
+    );
+    logger.info("Drive: File uploaded", {
+      filename: suggestedName,
+      folderPath: targetFolderPath,
+      driveFileId: uploaded.id,
+    });
+    return {
+      filename: suggestedName,
+      folderPath: targetFolderPath,
+      suggestedName,
+      driveFileId: uploaded.id,
+      driveWebLink: uploaded.webViewLink,
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error("Drive: Failed to upload file", {
+      filename: attachment.filename, error: errorMessage,
+    });
+    // Fallback: upload with original name to root
+    try {
+      const fallbackStream = await streamFromUrl(attachment.downloadUrl);
+      const uploaded = await uploadFile(
+          oauth2Client, rootFolderId, attachment.filename,
+          attachment.contentType, fallbackStream,
+      );
+      return {
+        filename: attachment.filename,
+        folderPath: "My Drive",
+        suggestedName: attachment.filename,
+        driveFileId: uploaded.id,
+        driveWebLink: uploaded.webViewLink,
+        error: `Upload to target failed, uploaded to root: ${errorMessage}`,
+      };
+    } catch (uploadError) {
+      const uploadErrorMessage =
+        uploadError instanceof Error ? uploadError.message : String(uploadError);
+      return {
+        filename: attachment.filename,
+        folderPath: "",
+        suggestedName: attachment.filename,
+        error: `Upload failed: ${uploadErrorMessage}`,
+      };
+    }
+  }
+}
+
+/**
+ * Upload all attachments to Drive in parallel.
+ */
+async function uploadAttachments(
+    oauth2Client: Auth.OAuth2Client,
+    attachments: DriveAttachment[],
+    proposal: FileProposal,
+    targetFolderId: string,
+    targetFolderPath: string,
+    rootFolderId: string,
+    emailDate?: string,
+): Promise<ProcessedDriveFile[]> {
+  return Promise.all(attachments.map((attachment, i) => {
+    const placementProposal = proposal.proposals.find((p) => p.file_index === i);
+    const suggestedBase = placementProposal?.suggested_name || attachment.filename;
+    const extension = getExtension(attachment.filename);
+    const withExt = suggestedBase.endsWith(extension) ?
+      suggestedBase : `${suggestedBase}${extension}`;
+    const suggestedName = ensureDatePrefix(withExt, emailDate);
+    return uploadSingleFile(
+        oauth2Client, attachment, suggestedName,
+        targetFolderId, targetFolderPath, rootFolderId,
+    );
+  }));
 }
 
 // ============================================================================
@@ -212,8 +413,10 @@ async function handleDriveEmail(
         logger.info("Drive: Returning user — organizing immediately", {sender, uid});
         return processUpload(emailId, uid, resend, email);
       }
-    } catch {
-      // No OAuth or failed — fall through to auth-required flow
+    } catch (err) {
+      logger.debug("Drive: No OAuth or user lookup failed, falling through to auth flow", {
+        uid, error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
@@ -221,7 +424,7 @@ async function handleDriveEmail(
   logger.info("Drive: New user — sending auth email", {sender});
 
   // List attachment metadata
-  const maxUploadBytes = parseInt(MAX_DRIVE_UPLOAD_BYTES.value());
+  const maxUploadBytes = MAX_DRIVE_UPLOAD_BYTES.value();
   const attachments = await listAttachments(resend, emailId, maxUploadBytes);
 
   if (attachments.length === 0) {
@@ -232,51 +435,19 @@ async function handleDriveEmail(
   }
 
   // Download and extract content summaries for LLM preview
-  const fileInfos: FileInfo[] = [];
-  for (const attachment of attachments) {
-    const buffer = await downloadAttachmentBuffer(
-        attachment.downloadUrl, attachment.filename,
-    );
-    const contentSummary = buffer ?
-      await extractContentSummary(buffer, attachment.contentType) : "";
-    fileInfos.push({
-      fileName: attachment.filename,
-      mimeType: attachment.contentType,
-      fileSize: attachment.size,
-      contentSummary,
-    });
-  }
+  const fileInfos = await buildFileInfos(attachments);
 
   // LLM: propose folder + filenames (no agent folders available without OAuth)
   const nextPrefix = getNextFolderPrefix([]);
-  let proposal;
-  try {
-    proposal = await proposeFilePlacement(
-        fileInfos,
-        email.subject || "",
-        email.text || "",
-        [],
-        nextPrefix,
-        uid,
-    );
-    logger.info("Drive: LLM proposal", {
-      folder: proposal.folder_name,
-      isExisting: proposal.is_existing_folder,
-      files: proposal.proposals.map((p) => p.suggested_name),
-    });
-  } catch (error) {
-    const errMsg = error instanceof Error ? error.message : String(error);
-    logger.error("Drive: LLM proposal failed", {error: errMsg});
-    proposal = {
-      folder_name: `${nextPrefix}-Documents`,
-      is_existing_folder: false,
-      proposals: attachments.map((att, i) => ({
-        file_index: i,
-        suggested_name: att.filename,
-        reason: "LLM failed, using original filename",
-      })),
-    };
-  }
+  const proposal = await callProposalWithFallback(
+      fileInfos, email.subject || "", email.text || "",
+      [], nextPrefix, uid, attachments,
+  );
+  logger.info("Drive: LLM proposal", {
+    folder: proposal.folder_name,
+    isExisting: proposal.is_existing_folder,
+    files: proposal.proposals.map((p) => p.suggested_name),
+  });
 
   // Build signup link with emailId + proposal as state (OAuth callback will reuse proposal)
   const statePayload = JSON.stringify({
@@ -292,7 +463,7 @@ async function handleDriveEmail(
     },
   });
   const encodedState = Buffer.from(statePayload).toString("base64url");
-  const signupLink = `${signupBaseUrl}?state=${encodeURIComponent(encodedState)}`;
+  const signupLink = `${driveSignupUrl}?state=${encodeURIComponent(encodedState)}`;
 
   // Send auth-required email showing what we'll organize
   const emailDate = email.headers?.date;
@@ -372,7 +543,7 @@ async function processUpload(
   }
 
   // Re-fetch attachments from Resend
-  const maxUploadBytes = parseInt(MAX_DRIVE_UPLOAD_BYTES.value());
+  const maxUploadBytes = MAX_DRIVE_UPLOAD_BYTES.value();
   const attachments = await listAttachments(resend, resendEmailId, maxUploadBytes);
 
   if (attachments.length === 0) {
@@ -395,45 +566,12 @@ async function processUpload(
     });
     proposal = savedProposal;
   } else {
-    // Extract content summaries for LLM
-    const fileInfos: FileInfo[] = [];
-    for (const attachment of attachments) {
-      const buffer = await downloadAttachmentBuffer(
-          attachment.downloadUrl, attachment.filename,
-      );
-      const contentSummary = buffer ?
-        await extractContentSummary(buffer, attachment.contentType) : "";
-      fileInfos.push({
-        fileName: attachment.filename,
-        mimeType: attachment.contentType,
-        fileSize: attachment.size,
-        contentSummary,
-      });
-    }
-
-    // LLM: propose placement with full folder tree context
-    try {
-      proposal = await proposeFilePlacement(
-          fileInfos,
-          originalEmail.subject || "",
-          originalEmail.text || "",
-          agentFolderNames,
-          nextPrefix,
-          uid,
-      );
-    } catch (error) {
-      const errMsg = error instanceof Error ? error.message : String(error);
-      logger.error("Drive: LLM placement failed", {error: errMsg});
-      proposal = {
-        folder_name: `${nextPrefix}-Documents`,
-        is_existing_folder: false,
-        proposals: attachments.map((att, i) => ({
-          file_index: i,
-          suggested_name: att.filename,
-          reason: "LLM failed",
-        })),
-      };
-    }
+    // Extract content summaries and propose placement via LLM
+    const fileInfos = await buildFileInfos(attachments);
+    proposal = await callProposalWithFallback(
+        fileInfos, originalEmail.subject || "", originalEmail.text || "",
+        agentFolderNames, nextPrefix, uid, attachments,
+    );
   }
 
   logger.info("Drive: Proposal result", {
@@ -449,124 +587,24 @@ async function processUpload(
   let rootFolderId: string;
   try {
     rootFolderId = await getRootFolderId(oauth2Client);
-  } catch {
+  } catch (err) {
+    logger.debug("Drive: Could not get root folder ID, using 'root'", {
+      error: err instanceof Error ? err.message : String(err),
+    });
     rootFolderId = "root";
   }
 
-  let targetFolderId: string;
-  let targetFolderPath: string;
-
-  // Match agent folders by category name (ignore NNN- prefix)
-  const proposedCategory = proposal.folder_name
-      .replace(/^\d{3}-/, "").toLowerCase();
-  const existingMatch = agentFolders.find((f) => {
-    const cat = f.name.replace(/^\d{3}-/, "").toLowerCase();
-    return cat === proposedCategory;
-  });
-  if (existingMatch) {
-    targetFolderId = existingMatch.id;
-    targetFolderPath = existingMatch.name;
-    // Rename if existing folder is missing NNN- prefix
-    if (!/^\d{3}-/.test(targetFolderPath)) {
-      const fixedName = `${nextPrefix}-${targetFolderPath}`;
-      await renameFolder(oauth2Client, targetFolderId, fixedName);
-      targetFolderPath = fixedName;
-    }
-    // Ensure folder is at root level (not nested under another folder)
-    try {
-      const folderInfo = await getDriveFolderParent(oauth2Client, targetFolderId);
-      if (folderInfo.parentId && folderInfo.parentId !== rootFolderId) {
-        await moveFile(oauth2Client, targetFolderId, rootFolderId, folderInfo.parentId);
-      }
-    } catch {
-      // Best-effort — folder may already be at root
-    }
-  } else {
-    // Ensure new folder name always has NNN- prefix
-    const hasPrefix = /^\d{3}-/.test(proposal.folder_name);
-    const folderName = hasPrefix ?
-      proposal.folder_name : `${nextPrefix}-${proposal.folder_name}`;
-    targetFolderId = await createFolder(
-        oauth2Client, folderName, rootFolderId,
+  const {folderId: targetFolderId, folderPath: targetFolderPath} =
+    await resolveTargetFolder(
+        oauth2Client, proposal, agentFolders, nextPrefix, rootFolderId,
     );
-    targetFolderPath = folderName;
-  }
 
-  // Place marker file in target folder
-  await placeMarkerFile(oauth2Client, targetFolderId);
-
-  // Upload each file
-  const uploadEmailDate = originalEmail.headers?.date;
-  const results: ProcessedDriveFile[] = [];
-  for (let i = 0; i < attachments.length; i++) {
-    const attachment = attachments[i];
-    const placementProposal = proposal.proposals.find((p) => p.file_index === i);
-    const suggestedBase = placementProposal?.suggested_name || attachment.filename;
-    const extension = getExtension(attachment.filename);
-    const withExt = suggestedBase.endsWith(extension) ?
-      suggestedBase : `${suggestedBase}${extension}`;
-    const suggestedName = ensureDatePrefix(withExt, uploadEmailDate);
-
-    try {
-      const stream = await streamFromUrl(attachment.downloadUrl);
-      const uploaded = await uploadFile(
-          oauth2Client,
-          targetFolderId,
-          suggestedName,
-          attachment.contentType,
-          stream,
-      );
-
-      results.push({
-        filename: suggestedName,
-        folderPath: targetFolderPath,
-        suggestedName,
-        driveFileId: uploaded.id,
-        driveWebLink: uploaded.webViewLink,
-      });
-
-      logger.info("Drive: File uploaded", {
-        filename: suggestedName,
-        folderPath: targetFolderPath,
-        driveFileId: uploaded.id,
-      });
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      logger.error("Drive: Failed to upload file", {
-        filename: attachment.filename,
-        error: errorMessage,
-      });
-
-      // Fallback: upload with original name to root
-      try {
-        const fallbackStream = await streamFromUrl(attachment.downloadUrl);
-        const uploaded = await uploadFile(
-            oauth2Client,
-            rootFolderId,
-            attachment.filename,
-            attachment.contentType,
-            fallbackStream,
-        );
-        results.push({
-          filename: attachment.filename,
-          folderPath: "My Drive",
-          suggestedName: attachment.filename,
-          driveFileId: uploaded.id,
-          driveWebLink: uploaded.webViewLink,
-          error: `Upload to target failed, uploaded to root: ${errorMessage}`,
-        });
-      } catch (uploadError) {
-        const uploadErrorMessage =
-          uploadError instanceof Error ? uploadError.message : String(uploadError);
-        results.push({
-          filename: attachment.filename,
-          folderPath: "",
-          suggestedName: attachment.filename,
-          error: `Upload failed: ${uploadErrorMessage}`,
-        });
-      }
-    }
-  }
+  // Upload all files in parallel
+  const results = await uploadAttachments(
+      oauth2Client, attachments, proposal,
+      targetFolderId, targetFolderPath, rootFolderId,
+      originalEmail.headers?.date,
+  );
 
   const succeeded = results.filter((r) => !r.error || r.driveFileId);
   const failed = results.filter((r) => r.error && !r.driveFileId);
@@ -656,7 +694,10 @@ async function handleMoveReply(
   let folderTree: DriveFolder[];
   try {
     folderTree = await getDriveFolderTree(oauth2Client);
-  } catch {
+  } catch (err) {
+    logger.debug("Drive: Could not fetch folder tree", {
+      error: err instanceof Error ? err.message : String(err),
+    });
     folderTree = [];
   }
 
@@ -675,7 +716,7 @@ async function handleMoveReply(
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     logger.error("Drive: LLM move interpretation failed", {error: errMsg});
-    const html = applyTemplate(driveMailTemplates.uploadFailed.html, {});
+    const html = applyTemplate(driveMailTemplates.moveFailed.html, {});
     await sendDriveEmailResponse(sender, email, html);
     return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: [], error: "LLM failed"};
   }
@@ -692,7 +733,10 @@ async function handleMoveReply(
   let rootFolderId: string;
   try {
     rootFolderId = await getRootFolderId(oauth2Client);
-  } catch {
+  } catch (err) {
+    logger.debug("Drive: Could not get root folder ID, using 'root'", {
+      error: err instanceof Error ? err.message : String(err),
+    });
     rootFolderId = "root";
   }
 
@@ -843,7 +887,10 @@ async function handleMoveReply(
 
   const succeeded = results.filter((r) => !r.error);
 
-  if (succeeded.length > 0) {
+  if (succeeded.length === 0) {
+    const html = applyTemplate(driveMailTemplates.moveFailed.html, {});
+    await sendDriveEmailResponse(sender, email, html);
+  } else {
     const updatedEmbedded: DriveEmbeddedData = {
       files: succeeded.map((r) => ({
         id: r.driveFileId || "",
@@ -855,14 +902,27 @@ async function handleMoveReply(
     };
 
     const embeddedHtml = buildEmbeddedDriveData(updatedEmbedded);
-    const file = succeeded[0];
-    const html = applyTemplate(driveMailTemplates.fileMoved.html, {
-      FILE_NAME: file.filename,
-      NEW_PATH: file.folderPath,
-      FILE_LINK: file.driveWebLink || "#",
-      EMBEDDED_DATA: embeddedHtml,
-    });
-    await sendDriveEmailResponse(sender, email, html);
+
+    if (succeeded.length === 1) {
+      const file = succeeded[0];
+      const html = applyTemplate(driveMailTemplates.fileMoved.html, {
+        FILE_NAME: file.filename,
+        NEW_PATH: file.folderPath,
+        FILE_LINK: file.driveWebLink || "#",
+        EMBEDDED_DATA: embeddedHtml,
+      });
+      await sendDriveEmailResponse(sender, email, html);
+    } else {
+      const fileListHtml = succeeded.map((file) =>
+        `<b>${file.filename}</b> → ${file.folderPath}` +
+        (file.driveWebLink ? ` (<a href="${file.driveWebLink}">view</a>)` : ""),
+      ).join("<br>");
+      const html = applyTemplate(driveMailTemplates.multipleFilesMoved.html, {
+        FILE_LIST: fileListHtml,
+        EMBEDDED_DATA: embeddedHtml,
+      });
+      await sendDriveEmailResponse(sender, email, html);
+    }
   }
 
   sendEvent(uid, "driveFileMoved", {

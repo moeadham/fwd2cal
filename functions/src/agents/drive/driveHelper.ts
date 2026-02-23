@@ -81,31 +81,6 @@ async function getDriveFolderTree(
 }
 
 /**
- * Format the folder tree as indented text for the LLM prompt
- */
-function formatFolderTreeForLLM(roots: DriveFolder[]): string {
-  const lines: string[] = [];
-
-  function walk(node: DriveFolder, depth: number): void {
-    const indent = "  ".repeat(depth);
-    lines.push(`${indent}- ${node.name}/ [id: ${node.id}]`);
-    // Sort children alphabetically for consistency
-    const sorted = [...node.children].sort((a, b) => a.name.localeCompare(b.name));
-    for (const child of sorted) {
-      walk(child, depth + 1);
-    }
-  }
-
-  // Sort roots alphabetically
-  const sorted = [...roots].sort((a, b) => a.name.localeCompare(b.name));
-  for (const root of sorted) {
-    walk(root, 0);
-  }
-
-  return lines.join("\n");
-}
-
-/**
  * Upload a file to Google Drive
  */
 async function uploadFile(
@@ -258,8 +233,9 @@ async function findAgentManagedFolders(
     oauth2Client: Auth.OAuth2Client,
 ): Promise<Array<{id: string; name: string}>> {
   const drive = getDriveClient(oauth2Client);
-  const results: Array<{id: string; name: string}> = [];
 
+  // Collect all parent folder IDs from marker files
+  const parentIds = new Set<string>();
   let pageToken: string | undefined;
   do {
     const response = await drive.files.list({
@@ -272,23 +248,32 @@ async function findAgentManagedFolders(
     const markerFiles = response.data.files || [];
     for (const marker of markerFiles) {
       const parentId = marker.parents?.[0];
-      if (!parentId) continue;
-
-      // Fetch the parent folder name
-      try {
-        const folder = await drive.files.get({
-          fileId: parentId,
-          fields: "id, name",
-        });
-        if (folder.data.id && folder.data.name) {
-          results.push({id: folder.data.id, name: folder.data.name});
-        }
-      } catch (_err) {
-        logger.warn("Drive: Could not fetch marker parent folder", {parentId});
-      }
+      if (parentId) parentIds.add(parentId);
     }
     pageToken = response.data.nextPageToken || undefined;
   } while (pageToken);
+
+  if (parentIds.size === 0) {
+    logger.info("Drive: Found agent-managed folders", {count: 0, folders: []});
+    return [];
+  }
+
+  // Fetch all parent folder names in parallel
+  const results: Array<{id: string; name: string}> = [];
+  const fetches = [...parentIds].map(async (parentId) => {
+    try {
+      const folder = await drive.files.get({
+        fileId: parentId,
+        fields: "id, name",
+      });
+      if (folder.data.id && folder.data.name) {
+        results.push({id: folder.data.id, name: folder.data.name});
+      }
+    } catch (_err) {
+      logger.warn("Drive: Could not fetch marker parent folder", {parentId});
+    }
+  });
+  await Promise.all(fetches);
 
   logger.info("Drive: Found agent-managed folders", {
     count: results.length,
@@ -324,9 +309,10 @@ async function getFolderFileCount(
   const response = await drive.files.list({
     q: `'${folderId}' in parents and trashed = false` +
       ` and name != '.sorted.by.fwd2drive.com'`,
-    fields: "files(id)",
+    fields: "nextPageToken, files(id)",
     pageSize: 100,
   });
+  if (response.data.nextPageToken) return 101;
   return response.data.files?.length || 0;
 }
 
@@ -348,7 +334,6 @@ async function getDriveFolderParent(
 export {
   getDriveClient,
   getDriveFolderTree,
-  formatFolderTreeForLLM,
   uploadFile,
   createFolder,
   findFolderInTree,

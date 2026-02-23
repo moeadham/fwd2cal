@@ -4,6 +4,7 @@ import {onRequest, HttpsOptions} from "firebase-functions/v2/https";
 import {Resend} from "resend";
 
 import {handleDriveEmail, processUpload} from "./driveHandler";
+import {driveSignupUrl} from "./mailTemplates";
 import {signupCallbackHandler} from "../../auth/authHandler";
 import {getAgentCredentials, getRedirectUriIndex} from "../../auth/credentials";
 import {ENVIRONMENT_NAME, RESEND_API_KEY} from "../../util/config";
@@ -216,11 +217,8 @@ export const v2driveConfirm = onRequest(
       }
 
       // No OAuth — redirect to signup with emailId as state
-      const isDevProject = process.env.GCLOUD_PROJECT === "fwd2cal-dev-2578e";
-      const signupBase = isDevProject ?
-        "https://us-central1-fwd2cal-dev-2578e.cloudfunctions.net/v2driveSignup" :
-        "https://us-central1-fwd2cal-prod.cloudfunctions.net/v2driveSignup";
-      res.redirect(302, `${signupBase}?state=${encodeURIComponent(emailId)}`);
+      const encodedState = Buffer.from(JSON.stringify({emailId})).toString("base64url");
+      res.redirect(302, `${driveSignupUrl}?state=${encodeURIComponent(encodedState)}`);
     },
 );
 

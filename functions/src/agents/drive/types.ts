@@ -4,33 +4,6 @@ import {z} from "zod";
 // ZOD SCHEMAS
 // ============================================================================
 
-// LLM file placement result for a single file
-export const FilePlacementItemSchema = z.object({
-  file_index: z.number().describe("The 0-based index of the file from the input list"),
-  folder_id: z.string().describe("The Google Drive folder ID where the file should be placed"),
-  folder_path: z.string().describe(
-      "The human-readable path of the chosen folder (e.g., 'Documents/Work/Projects')",
-  ),
-  suggested_name: z.string().describe(
-      "A unique, descriptive filename without extension, ALWAYS prefixed with " +
-      "YYYY.MM.DD date (e.g., '2024.03.15 Amazon Invoice Laptop')",
-  ),
-  reason: z.string().describe("Brief reasoning for why this folder and name were chosen"),
-});
-
-export type FilePlacementItem = z.infer<typeof FilePlacementItemSchema>;
-
-// Batch placement result for all files in one email
-export const BatchFilePlacementSchema = z.object({
-  placements: z.array(FilePlacementItemSchema).describe("Placement decision for each file"),
-});
-
-export type BatchFilePlacement = z.infer<typeof BatchFilePlacementSchema>;
-
-// Keep single-file alias for backward compatibility
-export const FilePlacementSchema = FilePlacementItemSchema;
-export type FilePlacement = FilePlacementItem;
-
 // File proposal result (Phase 1 — before Drive access)
 export const FileProposalItemSchema = z.object({
   file_index: z.number().describe("The 0-based index of the file from the input list"),
@@ -123,7 +96,6 @@ export interface DrivePromptConfig {
 }
 
 export interface DrivePrompts {
-  pickFilePlacement: DrivePromptConfig;
   proposeFilePlacement: DrivePromptConfig;
   interpretMoveInstructions: DrivePromptConfig;
 }
@@ -143,10 +115,11 @@ export interface DriveMailTemplates {
   fileProposal: DriveMailTemplate;
   multipleFileProposal: DriveMailTemplate;
   fileMoved: DriveMailTemplate;
+  multipleFilesMoved: DriveMailTemplate;
   driveAuthFailed: DriveMailTemplate;
   noAttachments: DriveMailTemplate;
-  notDriveUser: DriveMailTemplate;
   uploadFailed: DriveMailTemplate;
+  moveFailed: DriveMailTemplate;
 }
 
 // ============================================================================
@@ -163,4 +136,15 @@ export interface DriveEmbeddedFileData {
 
 export interface DriveEmbeddedData {
   files: DriveEmbeddedFileData[];
+}
+
+// ============================================================================
+// FILE INFO (used by LLM proposal)
+// ============================================================================
+
+export interface FileInfo {
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+  contentSummary: string;
 }
