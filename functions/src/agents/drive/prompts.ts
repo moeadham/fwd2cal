@@ -72,7 +72,7 @@ Rules:
 You will receive:
 1. A tree summary of the current Drive structure
 2. Previously proposed folders (from earlier batches) — you MUST reuse these and may add new ones
-3. A batch of files with: ID, name, type, folder path, modification date, and size
+3. A batch of files with: ID, name, type, folder path, creation date, and size
 
 ## Folder naming rules:
 - Top-level folders use "NN - CategoryName" format (e.g., "01 - Personal", "02 - Work", "03 - Finance")
@@ -84,7 +84,7 @@ You will receive:
 
 ## Filename rules:
 - Rename files to "YYYY.MM.DD - descriptive-name.ext" format
-- Use the file's modification date if no better date is evident from the filename
+- Use the file's creation date if no better date is evident from the filename
 - Keep names concise but descriptive
 - Preserve the original file extension
 

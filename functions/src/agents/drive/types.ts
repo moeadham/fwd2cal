@@ -96,7 +96,7 @@ export interface DriveFileEntry {
   mimeType: string;
   parentId: string | null;
   parentPath: string;
-  modifiedTime: string;
+  createdTime: string;
   size: number;
   webViewLink: string;
   isFolder: boolean;

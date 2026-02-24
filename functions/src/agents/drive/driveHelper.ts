@@ -342,7 +342,7 @@ async function listAllDriveFiles(
   name: string;
   mimeType: string;
   parents: string[];
-  modifiedTime: string;
+  createdTime: string;
   size: string;
   webViewLink: string;
 }>> {
@@ -352,7 +352,7 @@ async function listAllDriveFiles(
     name: string;
     mimeType: string;
     parents: string[];
-    modifiedTime: string;
+    createdTime: string;
     size: string;
     webViewLink: string;
   }> = [];
@@ -361,7 +361,7 @@ async function listAllDriveFiles(
   do {
     const response = await drive.files.list({
       q: "trashed = false and 'me' in owners",
-      fields: "nextPageToken, files(id, name, mimeType, parents, modifiedTime, size, webViewLink)",
+      fields: "nextPageToken, files(id, name, mimeType, parents, createdTime, size, webViewLink)",
       pageSize: 1000,
       pageToken: pageToken,
     });
@@ -374,7 +374,7 @@ async function listAllDriveFiles(
           name: file.name,
           mimeType: file.mimeType || "",
           parents: file.parents || [],
-          modifiedTime: file.modifiedTime || "",
+          createdTime: file.createdTime || "",
           size: file.size || "0",
           webViewLink: file.webViewLink || "",
         });

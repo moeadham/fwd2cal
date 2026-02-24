@@ -173,7 +173,7 @@ function buildChunkUserText(
     ` (${nonFolders.length} files, ${totalFiles} total in drive)\n`;
   for (const file of nonFolders) {
     userText += `- [${file.id}] "${file.name}" in "${file.parentPath}" ` +
-      `(${file.mimeType}, modified: ${file.modifiedTime}, ` +
+      `(${file.mimeType}, created: ${file.createdTime}, ` +
       `${file.size} bytes)\n`;
   }
 

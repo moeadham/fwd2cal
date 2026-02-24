@@ -107,7 +107,7 @@ function buildFileEntries(
       name: string;
       mimeType: string;
       parents: string[];
-      modifiedTime: string;
+      createdTime: string;
       size: string;
       webViewLink: string;
     }>,
@@ -142,7 +142,7 @@ function buildFileEntries(
     mimeType: f.mimeType,
     parentId: f.parents[0] || null,
     parentPath: getPath(f.id),
-    modifiedTime: f.modifiedTime,
+    createdTime: f.createdTime,
     size: parseInt(f.size, 10) || 0,
     webViewLink: f.webViewLink,
     isFolder: f.mimeType === "application/vnd.google-apps.folder",
