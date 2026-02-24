@@ -214,6 +214,7 @@ export interface DrivePrompts {
   proposeFilePlacement: DrivePromptConfig;
   interpretMoveInstructions: DrivePromptConfig;
   proposeOrganization: DrivePromptConfig;
+  consolidateSummaries: DrivePromptConfig;
 }
 
 // ============================================================================

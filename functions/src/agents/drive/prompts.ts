@@ -101,6 +101,11 @@ You will receive:
 2. file_actions: ONLY files that need changes. Do NOT include "keep" entries.
 3. summary: Brief summary of changes proposed in THIS batch`,
   },
+
+  consolidateSummaries: {
+    model: DEFAULT_MODEL,
+    prompt: `Combine these per-batch summaries into a single concise summary (2-3 sentences max) of all proposed Drive changes.`,
+  },
 };
 
 export {prompts};

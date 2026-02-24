@@ -1,3 +1,4 @@
+import {z} from "zod";
 import {logger} from "firebase-functions/v2";
 import {defaultCompletion, DEFAULT_TEMP} from "../../util/openai";
 import {prompts} from "./prompts";
@@ -285,10 +286,38 @@ async function proposeOrganization(
     finalFolders: accumulatedFolders.length,
   });
 
+  // Consolidate per-batch summaries into one concise summary
+  let finalSummary = summaries[0] ?? "";
+  if (summaries.length > 1) {
+    const consolidateMessages: ChatMessage[] = [
+      {
+        role: "system",
+        content: prompts.consolidateSummaries.prompt,
+      },
+      {
+        role: "user",
+        content: summaries.map((s, i) =>
+          `Batch ${i + 1}: ${s}`).join("\n"),
+      },
+    ];
+    try {
+      const result = await defaultCompletion<{summary: string}>(
+          consolidateMessages,
+          prompts.consolidateSummaries.model,
+          DEFAULT_TEMP,
+          z.object({summary: z.string()}),
+          uid,
+      );
+      finalSummary = (result as {summary: string}).summary;
+    } catch (err) {
+      logger.warn("Failed to consolidate summaries, using first", err);
+    }
+  }
+
   return {
     proposed_folders: accumulatedFolders,
     file_actions: allFileActions,
-    summary: summaries.join(" "),
+    summary: finalSummary,
   };
 }
 
