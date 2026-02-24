@@ -772,6 +772,9 @@ async function handleMoveReply(
 
   // Track source folders already renamed so we don't rename twice
   const renamedFolders = new Map<string, string>(); // folderId → newName
+  // Track resolved categories to prevent duplicate folder creation
+  // category (lowercase) → {folderId, folderPath}
+  const resolvedCategories = new Map<string, {folderId: string; folderPath: string}>();
   // Track the resolved folder ID for each file (for embedded data in reply)
   const fileFolderIds = new Map<string, string>(); // filename → folderId
 
@@ -784,41 +787,65 @@ async function handleMoveReply(
     let newFolderPath: string;
     let skipMove = false;
 
-    // Resolve target folder
-    const needsNewFolder =
-      (move.folder_id === "root" && move.folder_path) ||
-      (!findFolderInTree(folderTree, move.folder_id) &&
-       !findFolderByName(folderTree, move.folder_path || move.folder_id));
+    // Normalize target category for dedup
+    const rawCategory = toTitleCase(move.folder_path || move.folder_id);
+    const categoryKey = rawCategory.replace(/^\d{2,3}-/, "").toLowerCase();
 
-    if (needsNewFolder) {
-      const targetCategory = toTitleCase(move.folder_path || move.folder_id);
-      // Ensure targetName always has NNN- prefix and Title Case
-      const hasPrefix = /^\d{2,3}-/.test(targetCategory);
-      const targetName = hasPrefix ? targetCategory :
-        `${getNextFolderPrefix(agentFolders.map((f) => f.name))}-${targetCategory}`;
+    // Check if we already resolved this category in a previous iteration
+    const alreadyResolved = resolvedCategories.get(categoryKey);
+    if (alreadyResolved) {
+      newFolderId = alreadyResolved.folderId;
+      newFolderPath = alreadyResolved.folderPath;
+      // Skip move if the file is already in this folder (e.g., folder was renamed)
+      skipMove = file.folderId === newFolderId;
+    } else {
+      // Resolve target folder
+      const needsNewFolder =
+        (move.folder_id === "root" && move.folder_path) ||
+        (!findFolderInTree(folderTree, move.folder_id) &&
+         !findFolderByName(folderTree, move.folder_path || move.folder_id));
 
-      const sourceAgent = agentFolders.find(
-          (f) => f.id === file.folderId,
-      );
+      if (needsNewFolder) {
+        const targetCategory = rawCategory;
+        // Ensure targetName always has NNN- prefix and Title Case
+        const hasPrefix = /^\d{2,3}-/.test(targetCategory);
+        const targetName = hasPrefix ? targetCategory :
+          `${getNextFolderPrefix(agentFolders.map((f) => f.name))}-${targetCategory}`;
 
-      // If source is agent-managed and will be empty, rename instead
-      if (sourceAgent && !renamedFolders.has(file.folderId)) {
-        const fileCount = await getFolderFileCount(
-            oauth2Client, file.folderId,
+        const sourceAgent = agentFolders.find(
+            (f) => f.id === file.folderId,
         );
-        const movingOut = moveResult.moves.filter(
-            (m) => embeddedData.files[m.file_index]?.folderId === file.folderId,
-        ).length;
 
-        if (fileCount <= movingOut) {
-          // Preserve the source folder's existing NNN- prefix
-          const sourcePrefixMatch = sourceAgent.name.match(/^(\d{2,3}-)/);
-          const renameTo = sourcePrefixMatch ?
-            `${sourcePrefixMatch[1]}${targetCategory}` : targetName;
-          await renameFolder(oauth2Client, file.folderId, renameTo);
-          renamedFolders.set(file.folderId, renameTo);
+        // If source is agent-managed and will be empty, rename instead
+        if (sourceAgent && !renamedFolders.has(file.folderId)) {
+          const fileCount = await getFolderFileCount(
+              oauth2Client, file.folderId,
+          );
+          const movingOut = moveResult.moves.filter(
+              (m) => embeddedData.files[m.file_index]?.folderId === file.folderId,
+          ).length;
+
+          if (fileCount <= movingOut) {
+            // Preserve the source folder's existing NNN- prefix
+            const sourcePrefixMatch = sourceAgent.name.match(/^(\d{2,3}-)/);
+            const renameTo = sourcePrefixMatch ?
+              `${sourcePrefixMatch[1]}${targetCategory}` : targetName;
+            await renameFolder(oauth2Client, file.folderId, renameTo);
+            renamedFolders.set(file.folderId, renameTo);
+            newFolderId = file.folderId;
+            newFolderPath = renameTo;
+            skipMove = true;
+          } else {
+            newFolderId = await createFolder(
+                oauth2Client, targetName, rootFolderId,
+            );
+            newFolderPath = targetName;
+            await placeMarkerFile(oauth2Client, newFolderId);
+          }
+        } else if (renamedFolders.has(file.folderId)) {
+          // Folder already renamed for a previous file in this batch
           newFolderId = file.folderId;
-          newFolderPath = renameTo;
+          newFolderPath = renamedFolders.get(file.folderId)!;
           skipMove = true;
         } else {
           newFolderId = await createFolder(
@@ -827,42 +854,34 @@ async function handleMoveReply(
           newFolderPath = targetName;
           await placeMarkerFile(oauth2Client, newFolderId);
         }
-      } else if (renamedFolders.has(file.folderId)) {
-        // Folder already renamed for a previous file in this batch
-        newFolderId = file.folderId;
-        newFolderPath = renamedFolders.get(file.folderId)!;
-        skipMove = true;
       } else {
-        newFolderId = await createFolder(
-            oauth2Client, targetName, rootFolderId,
-        );
-        newFolderPath = targetName;
-        await placeMarkerFile(oauth2Client, newFolderId);
-      }
-    } else {
-      // Target folder exists — only use it if it's agent-managed
-      const isAgentTarget = agentFolders.some(
-          (f) => f.id === move.folder_id,
-      );
-      if (isAgentTarget) {
-        const agentFolder = agentFolders.find(
+        // Target folder exists — only use it if it's agent-managed
+        const isAgentTarget = agentFolders.some(
             (f) => f.id === move.folder_id,
-        )!;
-        newFolderId = agentFolder.id;
-        newFolderPath = agentFolder.name;
-      } else {
-        // LLM picked a non-agent folder — create agent-managed one
-        const targetName = toTitleCase(move.folder_path || move.folder_id);
-        const nextPfx = getNextFolderPrefix(
-            agentFolders.map((f) => f.name),
         );
-        const agentName = `${nextPfx}-${targetName}`;
-        newFolderId = await createFolder(
-            oauth2Client, agentName, rootFolderId,
-        );
-        newFolderPath = agentName;
-        await placeMarkerFile(oauth2Client, newFolderId);
+        if (isAgentTarget) {
+          const agentFolder = agentFolders.find(
+              (f) => f.id === move.folder_id,
+          )!;
+          newFolderId = agentFolder.id;
+          newFolderPath = agentFolder.name;
+        } else {
+          // LLM picked a non-agent folder — create agent-managed one
+          const targetName = toTitleCase(move.folder_path || move.folder_id);
+          const nextPfx = getNextFolderPrefix(
+              agentFolders.map((f) => f.name),
+          );
+          const agentName = `${nextPfx}-${targetName}`;
+          newFolderId = await createFolder(
+              oauth2Client, agentName, rootFolderId,
+          );
+          newFolderPath = agentName;
+          await placeMarkerFile(oauth2Client, newFolderId);
+        }
       }
+
+      // Cache the resolved category for subsequent files
+      resolvedCategories.set(categoryKey, {folderId: newFolderId, folderPath: newFolderPath});
     }
 
     // Safety net: ensure folder name has NNN- prefix — only rename managed folders
