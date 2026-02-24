@@ -82,14 +82,29 @@ async function listAttachments(
     return [];
   }
 
+  // Detect inline images: content_disposition=inline OR has a content_id (cid: reference)
+  const isInlineImage = (a: AttachmentInfo) =>
+    a.content_type?.startsWith("image/") &&
+    (a.content_disposition === "inline" || !!a.content_id);
+
+  // Check if there are any non-inline-image attachments (PDFs, docs, etc.)
+  const hasNonImageAttachments = attachmentsList.some(
+      (a) => !isInlineImage(a),
+  );
+
   const attachments: DriveAttachment[] = [];
   for (const info of attachmentsList) {
-    // Skip small inline images (logos, tracking pixels)
-    if (info.content_disposition === "inline" && info.content_type?.startsWith("image/")) {
-      if (!info.size || info.size < MIN_INLINE_IMAGE_BYTES) {
-        logger.info("Skipping small inline image (logo/tracking pixel)", {
+    // Skip inline images (email header/footer/signature images)
+    if (isInlineImage(info)) {
+      // If there are real file attachments, skip ALL inline images (they're email chrome)
+      // If there are only inline images, keep large ones (they're likely the actual content)
+      if (hasNonImageAttachments || !info.size || info.size < MIN_INLINE_IMAGE_BYTES) {
+        logger.info("Skipping inline image", {
           filename: info.filename,
           size: info.size,
+          content_id: info.content_id,
+          content_disposition: info.content_disposition,
+          reason: hasNonImageAttachments ? "email has file attachments" : "too small",
         });
         continue;
       }
