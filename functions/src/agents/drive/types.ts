@@ -176,7 +176,8 @@ export interface OrganizeProposalDoc {
   expiresAt: string;
   proposal: DriveOrganizeProposal;
   cost: OrganizeCostBreakdown;
-  snapshotId?: string;
+  snapshot?: OrganizeSnapshotAction[];
+  completedAt?: string;
 }
 
 // Snapshot for undo (stored in Firestore)

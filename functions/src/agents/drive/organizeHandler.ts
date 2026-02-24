@@ -1,5 +1,11 @@
 import {logger} from "firebase-functions/v2";
-import {getUserFromEmail, getUserFromUID, saveOrganizeProposal} from "../../util/firestoreHandler";
+import {
+  getUserFromEmail,
+  getUserFromUID,
+  saveOrganizeProposal,
+  getOrganizeProposal,
+  updateOrganizeProposalStatus,
+} from "../../util/firestoreHandler";
 import {getOauthClient} from "../../auth/authHandler";
 import {sendEvent} from "../../util/analytics";
 import {
@@ -24,9 +30,24 @@ import {
   OrganizeCostBreakdown,
   OrganizeProcessingResult,
   OrganizeEmbeddedData,
+  OrganizeProposalDoc,
+  OrganizeSnapshotAction,
 } from "./types";
+import {Auth} from "googleapis";
 import {driveMailTemplates, driveFullScopeSignupUrl} from "./mailTemplates";
-import {listAllDriveFiles} from "./driveHelper";
+import {
+  listAllDriveFiles,
+  createFolder,
+  moveFile,
+  renameFile,
+  renameFolder,
+  placeMarkerFile,
+  getRootFolderId,
+  getDriveClient,
+  findAgentManagedFolders,
+  getFolderFileCount,
+  deleteFolder,
+} from "./driveHelper";
 import {proposeOrganization} from "./llm";
 
 // ============================================================================
@@ -678,4 +699,588 @@ async function scanAndPropose(
   };
 }
 
-export {handleOrganizeDrive, hasFullDriveScope};
+// ============================================================================
+// APPROVAL HANDLER
+// ============================================================================
+
+/**
+ * Handle a user's approval reply to an organize-drive proposal.
+ * Called from driveHandler when ?o= embedded data is detected.
+ */
+async function handleOrganizeApproval(
+    email: TransformedEmail,
+    proposalId: string,
+): Promise<OrganizeProcessingResult> {
+  const sender = getSenderFromRawEmail(email);
+  if (!sender) {
+    return emptyResult("No sender found");
+  }
+
+  // Look up user
+  const uid = await getUserFromEmail(sender);
+  if (!uid) {
+    logger.warn("Drive organize approval: Unknown user", {sender});
+    return emptyResult("User not found");
+  }
+
+  // Fetch proposal from Firestore
+  let proposalDoc: OrganizeProposalDoc;
+  try {
+    const raw = await getOrganizeProposal(proposalId);
+    if (!raw) {
+      logger.warn("Drive organize approval: Proposal not found", {proposalId});
+      const html = applyTemplate(driveMailTemplates.organizeError.html, {});
+      await sendOrganizeEmailResponse(sender, email, html);
+      return emptyResult("Proposal not found");
+    }
+    proposalDoc = raw as unknown as OrganizeProposalDoc;
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    logger.error("Drive organize approval: Failed to fetch proposal", {
+      proposalId, error: errMsg,
+    });
+    const html = applyTemplate(driveMailTemplates.organizeError.html, {});
+    await sendOrganizeEmailResponse(sender, email, html);
+    return emptyResult("Proposal fetch failed");
+  }
+
+  // Validate proposal ownership
+  if (proposalDoc.uid !== uid) {
+    logger.warn("Drive organize: UID mismatch", {
+      proposalUid: proposalDoc.uid, senderUid: uid,
+    });
+    return emptyResult("Unauthorized");
+  }
+
+  // Check if this is an undo request
+  const replyText = (email.text || "").toLowerCase().trim();
+  const isUndo = /\bundo\b/.test(replyText);
+
+  if (isUndo && proposalDoc.status === "completed") {
+    return handleOrganizeUndo(email, sender, uid, proposalId, proposalDoc);
+  }
+
+  if (proposalDoc.status !== "pending") {
+    logger.warn("Drive organize: Proposal not pending", {
+      proposalId, status: proposalDoc.status,
+    });
+    const html = `This proposal has already been ${proposalDoc.status}. ` +
+      `Send a new &quot;organize my drive&quot; email to create a fresh proposal.` +
+      `<br><br>You can always ask for help: <a href="mailto:${getSupportEmail()}">${getSupportEmail()}</a><br>`;
+    await sendOrganizeEmailResponse(sender, email, html);
+    return emptyResult(`Proposal already ${proposalDoc.status}`);
+  }
+
+  const now = new Date();
+  if (new Date(proposalDoc.expiresAt) < now) {
+    logger.warn("Drive organize: Proposal expired", {proposalId});
+    const html = `This proposal has expired. ` +
+      `Send a new &quot;organize my drive&quot; email to create a fresh proposal.` +
+      `<br><br>You can always ask for help: <a href="mailto:${getSupportEmail()}">${getSupportEmail()}</a><br>`;
+    await sendOrganizeEmailResponse(sender, email, html);
+    return emptyResult("Proposal expired");
+  }
+
+  // Mark as executing
+  await updateOrganizeProposalStatus(proposalId, "executing");
+
+  // Get OAuth client
+  let oauth2Client;
+  try {
+    oauth2Client = await getOauthClient(uid, "drive");
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    logger.error("Drive organize approval: OAuth failed", {uid, error: errMsg});
+    await updateOrganizeProposalStatus(proposalId, "pending");
+    const html = applyTemplate(driveMailTemplates.organizeError.html, {});
+    await sendOrganizeEmailResponse(sender, email, html);
+    return emptyResult("OAuth failed");
+  }
+
+  // Execute the proposal
+  const proposal = proposalDoc.proposal;
+  let execResult;
+  try {
+    execResult = await executeOrganizeProposal(oauth2Client, proposal);
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    logger.error("Drive organize approval: Execution failed", {
+      proposalId, error: errMsg,
+    });
+    await updateOrganizeProposalStatus(proposalId, "pending");
+    const html = applyTemplate(driveMailTemplates.organizeError.html, {});
+    await sendOrganizeEmailResponse(sender, email, html);
+    return emptyResult("Execution failed");
+  }
+
+  // Integrity check — undo everything if mismatches found
+  const mismatches = await verifyOrganizeResults(
+      oauth2Client, proposal, execResult.folderMap,
+  );
+
+  if (mismatches.length > 0) {
+    logger.warn("Drive organize approval: Integrity check failed, undoing", {
+      proposalId, mismatchCount: mismatches.length,
+      mismatches: mismatches.slice(0, 10),
+    });
+
+    await undoOrganizeActions(oauth2Client, execResult.snapshot);
+    await updateOrganizeProposalStatus(proposalId, "pending");
+
+    const html = `We ran into some issues while organizing your Drive and ` +
+      `have reverted all changes. Your files are back where they were.` +
+      `<br><br>Please try again by sending a new &quot;organize my drive&quot; email.` +
+      `<br><br>You can always ask for help: <a href="mailto:${getSupportEmail()}">${getSupportEmail()}</a><br>`;
+    await sendOrganizeEmailResponse(sender, email, html);
+
+    sendEvent(uid, "driveOrganizeFailed", {
+      proposalId,
+      mismatches: String(mismatches.length),
+    });
+
+    return emptyResult("Integrity check failed — changes reverted");
+  }
+
+  // All good — save snapshot and mark completed
+  await updateOrganizeProposalStatus(proposalId, "completed", {
+    snapshot: execResult.snapshot,
+    completedAt: now.toISOString(),
+  });
+
+  // Clean up empty managed folders left behind after reorganization
+  await cleanupEmptyManagedFolders(oauth2Client);
+
+  // Send completion email
+  const folderTreeHtml = renderFolderTree(proposal);
+  const filesChanged = execResult.stats.moved + execResult.stats.renamed;
+  const embeddedData: OrganizeEmbeddedData = {proposalId};
+  const embeddedHtml = buildOrganizeEmbeddedData(embeddedData);
+
+  const html = applyTemplate(driveMailTemplates.organizeComplete.html, {
+    SUMMARY: proposal.summary,
+    FILES_CHANGED: String(filesChanged),
+    FOLDER_TREE: folderTreeHtml,
+    EMBEDDED_DATA: embeddedHtml,
+  });
+  await sendOrganizeEmailResponse(sender, email, html);
+
+  sendEvent(uid, "driveOrganizeCompleted", {
+    filesChanged: String(filesChanged),
+    failed: String(execResult.stats.failed),
+  });
+
+  logger.info("Drive organize approval: Complete", {
+    proposalId, uid,
+    moved: execResult.stats.moved,
+    renamed: execResult.stats.renamed,
+    failed: execResult.stats.failed,
+  });
+
+  return {
+    totalFiles: proposal.file_actions.length,
+    filesToMove: execResult.stats.moved,
+    filesToRename: execResult.stats.renamed,
+    totalCost: proposalDoc.cost.totalCost,
+    proposalSent: false,
+  };
+}
+
+// ============================================================================
+// EXECUTION
+// ============================================================================
+
+/**
+ * Execute the reorganization proposal on the user's Drive.
+ * Creates folders, moves files, renames files, and builds a snapshot for undo.
+ */
+async function executeOrganizeProposal(
+    oauth2Client: Auth.OAuth2Client,
+    proposal: DriveOrganizeProposal,
+): Promise<{
+  folderMap: Map<string, string>;
+  snapshot: OrganizeSnapshotAction[];
+  stats: {moved: number; renamed: number; failed: number; skipped: number};
+}> {
+  const rootFolderId = await getRootFolderId(oauth2Client);
+  const folderMap = new Map<string, string>(); // folder name → folder ID
+  const snapshot: OrganizeSnapshotAction[] = [];
+  const stats = {moved: 0, renamed: 0, failed: 0, skipped: 0};
+
+  // Phase 1 — Resolve/create folders
+  // Fetch existing ROOT-LEVEL folders so we don't create duplicates.
+  // Only root-level (parent == rootFolderId) to avoid subfolder name collisions.
+  const drive = getDriveClient(oauth2Client);
+  const existingRootFolders = new Map<string, string>(); // name → id
+  let pageToken: string | undefined;
+  do {
+    const resp = await drive.files.list({
+      q: "mimeType = 'application/vnd.google-apps.folder' and trashed = false" +
+        ` and 'me' in owners and '${rootFolderId}' in parents`,
+      fields: "nextPageToken, files(id, name)",
+      pageSize: 1000,
+      pageToken,
+    });
+    for (const f of resp.data.files || []) {
+      if (f.id && f.name) {
+        existingRootFolders.set(f.name, f.id);
+      }
+    }
+    pageToken = resp.data.nextPageToken || undefined;
+  } while (pageToken);
+
+  // Pre-populate folderMap from existing agent-managed folders (prevents
+  // duplicates on repeat organizes) and from folder rename actions.
+  const managedFolders = await findAgentManagedFolders(oauth2Client);
+  for (const mf of managedFolders) {
+    folderMap.set(mf.name, mf.id);
+  }
+  for (const action of proposal.file_actions) {
+    if (action.action === "rename" && action.current_path === "My Drive" &&
+        proposal.proposed_folders.some((f) => f.folder_name === action.new_name)) {
+      folderMap.set(action.new_name, action.file_id);
+    }
+  }
+
+  for (const folder of proposal.proposed_folders) {
+    // Already mapped from a managed/rename action, or exists at root with the name
+    let folderId = folderMap.get(folder.folder_name) ||
+      existingRootFolders.get(folder.folder_name);
+    if (!folderId) {
+      folderId = await createFolder(oauth2Client, folder.folder_name, rootFolderId);
+      await placeMarkerFile(oauth2Client, folderId);
+    }
+    folderMap.set(folder.folder_name, folderId);
+
+    // Create subfolders
+    if (folder.subfolders) {
+      for (const sub of folder.subfolders) {
+        const subPath = `${folder.folder_name}/${sub.subfolder_name}`;
+        const existingSubId = await findSubfolder(
+            drive, folderId, sub.subfolder_name,
+        );
+        if (existingSubId) {
+          folderMap.set(subPath, existingSubId);
+        } else {
+          const subId = await createFolder(
+              oauth2Client, sub.subfolder_name, folderId,
+          );
+          folderMap.set(subPath, subId);
+        }
+      }
+    }
+  }
+
+  logger.info("Drive organize: Folders resolved", {
+    folderCount: folderMap.size,
+  });
+
+  // Phase 2 — Execute file actions
+  // Batch fetch current parent IDs for files we'll operate on
+  const fileIds = proposal.file_actions
+      .filter((a) => a.action !== "keep")
+      .map((a) => a.file_id);
+
+  const fileParents = new Map<string, string>(); // file_id → current parent_id
+  for (let i = 0; i < fileIds.length; i += 100) {
+    const batch = fileIds.slice(i, i + 100);
+    const fetches = batch.map(async (fileId) => {
+      try {
+        const resp = await drive.files.get({
+          fileId, fields: "id, parents",
+        });
+        const parentId = resp.data.parents?.[0];
+        if (parentId) fileParents.set(fileId, parentId);
+      } catch {
+        logger.warn("Drive organize: Could not fetch file parent", {fileId});
+      }
+    });
+    await Promise.all(fetches);
+  }
+
+  for (const action of proposal.file_actions) {
+    if (action.action === "keep") {
+      stats.skipped++;
+      continue;
+    }
+
+    const currentParentId = fileParents.get(action.file_id);
+    if (!currentParentId) {
+      logger.warn("Drive organize: No parent found for file, skipping", {
+        fileId: action.file_id, name: action.current_name,
+      });
+      stats.failed++;
+      continue;
+    }
+
+    // Record snapshot entry for undo
+    const snapshotEntry: OrganizeSnapshotAction = {
+      fileId: action.file_id,
+      originalName: action.current_name,
+      originalParentId: currentParentId,
+      originalParentPath: action.current_path,
+    };
+
+    try {
+      if (action.action === "move" || action.action === "move_and_rename") {
+        const targetFolderId = folderMap.get(action.new_folder);
+        if (!targetFolderId) {
+          logger.warn("Drive organize: Target folder not found", {
+            folder: action.new_folder, fileId: action.file_id,
+          });
+          stats.failed++;
+          continue;
+        }
+
+        if (targetFolderId !== currentParentId) {
+          await moveFile(oauth2Client, action.file_id, targetFolderId, currentParentId);
+          snapshotEntry.newParentId = targetFolderId;
+          stats.moved++;
+        }
+      }
+
+      if (action.action === "rename" || action.action === "move_and_rename") {
+        // For folder renames (from seedFoldersFromDrive), use renameFolder
+        const isFolder = action.current_path === "My Drive" &&
+          proposal.proposed_folders.some((f) => f.folder_name === action.new_name);
+        if (isFolder) {
+          await renameFolder(oauth2Client, action.file_id, action.new_name);
+        } else {
+          await renameFile(oauth2Client, action.file_id, action.new_name);
+        }
+        snapshotEntry.newName = action.new_name;
+        stats.renamed++;
+      }
+
+      snapshot.push(snapshotEntry);
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      logger.error("Drive organize: Action failed", {
+        fileId: action.file_id, action: action.action, error: errMsg,
+      });
+      stats.failed++;
+    }
+  }
+
+  logger.info("Drive organize: Execution complete", stats);
+  return {folderMap, snapshot, stats};
+}
+
+/**
+ * Find a subfolder by name within a parent folder.
+ */
+async function findSubfolder(
+    drive: ReturnType<typeof getDriveClient>,
+    parentId: string,
+    name: string,
+): Promise<string | null> {
+  const resp = await drive.files.list({
+    q: `mimeType = 'application/vnd.google-apps.folder' and '${parentId}' in parents ` +
+      `and name = '${name.replace(/'/g, "\\'")}' and trashed = false`,
+    fields: "files(id)",
+    pageSize: 1,
+  });
+  return resp.data.files?.[0]?.id || null;
+}
+
+// ============================================================================
+// INTEGRITY CHECK
+// ============================================================================
+
+/**
+ * Verify that executed actions match the proposal.
+ * Fetches current state for each changed file and compares against expected.
+ */
+async function verifyOrganizeResults(
+    oauth2Client: Auth.OAuth2Client,
+    proposal: DriveOrganizeProposal,
+    folderMap: Map<string, string>,
+): Promise<Array<{fileId: string; expected: string; actual: string}>> {
+  const drive = getDriveClient(oauth2Client);
+  const mismatches: Array<{fileId: string; expected: string; actual: string}> = [];
+
+  const actionsToVerify = proposal.file_actions.filter(
+      (a) => a.action !== "keep",
+  );
+
+  // Verify in batches of 50
+  for (let i = 0; i < actionsToVerify.length; i += 50) {
+    const batch = actionsToVerify.slice(i, i + 50);
+    const checks = batch.map(async (action) => {
+      try {
+        const resp = await drive.files.get({
+          fileId: action.file_id,
+          fields: "id, name, parents",
+        });
+
+        const actualName = resp.data.name || "";
+        const actualParentId = resp.data.parents?.[0] || "";
+
+        // Check name
+        if (action.action === "rename" || action.action === "move_and_rename") {
+          if (actualName !== action.new_name) {
+            mismatches.push({
+              fileId: action.file_id,
+              expected: `name="${action.new_name}"`,
+              actual: `name="${actualName}"`,
+            });
+          }
+        }
+
+        // Check parent
+        if (action.action === "move" || action.action === "move_and_rename") {
+          const expectedParentId = folderMap.get(action.new_folder);
+          if (expectedParentId && actualParentId !== expectedParentId) {
+            mismatches.push({
+              fileId: action.file_id,
+              expected: `parent="${action.new_folder}"`,
+              actual: `parent="${actualParentId}"`,
+            });
+          }
+        }
+      } catch {
+        mismatches.push({
+          fileId: action.file_id,
+          expected: "accessible",
+          actual: "not found or inaccessible",
+        });
+      }
+    });
+    await Promise.all(checks);
+  }
+
+  return mismatches;
+}
+
+// ============================================================================
+// UNDO
+// ============================================================================
+
+/**
+ * Handle an undo request for a completed organize-drive proposal.
+ */
+async function handleOrganizeUndo(
+    email: TransformedEmail,
+    sender: string,
+    uid: string,
+    proposalId: string,
+    proposalDoc: OrganizeProposalDoc,
+): Promise<OrganizeProcessingResult> {
+  const snapshot = proposalDoc.snapshot;
+
+  if (!snapshot || snapshot.length === 0) {
+    logger.warn("Drive organize undo: No snapshot found", {proposalId});
+    const html = `Unable to undo &mdash; no snapshot was saved for this proposal.` +
+      `<br><br>You can always ask for help: <a href="mailto:${getSupportEmail()}">${getSupportEmail()}</a><br>`;
+    await sendOrganizeEmailResponse(sender, email, html);
+    return emptyResult("No snapshot");
+  }
+
+  // Check 30-day undo window
+  const completedAt = proposalDoc.completedAt;
+  if (completedAt) {
+    const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+    if (new Date().getTime() - new Date(completedAt).getTime() > thirtyDaysMs) {
+      const html = `The 30-day undo window has expired for this proposal.` +
+        `<br><br>You can always ask for help: <a href="mailto:${getSupportEmail()}">${getSupportEmail()}</a><br>`;
+      await sendOrganizeEmailResponse(sender, email, html);
+      return emptyResult("Undo window expired");
+    }
+  }
+
+  let oauth2Client;
+  try {
+    oauth2Client = await getOauthClient(uid, "drive");
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    logger.error("Drive organize undo: OAuth failed", {uid, error: errMsg});
+    const html = applyTemplate(driveMailTemplates.organizeError.html, {});
+    await sendOrganizeEmailResponse(sender, email, html);
+    return emptyResult("OAuth failed");
+  }
+
+  logger.info("Drive organize undo: Starting", {proposalId, actions: snapshot.length});
+  await undoOrganizeActions(oauth2Client, snapshot);
+  await updateOrganizeProposalStatus(proposalId, "undone");
+
+  const html = applyTemplate(driveMailTemplates.organizeUndone.html, {});
+  await sendOrganizeEmailResponse(sender, email, html);
+
+  sendEvent(uid, "driveOrganizeUndone", {
+    proposalId,
+    filesReverted: String(snapshot.length),
+  });
+
+  logger.info("Drive organize undo: Complete", {
+    proposalId, uid, filesReverted: snapshot.length,
+  });
+
+  return emptyResult();
+}
+
+/**
+ * Delete any empty agent-managed folders (those with a marker file but no other files).
+ */
+async function cleanupEmptyManagedFolders(
+    oauth2Client: Auth.OAuth2Client,
+): Promise<void> {
+  try {
+    const managedFolders = await findAgentManagedFolders(oauth2Client);
+    let deleted = 0;
+    for (const folder of managedFolders) {
+      const fileCount = await getFolderFileCount(oauth2Client, folder.id);
+      if (fileCount === 0) {
+        await deleteFolder(oauth2Client, folder.id);
+        deleted++;
+      }
+    }
+    if (deleted > 0) {
+      logger.info("Drive organize: Deleted empty managed folders", {deleted});
+    }
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    logger.warn("Drive organize: Failed to clean up empty folders", {
+      error: errMsg,
+    });
+  }
+}
+
+/**
+ * Undo organize actions by moving/renaming files back to their original state,
+ * then delete any empty agent-managed folders left behind.
+ */
+async function undoOrganizeActions(
+    oauth2Client: Auth.OAuth2Client,
+    snapshot: OrganizeSnapshotAction[],
+): Promise<void> {
+  // Undo file actions in reverse order
+  for (let i = snapshot.length - 1; i >= 0; i--) {
+    const entry = snapshot[i];
+    try {
+      // Undo rename first (restore original name)
+      if (entry.newName) {
+        await renameFile(oauth2Client, entry.fileId, entry.originalName);
+      }
+
+      // Undo move (restore original parent)
+      if (entry.newParentId && entry.newParentId !== entry.originalParentId) {
+        await moveFile(
+            oauth2Client, entry.fileId,
+            entry.originalParentId, entry.newParentId,
+        );
+      }
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      logger.error("Drive organize undo: Failed to revert action", {
+        fileId: entry.fileId, error: errMsg,
+      });
+    }
+  }
+
+  logger.info("Drive organize undo: Reverted actions", {
+    count: snapshot.length,
+  });
+
+  await cleanupEmptyManagedFolders(oauth2Client);
+}
+
+export {handleOrganizeDrive, hasFullDriveScope, handleOrganizeApproval};

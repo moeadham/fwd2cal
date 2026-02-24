@@ -403,6 +403,21 @@ async function renameFile(
   logger.info("Drive: File renamed", {fileId, newName});
 }
 
+/**
+ * Delete a folder in Google Drive (moves to trash).
+ */
+async function deleteFolder(
+    oauth2Client: Auth.OAuth2Client,
+    folderId: string,
+): Promise<void> {
+  const drive = getDriveClient(oauth2Client);
+  await drive.files.update({
+    fileId: folderId,
+    requestBody: {trashed: true},
+  });
+  logger.info("Drive: Folder trashed", {folderId});
+}
+
 export {
   getDriveClient,
   getDriveFolderTree,
@@ -418,4 +433,5 @@ export {
   getDriveFolderParent,
   listAllDriveFiles,
   renameFile,
+  deleteFolder,
 };

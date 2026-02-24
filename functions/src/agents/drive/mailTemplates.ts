@@ -122,7 +122,7 @@ const driveMailTemplates: DriveMailTemplates = {
 <hr style="border:none;border-top:1px solid #eee;margin:16px 0;">
 <b>Cost:</b> %TOTAL_COST% (%COST_PER_FILE% per file &times; %FILES_TO_CHANGE% files)
 <br><br>
-<em>Execution is coming soon! For now, this is a preview of what we would do.</em>
+<b>Reply &quot;approve&quot; to this email to start organizing your drive.</b>
 %EMBEDDED_DATA%
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
   },

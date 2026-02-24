@@ -18,6 +18,7 @@ import {TransformedEmail, ResendClient} from "../../util/types";
 import {
   DriveProcessingResult, ProcessedDriveFile, DriveFolder,
   DriveEmbeddedData, DriveAttachment, FileProposal, FileInfo,
+  OrganizeEmbeddedData,
 } from "./types";
 import {driveMailTemplates, driveSignupUrl} from "./mailTemplates";
 import {listAttachments, downloadAttachmentBuffer, extractContentSummary, streamFromUrl} from "./fileProcessor";
@@ -38,7 +39,7 @@ import {
 import {proposeFilePlacement, interpretMoveInstructions} from "./llm";
 import {fastMatchSkill} from "../../util/skills/matcher";
 import {getSkills} from "./skills";
-import {handleOrganizeDrive} from "./organizeHandler";
+import {handleOrganizeDrive, handleOrganizeApproval} from "./organizeHandler";
 import {Auth} from "googleapis";
 
 
@@ -168,6 +169,23 @@ function parseEmbeddedDriveData(html: string): DriveEmbeddedData | null {
       return JSON.parse(json) as DriveEmbeddedData;
     } catch {
       logger.warn("Drive: Failed to parse embedded drive data from link");
+    }
+  }
+  return null;
+}
+
+/**
+ * Parse embedded organize data from an email's HTML (quoted thread).
+ * Looks for the visible "View proposal" link with encoded proposalId.
+ */
+function parseOrganizeEmbeddedData(html: string): OrganizeEmbeddedData | null {
+  const linkMatch = html.match(/fwd2cal\.com\/d\?o=([A-Za-z0-9_-]+)/);
+  if (linkMatch) {
+    try {
+      const json = Buffer.from(linkMatch[1], "base64url").toString();
+      return JSON.parse(json) as OrganizeEmbeddedData;
+    } catch {
+      logger.warn("Drive: Failed to parse embedded organize data from link");
     }
   }
   return null;
@@ -415,6 +433,15 @@ async function handleDriveEmail(
   if (!verifyEmail(email)) {
     logger.warn("Drive: Unverified email", {sender});
     return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: [], error: "Unverified email"};
+  }
+
+  // Check if this is a REPLY to an organize-drive proposal (approval)
+  // Must come before skill match — the quoted thread subject still matches "organize drive"
+  const organizeData = parseOrganizeEmbeddedData(email.html || "");
+  if (organizeData) {
+    logger.info("Drive: organize-drive approval detected", {sender, proposalId: organizeData.proposalId});
+    await handleOrganizeApproval(email, organizeData.proposalId);
+    return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: []};
   }
 
   // Check for organize-drive skill match
