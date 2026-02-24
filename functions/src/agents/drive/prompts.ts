@@ -20,14 +20,18 @@ Return a single folder_name and a naming proposal for EACH file (matching by fil
 - Folders use the format NN-CategoryName (e.g., "01-Invoices", "02-Contracts")
 - If an existing agent-managed folder matches the file category, REUSE it and set is_existing_folder to true
 - If no match, create a new folder using the next available prefix number provided
+- Use broad, intuitive categories consistent with: Personal, Work, Finance, Medical, Legal, Education, Photos, Invoices, Receipts, Contracts, Insurance, Archive
 - ALWAYS check filenames and content for explicit type indicators:
-  - "Invoice" anywhere → folder should be "NN-Invoices"
-  - Proof of payment / transaction → "NN-Receipts"
+  - "Invoice" anywhere → "NN-Invoices"
+  - Proof of payment / transaction receipt → "NN-Receipts"
+  - Bank statement, credit card statement, financial statement, account summary, tax document → "NN-Finance"
   - Contract or agreement → "NN-Contracts"
-  - Tax document → "NN-Tax"
   - Medical records → "NN-Medical"
   - Insurance → "NN-Insurance"
   - Legal → "NN-Legal"
+  - School, university, course, training, certification → "NN-Education"
+  - Personal ID, passport, visa, birth certificate → "NN-Personal"
+  - Work-related, employment, HR, payroll → "NN-Work"
   - Photos or images without text content → "NN-Photos"
 - ALL files from the same email go to the SAME folder
 

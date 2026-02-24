@@ -102,9 +102,6 @@ async function listAttachments(
         logger.info("Skipping inline image", {
           filename: info.filename,
           size: info.size,
-          content_id: info.content_id,
-          content_disposition: info.content_disposition,
-          reason: hasNonImageAttachments ? "email has file attachments" : "too small",
         });
         continue;
       }
