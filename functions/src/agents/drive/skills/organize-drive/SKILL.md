@@ -11,7 +11,7 @@ triggers:
   - sort my drive
   - sort drive
 fastPattern: "organiz(?:e|ing)\\s+(?:my\\s+)?drive|clean\\s+up\\s+(?:my\\s+)?drive|sort\\s+(?:my\\s+)?drive|reorganiz(?:e|ing)\\s+(?:my\\s+)?drive"
-subjectOnly: true
+subjectOnly: false
 ---
 
 # Organize Drive
@@ -27,4 +27,4 @@ subjectOnly: true
 4. Send file listing to LLM to propose new directory structure
 5. Calculate per-file cost for reorganization
 6. Send proposal email showing before/after structure and cost
-7. (Future) Handle approval reply and execute reorganization
+7. Handle approval reply and execute reorganization

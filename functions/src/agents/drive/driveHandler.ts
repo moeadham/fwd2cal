@@ -47,6 +47,20 @@ import {Auth} from "googleapis";
 // ============================================================================
 
 /**
+ * Convert a string to Title Case (e.g. "tax documents" → "Tax Documents").
+ * Preserves existing NNN- prefixes if present.
+ */
+function toTitleCase(str: string): string {
+  const prefixMatch = str.match(/^(\d{2,3}-)(.*)$/);
+  const category = prefixMatch ? prefixMatch[2] : str;
+  const titled = category
+      .split(/[\s-]+/)
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+      .join(" ");
+  return prefixMatch ? `${prefixMatch[1]}${titled}` : titled;
+}
+
+/**
  * Get the file extension from a filename
  */
 function getExtension(filename: string): string {
@@ -275,10 +289,10 @@ async function resolveTargetFolder(
       });
     }
   } else {
-    // Ensure new folder name always has NNN- prefix
+    // Ensure new folder name always has NNN- prefix and Title Case
     const hasPrefix = /^\d{2,3}-/.test(proposal.folder_name);
-    const folderName = hasPrefix ?
-      proposal.folder_name : `${nextPrefix}-${proposal.folder_name}`;
+    const folderName = toTitleCase(hasPrefix ?
+      proposal.folder_name : `${nextPrefix}-${proposal.folder_name}`);
     targetFolderId = await createFolder(
         oauth2Client, folderName, rootFolderId,
     );
@@ -777,8 +791,8 @@ async function handleMoveReply(
        !findFolderByName(folderTree, move.folder_path || move.folder_id));
 
     if (needsNewFolder) {
-      const targetCategory = move.folder_path || move.folder_id;
-      // Ensure targetName always has NNN- prefix
+      const targetCategory = toTitleCase(move.folder_path || move.folder_id);
+      // Ensure targetName always has NNN- prefix and Title Case
       const hasPrefix = /^\d{2,3}-/.test(targetCategory);
       const targetName = hasPrefix ? targetCategory :
         `${getNextFolderPrefix(agentFolders.map((f) => f.name))}-${targetCategory}`;
@@ -786,10 +800,9 @@ async function handleMoveReply(
       const sourceAgent = agentFolders.find(
           (f) => f.id === file.folderId,
       );
-      const prefixMatch = sourceAgent?.name.match(/^(\d{3})-/);
 
       // If source is agent-managed and will be empty, rename instead
-      if (sourceAgent && prefixMatch && !renamedFolders.has(file.folderId)) {
+      if (sourceAgent && !renamedFolders.has(file.folderId)) {
         const fileCount = await getFolderFileCount(
             oauth2Client, file.folderId,
         );
@@ -798,11 +811,14 @@ async function handleMoveReply(
         ).length;
 
         if (fileCount <= movingOut) {
-          const newName = `${prefixMatch[1]}-${targetCategory}`;
-          await renameFolder(oauth2Client, file.folderId, newName);
-          renamedFolders.set(file.folderId, newName);
+          // Preserve the source folder's existing NNN- prefix
+          const sourcePrefixMatch = sourceAgent.name.match(/^(\d{2,3}-)/);
+          const renameTo = sourcePrefixMatch ?
+            `${sourcePrefixMatch[1]}${targetCategory}` : targetName;
+          await renameFolder(oauth2Client, file.folderId, renameTo);
+          renamedFolders.set(file.folderId, renameTo);
           newFolderId = file.folderId;
-          newFolderPath = newName;
+          newFolderPath = renameTo;
           skipMove = true;
         } else {
           newFolderId = await createFolder(
@@ -836,7 +852,7 @@ async function handleMoveReply(
         newFolderPath = agentFolder.name;
       } else {
         // LLM picked a non-agent folder — create agent-managed one
-        const targetName = move.folder_path || move.folder_id;
+        const targetName = toTitleCase(move.folder_path || move.folder_id);
         const nextPfx = getNextFolderPrefix(
             agentFolders.map((f) => f.name),
         );
