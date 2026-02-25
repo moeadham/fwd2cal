@@ -1,6 +1,7 @@
 import {logger} from "firebase-functions/v2";
 import {onTaskDispatched, TaskQueueOptions} from "firebase-functions/v2/tasks";
 import {onRequest, HttpsOptions} from "firebase-functions/v2/https";
+import {getFunctions} from "firebase-admin/functions";
 import {Resend} from "resend";
 
 import {handleDriveEmail, processUpload} from "./driveHandler";
@@ -133,14 +134,8 @@ export const v2driveOauthCallback = onRequest(
       if (state) {
         try {
           const {emailId, proposal, organize} = parseOAuthState(state);
-          if (organize) {
-            // Organize-drive flow: trigger full-drive scan + proposal
-            const {transformedEmail} = await fetchEmailById(emailId);
-            await handleOrganizeDrive(transformedEmail, emailId);
-          } else {
-            const {resend, transformedEmail} = await fetchEmailById(emailId);
-            await processUpload(emailId, uid, resend, transformedEmail, proposal);
-          }
+          // Dispatch as background task to avoid blocking the browser redirect
+          await dispatchPostAuthTask({emailId, uid, organize, proposal});
         } catch (err) {
           logger.error("Drive: Failed to process after OAuth", {
             state,
@@ -279,6 +274,23 @@ export const v2testDriveInboundDispatch = onRequest(
     },
 );
 
+export const v2driveProcessAfterAuth = onTaskDispatched(
+    driveDispatchConfig,
+    async (req): Promise<void> => {
+      const {emailId, uid, organize, proposal} =
+        req.data as PostAuthTaskData;
+      if (organize) {
+        logger.info("Drive post-auth: Starting organize", {emailId});
+        const {transformedEmail} = await fetchEmailById(emailId);
+        await handleOrganizeDrive(transformedEmail, emailId);
+      } else {
+        logger.info("Drive post-auth: Starting upload", {emailId, uid});
+        const {resend, transformedEmail} = await fetchEmailById(emailId);
+        await processUpload(emailId, uid, resend, transformedEmail, proposal);
+      }
+    },
+);
+
 export const v2testDriveProcessUpload = onRequest(
     onRequestConfig,
     async (req, res) => {
@@ -322,6 +334,40 @@ export const v2testDriveProcessUpload = onRequest(
       }
     },
 );
+
+interface PostAuthTaskData {
+  emailId: string;
+  uid: string;
+  organize?: boolean;
+  proposal?: FileProposal;
+}
+
+async function dispatchPostAuthTask(data: PostAuthTaskData): Promise<void> {
+  const isLocal = ENVIRONMENT_NAME.value() === "local" ||
+    ENVIRONMENT_NAME.value() === "test";
+  if (isLocal) {
+    // In local/test mode, run synchronously (task queues not available)
+    if (data.organize) {
+      const {transformedEmail} = await fetchEmailById(data.emailId);
+      await handleOrganizeDrive(transformedEmail, data.emailId);
+    } else {
+      const {resend, transformedEmail} = await fetchEmailById(data.emailId);
+      await processUpload(
+          data.emailId, data.uid, resend, transformedEmail, data.proposal,
+      );
+    }
+    return;
+  }
+  const queue = getFunctions().taskQueue(
+      "locations/us-central1/functions/v2driveProcessAfterAuth",
+  );
+  await queue.enqueue(data, {
+    dispatchDeadlineSeconds: 60 * 30,
+  });
+  logger.info("Drive: Dispatched post-auth task", {
+    emailId: data.emailId, organize: !!data.organize,
+  });
+}
 
 async function handleDriveInboundDispatch(
     req: TaskRequest,
