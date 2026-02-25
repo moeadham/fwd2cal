@@ -6,7 +6,7 @@ import {getFunctions} from "firebase-admin/functions";
 import {Resend} from "resend";
 
 import {handleDriveEmail, processUpload} from "./driveHandler";
-import {handleOrganizeDrive} from "./organizeHandler";
+import {handleOrganizeDrive, handleOrganizeApproval, signActionToken} from "./organizeHandler";
 import {driveSignupUrl} from "./mailTemplates";
 import {signupCallbackHandler} from "../../auth/authHandler";
 import {getAgentCredentials, getRedirectUriIndex} from "../../auth/credentials";
@@ -21,13 +21,15 @@ import {getLastSentEmail, getMockResendClient, setMockData} from "../../util/res
 import {
   setDriveEnabled, getUserFromEmail, getUserFromUID,
   cleanupExpiredDriveFileData,
+  getOrganizeProposal,
+  updateOrganizeProposalStatus,
 } from "../../util/firestoreHandler";
 import {sendEvent} from "../../util/analytics";
 import {
   fetchAndTransformEmail,
   EmailFetchError,
 } from "../../resend/emailFetcher";
-import {FileProposal} from "./types";
+import {FileProposal, OrganizeProposalDoc} from "./types";
 
 /**
  * Parse the OAuth state parameter (base64url-encoded JSON with emailId + proposal).
@@ -411,6 +413,176 @@ async function handleDriveInboundDispatch(
     data: outcome,
     sentEmail: sentEmail,
   };
+}
+
+// ============================================================================
+// ORGANIZE ACTION ENDPOINT (approve / undo via button click)
+// ============================================================================
+
+function renderActionPage(
+    status: "success" | "error" | "processing",
+    message: string,
+): string {
+  const config = {
+    success: {color: "#27ae60", icon: "&#10004;", title: "Done!"},
+    error: {color: "#e74c3c", icon: "&#10006;", title: "Something went wrong"},
+    processing: {color: "#3498db", icon: "&#9881;", title: "Working on it..."},
+  }[status];
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>fwd2drive - ${config.title}</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+           display: flex; justify-content: center; align-items: center;
+           min-height: 100vh; margin: 0; background: #f5f5f5; }
+    .card { background: white; border-radius: 12px; padding: 40px;
+            max-width: 480px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+    .icon { font-size: 48px; color: ${config.color}; margin-bottom: 16px; }
+    h1 { font-size: 24px; margin: 0 0 12px; color: #333; }
+    p { font-size: 16px; color: #666; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">${config.icon}</div>
+    <h1>${config.title}</h1>
+    <p>${message}</p>
+    <p style="margin-top:24px;font-size:13px;color:#999;">You can close this tab.</p>
+  </div>
+</body>
+</html>`;
+}
+
+export const v2driveOrganizeAction = onRequest(
+    onRequestConfig,
+    async (req, res) => {
+      const proposalId = req.query.proposalId as string;
+      const action = req.query.action as string;
+
+      if (!proposalId || !action || !["approve", "undo"].includes(action)) {
+        res.status(400).send(renderActionPage("error", "Invalid request."));
+        return;
+      }
+
+      // Verify HMAC token
+      const token = req.query.token as string;
+      const expectedToken = signActionToken(proposalId, action);
+      if (!token || token !== expectedToken) {
+        res.status(403).send(renderActionPage("error", "Invalid or expired link."));
+        return;
+      }
+
+      // Fetch proposal from Firestore for quick validation
+      let proposalDoc: OrganizeProposalDoc;
+      try {
+        const raw = await getOrganizeProposal(proposalId);
+        if (!raw) {
+          res.status(404).send(renderActionPage("error",
+              "This proposal was not found or has expired."));
+          return;
+        }
+        proposalDoc = raw as unknown as OrganizeProposalDoc;
+      } catch (err) {
+        logger.error("Drive organize action: Failed to fetch proposal", {
+          proposalId, error: err instanceof Error ? err.message : String(err),
+        });
+        res.status(500).send(renderActionPage("error",
+            "Something went wrong. Please try again."));
+        return;
+      }
+
+      // Validate status before dispatching
+      if (action === "approve" && proposalDoc.status !== "pending") {
+        res.send(renderActionPage("error",
+            `This proposal has already been ${proposalDoc.status}.`));
+        return;
+      }
+      if (action === "undo" && proposalDoc.status !== "completed") {
+        res.send(renderActionPage("error",
+            "This proposal cannot be undone at this time."));
+        return;
+      }
+
+      // Mark as executing to prevent double-clicks
+      if (action === "approve") {
+        await updateOrganizeProposalStatus(proposalId, "executing");
+      }
+
+      // Dispatch background task and return immediately
+      try {
+        await dispatchOrganizeActionTask({
+          proposalId,
+          action,
+          emailId: proposalDoc.emailId,
+        });
+      } catch (err) {
+        logger.error("Drive organize action: Failed to dispatch task", {
+          proposalId, action,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        // Revert status on dispatch failure
+        if (action === "approve") {
+          await updateOrganizeProposalStatus(proposalId, "pending");
+        }
+        res.status(500).send(renderActionPage("error",
+            "Something went wrong. Please try again."));
+        return;
+      }
+
+      const message = action === "undo" ?
+        "We're restoring your Drive to its previous state. You'll receive a confirmation email when it's done." :
+        "We're organizing your Drive now. You'll receive a confirmation email when it's done.";
+      res.send(renderActionPage("processing", message));
+    },
+);
+
+// Background task handler for organize actions triggered by button clicks
+
+interface OrganizeActionTaskData {
+  proposalId: string;
+  action: string;
+  emailId: string;
+}
+
+export const v2driveOrganizeActionTask = onTaskDispatched(
+    driveDispatchConfig,
+    async (req): Promise<void> => {
+      const {proposalId, action, emailId} =
+        req.data as OrganizeActionTaskData;
+
+      logger.info("Drive organize action task: Starting", {proposalId, action});
+
+      const {transformedEmail} = await fetchEmailById(emailId);
+      transformedEmail.text = action;
+      await handleOrganizeApproval(transformedEmail, proposalId);
+
+      logger.info("Drive organize action task: Complete", {proposalId, action});
+    },
+);
+
+async function dispatchOrganizeActionTask(
+    data: OrganizeActionTaskData,
+): Promise<void> {
+  const isLocal = ENVIRONMENT_NAME.value() === "local" ||
+    ENVIRONMENT_NAME.value() === "test";
+  if (isLocal) {
+    const {transformedEmail} = await fetchEmailById(data.emailId);
+    transformedEmail.text = data.action;
+    await handleOrganizeApproval(transformedEmail, data.proposalId);
+    return;
+  }
+  const queue = getFunctions().taskQueue(
+      "locations/us-central1/functions/v2driveOrganizeActionTask",
+  );
+  await queue.enqueue(data, {
+    dispatchDeadlineSeconds: 60 * 30,
+  });
+  logger.info("Drive organize action: Dispatched task", {
+    proposalId: data.proposalId, action: data.action,
+  });
 }
 
 // ============================================================================

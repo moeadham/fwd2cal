@@ -11,6 +11,10 @@ export const driveSignupUrl = isDevProject ?
   "https://us-central1-fwd2cal-dev-2578e.cloudfunctions.net/v2driveSignup" :
   "https://www.fwd2cal.com/drive-signup-consent";
 
+export const driveOrganizeActionUrl = isDevProject ?
+  "https://us-central1-fwd2cal-dev-2578e.cloudfunctions.net/v2driveOrganizeAction" :
+  "https://www.fwd2cal.com/drive-organize-action";
+
 const driveMailTemplates: DriveMailTemplates = {
   fileProposal: {
     html: `We'd like to organize your file in Google Drive:
@@ -122,7 +126,9 @@ const driveMailTemplates: DriveMailTemplates = {
 <hr style="border:none;border-top:1px solid #eee;margin:16px 0;">
 <b>Cost:</b> %TOTAL_COST% (%COST_PER_FILE% per file &times; %FILES_TO_CHANGE% files)
 <br><br>
-<b>Reply &quot;approve&quot; to this email to start organizing your drive.</b>
+<a href="%APPROVE_LINK%" style="display:inline-block; padding:10px 20px; margin:5px 0; background-color:#3498db; color:white; text-align:center; text-decoration:none; font-weight:bold; border-radius:5px; border:none; cursor:pointer;">Approve &amp; Organize</a>
+<br><br>
+<span style="color:#999;font-size:13px;">Or reply &quot;approve&quot; to this email.</span>
 %EMBEDDED_DATA%
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
   },
@@ -145,7 +151,9 @@ const driveMailTemplates: DriveMailTemplates = {
 %FOLDER_TREE%
 </div>
 <br>
-If you'd like to undo this, just reply to this email with &quot;undo&quot; within 30 days.
+<a href="%UNDO_LINK%" style="display:inline-block; padding:10px 20px; margin:5px 0; background-color:#e74c3c; color:white; text-align:center; text-decoration:none; font-weight:bold; border-radius:5px; border:none; cursor:pointer;">Undo Reorganization</a>
+<br><br>
+<span style="color:#999;font-size:13px;">Or reply &quot;undo&quot; to this email within 30 days.</span>
 %EMBEDDED_DATA%
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
   },

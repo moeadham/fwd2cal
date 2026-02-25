@@ -1,3 +1,4 @@
+import {createHmac} from "crypto";
 import {logger} from "firebase-functions/v2";
 import {
   getUserFromEmail,
@@ -11,6 +12,7 @@ import {sendEvent} from "../../util/analytics";
 import {
   getSupportEmail,
   DRIVE_EMAIL_ADDRESS,
+  DRIVE_ACTION_SIGNING_KEY,
   ORGANIZE_DRIVE_COST_PER_FILE,
   ORGANIZE_DRIVE_MAX_FILES,
   ORGANIZE_DRIVE_MAX_PREVIEW_ROWS,
@@ -34,7 +36,7 @@ import {
   OrganizeSnapshotAction,
 } from "./types";
 import {Auth} from "googleapis";
-import {driveMailTemplates, driveFullScopeSignupUrl} from "./mailTemplates";
+import {driveMailTemplates, driveFullScopeSignupUrl, driveOrganizeActionUrl} from "./mailTemplates";
 import {
   listAllDriveFiles,
   createFolder,
@@ -53,6 +55,16 @@ import {proposeOrganization} from "./llm";
 // ============================================================================
 // HELPERS
 // ============================================================================
+
+/**
+ * Sign an action token for a propose/undo button URL.
+ * HMAC-SHA256 of "proposalId:action" using the server signing key.
+ */
+function signActionToken(proposalId: string, action: string): string {
+  return createHmac("sha256", DRIVE_ACTION_SIGNING_KEY.value())
+      .update(`${proposalId}:${action}`)
+      .digest("hex");
+}
 
 /**
  * Replace template placeholders in an HTML string.
@@ -655,6 +667,9 @@ async function scanAndPropose(
   const folderTreeHtml = renderFolderTree(proposal);
   const fileChangesHtml = renderFileChangesPreview(proposal);
 
+  const approveToken = signActionToken(proposalId, "approve");
+  const approveLink = `${driveOrganizeActionUrl}?proposalId=${proposalId}&action=approve&token=${approveToken}`;
+
   const html = applyTemplate(driveMailTemplates.organizeProposal.html, {
     SUMMARY: proposal.summary,
     TOTAL_FILES: String(cost.totalFiles),
@@ -665,6 +680,7 @@ async function scanAndPropose(
     TOTAL_COST: `$${cost.totalCost.toFixed(2)}`,
     COST_PER_FILE: `$${cost.costPerFile.toFixed(2)}`,
     EMBEDDED_DATA: embeddedHtml,
+    APPROVE_LINK: approveLink,
   });
 
   // Build CSV attachment with the full proposal
@@ -760,7 +776,7 @@ async function handleOrganizeApproval(
     return handleOrganizeUndo(email, sender, uid, proposalId, proposalDoc);
   }
 
-  if (proposalDoc.status !== "pending") {
+  if (proposalDoc.status !== "pending" && proposalDoc.status !== "executing") {
     logger.warn("Drive organize: Proposal not pending", {
       proposalId, status: proposalDoc.status,
     });
@@ -856,11 +872,15 @@ async function handleOrganizeApproval(
   const embeddedData: OrganizeEmbeddedData = {proposalId};
   const embeddedHtml = buildOrganizeEmbeddedData(embeddedData);
 
+  const undoToken = signActionToken(proposalId, "undo");
+  const undoLink = `${driveOrganizeActionUrl}?proposalId=${proposalId}&action=undo&token=${undoToken}`;
+
   const html = applyTemplate(driveMailTemplates.organizeComplete.html, {
     SUMMARY: proposal.summary,
     FILES_CHANGED: String(filesChanged),
     FOLDER_TREE: folderTreeHtml,
     EMBEDDED_DATA: embeddedHtml,
+    UNDO_LINK: undoLink,
   });
   await sendOrganizeEmailResponse(sender, email, html);
 
@@ -1283,4 +1303,4 @@ async function undoOrganizeActions(
   await cleanupEmptyManagedFolders(oauth2Client);
 }
 
-export {handleOrganizeDrive, hasFullDriveScope, handleOrganizeApproval};
+export {handleOrganizeDrive, hasFullDriveScope, handleOrganizeApproval, signActionToken};
