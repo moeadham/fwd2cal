@@ -1,6 +1,7 @@
 import {logger} from "firebase-functions/v2";
 import {onTaskDispatched, TaskQueueOptions} from "firebase-functions/v2/tasks";
 import {onRequest, HttpsOptions} from "firebase-functions/v2/https";
+import {onSchedule} from "firebase-functions/v2/scheduler";
 import {getFunctions} from "firebase-admin/functions";
 import {Resend} from "resend";
 
@@ -17,7 +18,10 @@ import {
   ResendClient,
 } from "../../util/types";
 import {getLastSentEmail, getMockResendClient, setMockData} from "../../util/resendMock";
-import {setDriveEnabled, getUserFromEmail, getUserFromUID} from "../../util/firestoreHandler";
+import {
+  setDriveEnabled, getUserFromEmail, getUserFromUID,
+  cleanupExpiredDriveFileData,
+} from "../../util/firestoreHandler";
 import {sendEvent} from "../../util/analytics";
 import {
   fetchAndTransformEmail,
@@ -408,3 +412,19 @@ async function handleDriveInboundDispatch(
     sentEmail: sentEmail,
   };
 }
+
+// ============================================================================
+// SCHEDULED CLEANUP
+// ============================================================================
+
+export const v2cleanupDriveFileData = onSchedule(
+    {
+      schedule: "0 3 * * *",
+      timeZone: "UTC",
+      memory: "512MiB",
+    },
+    async () => {
+      const deleted = await cleanupExpiredDriveFileData();
+      logger.info("Drive: Cleanup complete", {deleted});
+    },
+);

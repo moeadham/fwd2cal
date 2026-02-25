@@ -258,8 +258,17 @@ export interface DriveEmbeddedFileData {
   webLink: string;
 }
 
+// Reference embedded in email HTML (only the Firestore doc ID)
 export interface DriveEmbeddedData {
+  fileDataId: string;
+}
+
+// Full file data stored in Firestore (DriveFileData collection)
+export interface DriveFileDataDoc {
+  uid: string;
   files: DriveEmbeddedFileData[];
+  createdAt: string;
+  expiresAt: string;
 }
 
 // ============================================================================

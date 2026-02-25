@@ -1,5 +1,8 @@
 import {logger} from "firebase-functions/v2";
-import {getUserFromEmail, getUserFromUID} from "../../util/firestoreHandler";
+import {
+  getUserFromEmail, getUserFromUID, saveDriveFileData,
+  getDriveFileData, updateDriveFileData,
+} from "../../util/firestoreHandler";
 import {getOauthClient} from "../../auth/authHandler";
 import {sendEmailResend} from "../../util/resend";
 import {sendEvent} from "../../util/analytics";
@@ -17,8 +20,8 @@ import {
 import {TransformedEmail, ResendClient} from "../../util/types";
 import {
   DriveProcessingResult, ProcessedDriveFile, DriveFolder,
-  DriveEmbeddedData, DriveAttachment, FileProposal, FileInfo,
-  OrganizeEmbeddedData,
+  DriveEmbeddedData, DriveEmbeddedFileData, DriveAttachment,
+  FileProposal, FileInfo, OrganizeEmbeddedData,
 } from "./types";
 import {driveMailTemplates, driveSignupUrl} from "./mailTemplates";
 import {listAttachments, downloadAttachmentBuffer, extractContentSummary, streamFromUrl} from "./fileProcessor";
@@ -146,30 +149,80 @@ function getNextFolderPrefix(existingFolders: string[]): string {
 }
 
 /**
+ * Build the embedded HTML link for a given fileDataId.
+ */
+function buildEmbeddedDriveHtml(fileDataId: string): string {
+  const embedded: DriveEmbeddedData = {fileDataId};
+  const encoded = Buffer.from(JSON.stringify(embedded)).toString("base64url");
+  const shortCode = fileDataId.slice(0, 8);
+  return `<br><a href="https://www.fwd2drive.com/d?r=${encoded}"` +
+    ` style="color:#999;font-size:11px;">ref: ${shortCode}</a>`;
+}
+
+/**
  * Build embedded drive data for reply detection.
+ * Saves file data to Firestore and embeds only the document ID in the email.
  * Uses a visible link so Gmail preserves it when quoting replies.
  */
-function buildEmbeddedDriveData(data: DriveEmbeddedData): string {
-  const json = JSON.stringify(data);
-  const encoded = Buffer.from(json).toString("base64url");
-  const link = `<br><a href="https://www.fwd2cal.com/d?r=${encoded}"` +
-    ` style="color:#999;font-size:11px;">Manage your files</a>`;
-  return link;
+async function buildEmbeddedDriveData(
+    uid: string,
+    files: DriveEmbeddedFileData[],
+): Promise<string> {
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+  const fileDataId = await saveDriveFileData({
+    uid,
+    files,
+    createdAt: now.toISOString(),
+    expiresAt: expiresAt.toISOString(),
+  });
+  return buildEmbeddedDriveHtml(fileDataId);
+}
+
+interface ParsedDriveData {
+  fileDataId: string | null;
+  files: DriveEmbeddedFileData[];
 }
 
 /**
  * Parse embedded drive data from an email's HTML (quoted thread).
- * Looks for the visible "Manage your files" link with encoded data.
+ * Returns the files array and fileDataId (for reuse on moves).
+ * Backwards-compatible with old format that embedded files directly.
  */
-function parseEmbeddedDriveData(html: string): DriveEmbeddedData | null {
-  const linkMatch = html.match(/fwd2cal\.com\/d\?r=([A-Za-z0-9_-]+)/);
-  if (linkMatch) {
-    try {
-      const json = Buffer.from(linkMatch[1], "base64url").toString();
-      return JSON.parse(json) as DriveEmbeddedData;
-    } catch {
-      logger.warn("Drive: Failed to parse embedded drive data from link");
+async function parseEmbeddedDriveData(
+    html: string,
+): Promise<ParsedDriveData | null> {
+  const linkMatch = html.match(/fwd2drive\.com\/d\?r=([A-Za-z0-9_-]+)/);
+  if (!linkMatch) return null;
+
+  try {
+    const json = Buffer.from(linkMatch[1], "base64url").toString();
+    const parsed = JSON.parse(json);
+
+    // New format: {fileDataId: "..."} — fetch from Firestore
+    if (parsed.fileDataId) {
+      const doc = await getDriveFileData(parsed.fileDataId);
+      if (!doc) {
+        logger.warn("Drive: File data not found in Firestore", {
+          fileDataId: parsed.fileDataId,
+        });
+        return null;
+      }
+      return {
+        fileDataId: parsed.fileDataId,
+        files: doc.files as DriveEmbeddedFileData[],
+      };
     }
+
+    // Old format: {files: [...]} — use directly (backwards compat)
+    if (parsed.files) {
+      return {
+        fileDataId: null,
+        files: parsed.files as DriveEmbeddedFileData[],
+      };
+    }
+  } catch {
+    logger.warn("Drive: Failed to parse embedded drive data from link");
   }
   return null;
 }
@@ -454,9 +507,11 @@ async function handleDriveEmail(
   }
 
   // Check if this is a REPLY to an existing upload (move request)
-  const embeddedData = parseEmbeddedDriveData(email.html || "");
-  if (embeddedData) {
-    return handleMoveReply(email, sender, embeddedData);
+  const parsedDriveData = await parseEmbeddedDriveData(email.html || "");
+  if (parsedDriveData) {
+    return handleMoveReply(
+        email, sender, parsedDriveData.files, parsedDriveData.fileDataId,
+    );
   }
 
   // Check if user already has OAuth — if so, organize immediately
@@ -666,17 +721,15 @@ async function processUpload(
   const succeeded = results.filter((r) => !r.error || r.driveFileId);
   const failed = results.filter((r) => r.error && !r.driveFileId);
 
-  // Build embedded data for reply/move detection
-  const embeddedData: DriveEmbeddedData = {
-    files: succeeded.map((r) => ({
-      id: r.driveFileId || "",
-      folderId: targetFolderId,
-      folderPath: r.folderPath,
-      filename: r.filename,
-      webLink: r.driveWebLink || "",
-    })),
-  };
-  const embeddedHtml = buildEmbeddedDriveData(embeddedData);
+  // Build embedded data for reply/move detection (saved to Firestore)
+  const embeddedFiles: DriveEmbeddedFileData[] = succeeded.map((r) => ({
+    id: r.driveFileId || "",
+    folderId: targetFolderId,
+    folderPath: r.folderPath,
+    filename: r.filename,
+    webLink: r.driveWebLink || "",
+  }));
+  const embeddedHtml = await buildEmbeddedDriveData(uid, embeddedFiles);
 
   // Send confirmation email
   if (succeeded.length === 0) {
@@ -728,7 +781,8 @@ async function processUpload(
 async function handleMoveReply(
     email: TransformedEmail,
     sender: string,
-    embeddedData: DriveEmbeddedData,
+    files: DriveEmbeddedFileData[],
+    fileDataId: string | null,
 ): Promise<DriveProcessingResult> {
   const uid = await getUserFromEmail(sender);
   if (!uid) {
@@ -766,7 +820,7 @@ async function handleMoveReply(
   try {
     moveResult = await interpretMoveInstructions(
         replyText,
-        embeddedData.files,
+        files,
         agentFolders.map((f) => ({name: f.name, id: f.id})),
         uid,
     );
@@ -807,7 +861,7 @@ async function handleMoveReply(
 
   const results: ProcessedDriveFile[] = [];
   for (const move of moveResult.moves) {
-    const file = embeddedData.files[move.file_index];
+    const file = files[move.file_index];
     if (!file) continue;
 
     let newFolderId: string;
@@ -849,7 +903,7 @@ async function handleMoveReply(
               oauth2Client, file.folderId,
           );
           const movingOut = moveResult.moves.filter(
-              (m) => embeddedData.files[m.file_index]?.folderId === file.folderId,
+              (m) => files[m.file_index]?.folderId === file.folderId,
           ).length;
 
           if (fileCount <= movingOut) {
@@ -969,17 +1023,21 @@ async function handleMoveReply(
     const html = applyTemplate(driveMailTemplates.moveFailed.html, {});
     await sendDriveEmailResponse(sender, email, html);
   } else {
-    const updatedEmbedded: DriveEmbeddedData = {
-      files: succeeded.map((r) => ({
-        id: r.driveFileId || "",
-        folderId: fileFolderIds.get(r.filename) || "",
-        folderPath: r.folderPath,
-        filename: r.filename,
-        webLink: r.driveWebLink || "",
-      })),
-    };
+    const updatedFiles: DriveEmbeddedFileData[] = succeeded.map((r) => ({
+      id: r.driveFileId || "",
+      folderId: fileFolderIds.get(r.filename) || "",
+      folderPath: r.folderPath,
+      filename: r.filename,
+      webLink: r.driveWebLink || "",
+    }));
 
-    const embeddedHtml = buildEmbeddedDriveData(updatedEmbedded);
+    let embeddedHtml: string;
+    if (fileDataId) {
+      await updateDriveFileData(fileDataId, updatedFiles);
+      embeddedHtml = buildEmbeddedDriveHtml(fileDataId);
+    } else {
+      embeddedHtml = await buildEmbeddedDriveData(uid, updatedFiles);
+    }
 
     if (succeeded.length === 1) {
       const file = succeeded[0];
@@ -1008,7 +1066,7 @@ async function handleMoveReply(
   });
 
   return {
-    filesProcessed: embeddedData.files.length,
+    filesProcessed: files.length,
     filesSucceeded: succeeded.length,
     filesFailed: results.filter((r) => r.error).length,
     results,

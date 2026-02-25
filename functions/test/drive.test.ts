@@ -233,9 +233,9 @@ describe("fwd2cal Drive Agent", function() {
     expect(res.body.sentEmail.html).to.be.a("string");
     expect(res.body.sentEmail.html).to.include("saved to Google Drive");
 
-    // Verify embedded drive data for reply/move detection (visible link)
-    expect(res.body.sentEmail.html).to.include("fwd2cal.com/d?r=");
-    expect(res.body.sentEmail.html).to.include("Manage your files");
+    // Verify embedded drive data for reply/move detection (visible link with ref code)
+    expect(res.body.sentEmail.html).to.include("fwd2drive.com/d?r=");
+    expect(res.body.sentEmail.html).to.include("ref:");
 
     // Verify "reply to move" message
     expect(res.body.sentEmail.html).to.include("reply to this email");
@@ -331,7 +331,7 @@ describe("fwd2cal Drive Agent", function() {
     expect(res.body.sentEmail.html).to.include("has been moved");
 
     // Verify embedded data still present (for further moves)
-    expect(res.body.sentEmail.html).to.include("fwd2cal.com/d?r=");
+    expect(res.body.sentEmail.html).to.include("fwd2drive.com/d?r=");
   });
 
   it("DT05 delete account", async function() {

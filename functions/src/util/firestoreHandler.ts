@@ -264,6 +264,71 @@ async function updateOrganizeProposalStatus(
   }
 }
 
+// ============================================================================
+// DRIVE FILE DATA PERSISTENCE
+// ============================================================================
+
+async function saveDriveFileData(
+    data: Record<string, unknown>,
+): Promise<string> {
+  try {
+    const docRef = await getFirestore()
+        .collection("DriveFileData")
+        .add(data);
+    logger.info("Saved drive file data", {fileDataId: docRef.id});
+    return docRef.id;
+  } catch (error) {
+    logger.error("Database error in saveDriveFileData:", error);
+    throw error;
+  }
+}
+
+async function getDriveFileData(
+    fileDataId: string,
+): Promise<Record<string, unknown> | null> {
+  try {
+    const doc = await getFirestore()
+        .collection("DriveFileData")
+        .doc(fileDataId)
+        .get();
+    if (!doc.exists) return null;
+    return {id: doc.id, ...doc.data()} as Record<string, unknown>;
+  } catch (error) {
+    logger.error("Database error in getDriveFileData:", error);
+    throw error;
+  }
+}
+
+async function updateDriveFileData(
+    fileDataId: string,
+    files: unknown[],
+): Promise<void> {
+  try {
+    await getFirestore()
+        .collection("DriveFileData")
+        .doc(fileDataId)
+        .update({files});
+  } catch (error) {
+    logger.error("Database error in updateDriveFileData:", error);
+    throw error;
+  }
+}
+
+async function cleanupExpiredDriveFileData(): Promise<number> {
+  const now = new Date().toISOString();
+  const snapshot = await getFirestore()
+      .collection("DriveFileData")
+      .where("expiresAt", "<", now)
+      .get();
+  if (snapshot.empty) return 0;
+
+  const batch = getFirestore().batch();
+  snapshot.forEach((doc) => batch.delete(doc.ref));
+  await batch.commit();
+  logger.info("Cleaned up expired drive file data", {count: snapshot.size});
+  return snapshot.size;
+}
+
 export {
   getUserFromUID,
   getUserFromEmail,
@@ -279,4 +344,8 @@ export {
   saveOrganizeProposal,
   getOrganizeProposal,
   updateOrganizeProposalStatus,
+  saveDriveFileData,
+  getDriveFileData,
+  updateDriveFileData,
+  cleanupExpiredDriveFileData,
 };
