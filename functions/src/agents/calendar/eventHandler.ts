@@ -468,7 +468,7 @@ async function addEventsAndSendResponse(
           EVENT_LINK: eventObject.htmlLink,
           EVENT_DATE: moment(eventObject.start.dateTime)
               .tz(eventObject.start.timeZone)
-              .format("dddd, MMMM Do [at] h:mm A z"),
+              .format("dddd, MMMM Do, YYYY [at] h:mm A z"),
           INVITE_LINK: eventObject.inviteOthersLink,
           EVENT_ATTENDEES: inviteesWithoutHost.join(", "),
           CALENDAR_NAME: calendarNameText,
@@ -481,7 +481,7 @@ async function addEventsAndSendResponse(
           EVENT_LINK: eventObject.htmlLink,
           EVENT_DATE: moment(eventObject.start.dateTime)
               .tz(eventObject.start.timeZone)
-              .format("dddd, MMMM Do [at] h:mm A z"),
+              .format("dddd, MMMM Do, YYYY [at] h:mm A z"),
           EVENT_ATTENDEES: eventObject.attendees ?
             eventObject.attendees.map((attendee) => attendee.email).join(", ") :
             "",
