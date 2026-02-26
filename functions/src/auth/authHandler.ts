@@ -29,7 +29,7 @@ async function refreshOAuthTokens(
   let tokens: OAuthTokens;
   try {
     tokens = await refreshAccessToken(oauth2Client);
-    await updateUserTokens(tokens, uid);
+    await updateUserTokens(tokens, uid, agentName);
     logger.log(`uid ${uid} access token refreshed to ${tokens.expiry_date}`);
   } catch (error) {
     logger.warn("Failed to refresh access token:", uid, error);
@@ -57,7 +57,7 @@ async function getOauthClient(
     agentName: AgentName,
 ): Promise<Auth.OAuth2Client> {
   const credentials = getAgentCredentials(agentName);
-  const userData = await getUserFromUID(uid);
+  const userData = await getUserFromUID(uid, agentName);
   const redirectUriIndex = getRedirectUriIndex(ENVIRONMENT_NAME.value());
   const oauth2Client = new google.auth.OAuth2(
       credentials.web.client_id,
@@ -80,8 +80,7 @@ async function oauthCronJob(): Promise<void> {
     );
     for (const user of users) {
       try {
-        const agentName: AgentName = user.driveEnabled ? "drive" : "calendar";
-        await refreshOAuthTokens(user.id, agentName);
+        await refreshOAuthTokens(user.id, user.agentName);
       } catch (error) {
         logger.warn(`Failed to refresh tokens for user ${user.id}:`, error);
         sendEvent(user.id, "tokenRefreshFailed");
@@ -171,7 +170,7 @@ async function signupCallbackHandler(
       }
     }
 
-    await storeUser(tokens as OAuthTokens, userRecord);
+    await storeUser(tokens as OAuthTokens, userRecord, agentName);
     await addUserEmailAddress(userRecord, [{email: userEmail, default: true}]);
 
     sendEvent(userRecord.uid, "sign_up");
@@ -207,9 +206,8 @@ async function verifyAdditionalEmail(
   if (!pendingEmail) {
     return res.redirect(302, "https://www.fwd2cal.com/not-found");
   }
-  const mainUser = await getUserFromUID(pendingEmail.ownerUid);
   await addUserEmailAddress(
-      {uid: mainUser.uid, email: mainUser.email},
+      {uid: pendingEmail.ownerUid, email: pendingEmail.ownerEmail},
       [
         {
           email: pendingEmail.id,
@@ -217,9 +215,9 @@ async function verifyAdditionalEmail(
         },
       ],
   );
-  logger.log(`added ${pendingEmail.id} to user account ${mainUser.uid}`);
-  sendEvent(mainUser.uid, "addUserConfirmed");
-  return res.send({data: mainUser.email});
+  logger.log(`added ${pendingEmail.id} to user account ${pendingEmail.ownerUid}`);
+  sendEvent(pendingEmail.ownerUid, "addUserConfirmed");
+  return res.send({data: pendingEmail.ownerEmail});
 }
 
 export {

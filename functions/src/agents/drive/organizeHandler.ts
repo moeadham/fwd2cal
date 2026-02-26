@@ -465,7 +465,7 @@ async function handleOrganizeDrive(
 
   let userData;
   try {
-    userData = await getUserFromUID(uid);
+    userData = await getUserFromUID(uid, "drive");
   } catch (err) {
     logger.debug("Drive organize: User lookup failed", {
       uid, error: err instanceof Error ? err.message : String(err),
@@ -473,7 +473,7 @@ async function handleOrganizeDrive(
     return sendOrganizeAuthRequiredEmail(email, sender, emailId);
   }
 
-  if (!userData.driveEnabled || !userData.access_token) {
+  if (!userData.access_token) {
     return sendOrganizeAuthRequiredEmail(email, sender, emailId);
   }
 

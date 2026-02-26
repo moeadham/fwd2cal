@@ -19,7 +19,7 @@ import {
 } from "../../util/types";
 import {getLastSentEmail, getMockResendClient, setMockData} from "../../util/resendMock";
 import {
-  setDriveEnabled, getUserFromEmail, getUserFromUID,
+  getUserFromEmail, getUserFromUID,
   cleanupExpiredDriveFileData,
   getOrganizeProposal,
   updateOrganizeProposalStatus,
@@ -126,7 +126,6 @@ export const v2driveOauthCallback = onRequest(
             "drive",
         );
         uid = userRecord.uid;
-        await setDriveEnabled(uid, true);
         sendEvent(uid, "drive_sign_up");
       } catch (err) {
         const error = err as { code?: number; message: string };
@@ -235,8 +234,8 @@ export const v2driveConfirm = onRequest(
       const uid = await getUserFromEmail(sender);
       if (uid) {
         try {
-          const userData = await getUserFromUID(uid);
-          if (userData.driveEnabled && userData.access_token) {
+          const userData = await getUserFromUID(uid, "drive");
+          if (userData.access_token) {
             // User has OAuth — process upload directly
             await processUpload(emailId, uid, resend, transformedEmail);
             res.redirect(302, "https://www.fwd2cal.com/drive-upload-success");

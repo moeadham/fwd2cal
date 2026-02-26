@@ -16,7 +16,6 @@ export interface UserDocument {
   refresh_token: string;
   expiry_date: number;
   token_scope: string;
-  driveEnabled?: boolean;
 }
 
 // Email address document from Firestore
@@ -67,7 +66,7 @@ export interface UserWithExpiringTokens {
   access_token: string;
   refresh_token: string;
   expiry_date: number;
-  driveEnabled?: boolean;
+  agentName: AgentName;
 }
 
 // Email item for adding to user

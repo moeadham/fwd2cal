@@ -287,11 +287,16 @@ async function deleteUserAccount(
     sender: string,
     uid: string,
 ): Promise<HandleEmailResult> {
-  // Get primary email address before deleting user
-  const user = await getUserFromUID(uid);
-  const primaryEmail = user.email;
+  // Get primary email address before deleting user (may not have a calendar doc)
+  let primaryEmail = sender;
+  try {
+    const user = await getUserFromUID(uid, "calendar");
+    primaryEmail = user.email;
+  } catch {
+    // User may only have a drive account — use sender as primary email
+  }
 
-  await deleteUser(uid);
+  await deleteUser(uid, "calendar");
   await deleteAccount(uid);
 
   // Remove primary email from registered users segment (fire-and-forget)
@@ -406,7 +411,7 @@ async function addEmailAddressToUser(
     await sendEmailResponse(sender, email, response, true);
     return;
   }
-  const verificationCode = await addPendingEmailAddress(uid, emailAddressToAdd);
+  const verificationCode = await addPendingEmailAddress(uid, emailAddressToAdd, sender);
   // Send email to the user with the verification code.
   const response: EmailResponseTemplate = {
     ...EMAIL_RESPONSES.addAdditionalEmailAddress,

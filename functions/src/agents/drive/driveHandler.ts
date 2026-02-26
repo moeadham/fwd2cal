@@ -518,8 +518,8 @@ async function handleDriveEmail(
   const uid = await getUserFromEmail(sender);
   if (uid) {
     try {
-      const userData = await getUserFromUID(uid);
-      if (userData.driveEnabled && userData.access_token) {
+      const userData = await getUserFromUID(uid, "drive");
+      if (userData.access_token) {
         logger.info("Drive: Returning user — organizing immediately", {sender, uid});
         return processUpload(emailId, uid, resend, email);
       }
