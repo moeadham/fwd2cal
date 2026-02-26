@@ -733,7 +733,9 @@ async function addEventsAndSendResponse(
     const isAuthError = failedEvents.some(
         (f) => f.error.includes("invalid_grant") ||
           f.error.includes("Token has been expired") ||
-          f.error.includes("No refresh token"),
+          f.error.includes("No refresh token") ||
+          f.error.includes("Insufficient Permission") ||
+          f.error.includes("unauthorized_client"),
     );
     if (isAuthError) {
       sendEvent(uid, "calendarError", {reason: "oauth_failed"});
