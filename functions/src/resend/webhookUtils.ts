@@ -6,7 +6,6 @@ import {Request, Response} from "express";
 import {
   ENVIRONMENT_NAME,
   RESEND_API_KEY,
-  RESEND_SIGNING_SECRET,
 } from "../util/config";
 import {
   ResendWebhookData,
@@ -24,6 +23,7 @@ export async function processInboundWebhook(
     res: Response,
     dispatchFunctionName: string,
     expectedRecipient: string,
+    signingSecret: string,
 ): Promise<void> {
   if (req.method !== "POST") {
     res.status(405).end();
@@ -68,7 +68,7 @@ export async function processInboundWebhook(
         timestamp: svixTimestamp,
         signature: signature,
       },
-      webhookSecret: RESEND_SIGNING_SECRET.value(),
+      webhookSecret: signingSecret,
     });
 
     if (!isValid) {

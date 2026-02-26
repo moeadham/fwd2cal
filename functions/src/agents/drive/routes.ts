@@ -16,7 +16,7 @@ import {
 import {signupCallbackHandler, oauthCronJob} from "../../auth/authHandler";
 import {processInboundWebhook} from "../../resend/webhookUtils";
 import {getAgentCredentials, getRedirectUriIndex} from "../../auth/credentials";
-import {ENVIRONMENT_NAME, DRIVE_EMAIL_ADDRESS} from "../../util/config";
+import {ENVIRONMENT_NAME, DRIVE_EMAIL_ADDRESS, DRIVE_RESEND_SIGNING_SECRET} from "../../util/config";
 import {TaskRequest} from "../../util/types";
 import {cleanupExpiredDriveFileData} from "../../util/firestoreHandler";
 import {sendEvent} from "../../util/analytics";
@@ -223,7 +223,10 @@ export const v2cleanupDriveFileData = onSchedule(
 export const v2driveInboundCallback = onRequest(
     onRequestConfig,
     async (req, res) => {
-      await processInboundWebhook(req, res, "v2driveInboundDispatch", DRIVE_EMAIL_ADDRESS.value());
+      await processInboundWebhook(
+          req, res, "v2driveInboundDispatch",
+          DRIVE_EMAIL_ADDRESS.value(), DRIVE_RESEND_SIGNING_SECRET.value(),
+      );
     },
 );
 

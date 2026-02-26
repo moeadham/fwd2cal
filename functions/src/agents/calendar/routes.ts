@@ -11,7 +11,7 @@ import {
   oauthCronJob,
 } from "../../auth/authHandler";
 import {getAgentCredentials, getRedirectUriIndex} from "../../auth/credentials";
-import {ENVIRONMENT_NAME, MAIN_EMAIL_ADDRESS} from "../../util/config";
+import {ENVIRONMENT_NAME, MAIN_EMAIL_ADDRESS, RESEND_SIGNING_SECRET} from "../../util/config";
 import {processInboundWebhook} from "../../resend/webhookUtils";
 import {TaskRequest} from "../../util/types";
 
@@ -134,7 +134,10 @@ export const v2inviteAdditionalAttendees = onRequest(
 export const v2resendInboundCallback = onRequest(
     onRequestConfig,
     async (req, res) => {
-      await processInboundWebhook(req, res, "v2resendInboundDispatch", MAIN_EMAIL_ADDRESS.value());
+      await processInboundWebhook(
+          req, res, "v2resendInboundDispatch",
+          MAIN_EMAIL_ADDRESS.value(), RESEND_SIGNING_SECRET.value(),
+      );
     },
 );
 
