@@ -38,12 +38,17 @@ async function getUserFromEmail(email: string): Promise<string | null> {
   return userObject?.uid || null;
 }
 
-async function findUsersWithExpiringTokens(): Promise<UserWithExpiringTokens[]> {
+async function findUsersWithExpiringTokens(
+    filterAgent?: AgentName,
+): Promise<UserWithExpiringTokens[]> {
   const now = new Date();
   const twoHoursLater = new Date(now.getTime() + 2 * 60 * 60 * 1000);
   const users: UserWithExpiringTokens[] = [];
 
-  for (const agentName of ["calendar", "drive"] as AgentName[]) {
+  const agents: AgentName[] = filterAgent ?
+    [filterAgent] :
+    ["calendar", "drive"];
+  for (const agentName of agents) {
     const collection = getAgentCollection(agentName);
     const usersRef = getFirestore().collection(collection);
     let querySnapshot;

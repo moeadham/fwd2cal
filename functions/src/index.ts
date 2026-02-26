@@ -9,4 +9,3 @@ db.settings({ignoreUndefinedProperties: true});
 // Re-export all endpoints
 export * from "./agents/calendar/endpoints";
 export * from "./agents/drive/endpoints";
-export * from "./resend/endpoints";

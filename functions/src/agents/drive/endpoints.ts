@@ -8,7 +8,8 @@ import {Resend} from "resend";
 import {handleDriveEmail, processUpload} from "./driveHandler";
 import {handleOrganizeDrive, handleOrganizeApproval, signActionToken} from "./organizeHandler";
 import {driveSignupUrl} from "./mailTemplates";
-import {signupCallbackHandler} from "../../auth/authHandler";
+import {signupCallbackHandler, oauthCronJob} from "../../auth/authHandler";
+import {processInboundWebhook} from "../../resend/endpoints";
 import {getAgentCredentials, getRedirectUriIndex} from "../../auth/credentials";
 import {ENVIRONMENT_NAME, RESEND_API_KEY} from "../../util/config";
 import {
@@ -597,5 +598,27 @@ export const v2cleanupDriveFileData = onSchedule(
     async () => {
       const deleted = await cleanupExpiredDriveFileData();
       logger.info("Drive: Cleanup complete", {deleted});
+    },
+);
+
+// ============================================================================
+// DRIVE INBOUND WEBHOOK + SCHEDULED TOKEN REFRESH
+// ============================================================================
+
+export const v2driveInboundCallback = onRequest(
+    onRequestConfig,
+    async (req, res) => {
+      await processInboundWebhook(req, res, "v2driveInboundDispatch");
+    },
+);
+
+export const v2driveRefreshTokensScheduled = onSchedule(
+    {
+      schedule: "0 * * * *",
+      timeZone: "America/New_York",
+      memory: "512MiB",
+    },
+    async () => {
+      await oauthCronJob("drive");
     },
 );

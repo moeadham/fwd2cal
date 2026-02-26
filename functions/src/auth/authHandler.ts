@@ -71,9 +71,9 @@ async function getOauthClient(
   return oauth2Client;
 }
 
-async function oauthCronJob(): Promise<void> {
+async function oauthCronJob(agentName?: AgentName): Promise<void> {
   try {
-    const users = await findUsersWithExpiringTokens();
+    const users = await findUsersWithExpiringTokens(agentName);
     logger.log(
         "Refreshing tokens for Users with expiring tokens ",
         users.length,

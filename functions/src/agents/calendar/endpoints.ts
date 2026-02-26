@@ -1,6 +1,7 @@
 import {logger} from "firebase-functions/v2";
 import {onTaskDispatched, TaskQueueOptions} from "firebase-functions/v2/tasks";
 import {onRequest, HttpsOptions} from "firebase-functions/v2/https";
+import {onSchedule} from "firebase-functions/v2/scheduler";
 
 import {handleEmail} from "./emailHandler";
 import {inviteAdditionalAttendees} from "./calendarHelper";
@@ -8,9 +9,11 @@ import {processAttachments} from "./attachmentHandler";
 import {
   signupCallbackHandler,
   verifyAdditionalEmail,
+  oauthCronJob,
 } from "../../auth/authHandler";
 import {getAgentCredentials, getRedirectUriIndex} from "../../auth/credentials";
 import {ENVIRONMENT_NAME} from "../../util/config";
+import {processInboundWebhook} from "../../resend/endpoints";
 import {
   TaskRequest,
   DispatchResult,
@@ -202,5 +205,27 @@ export const v2inviteAdditionalAttendees = onRequest(
         logger.warn("Error in inviteAdditionalAttendees", err);
         return res.redirect(302, "https://www.fwd2cal.com/404");
       }
+    },
+);
+
+// ============================================================================
+// CALENDAR INBOUND WEBHOOK + SCHEDULED TOKEN REFRESH
+// ============================================================================
+
+export const v2resendInboundCallback = onRequest(
+    onRequestConfig,
+    async (req, res) => {
+      await processInboundWebhook(req, res, "v2resendInboundDispatch");
+    },
+);
+
+export const v2refreshTokensScheduled = onSchedule(
+    {
+      schedule: "0 * * * *",
+      timeZone: "America/New_York",
+      memory: "512MiB",
+    },
+    async () => {
+      await oauthCronJob("calendar");
     },
 );

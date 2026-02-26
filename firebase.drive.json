@@ -34,8 +34,8 @@
         "function": "v2driveOauthCallback"
       },
       {
-        "source": "/v2/resendInboundCallback",
-        "function": "v2resendInboundCallback"
+        "source": "/v2/driveInboundCallback",
+        "function": "v2driveInboundCallback"
       }
     ]
   }
