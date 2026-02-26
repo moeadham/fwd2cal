@@ -23,6 +23,7 @@ export async function processInboundWebhook(
     req: Request,
     res: Response,
     dispatchFunctionName: string,
+    expectedRecipient: string,
 ): Promise<void> {
   if (req.method !== "POST") {
     res.status(405).end();
@@ -85,6 +86,23 @@ export async function processInboundWebhook(
         type: webhookData.type,
       });
       res.status(200).json({message: "ok"});
+      return;
+    }
+
+    // Verify the email is addressed to the expected recipient
+    const recipients = webhookData.data.to || [];
+    const isForUs = recipients.some(
+        (addr) => addr.toLowerCase() === expectedRecipient.toLowerCase(),
+    );
+    if (!isForUs) {
+      logger.log(
+          "Email not for this environment." +
+          ` Recipients: ${recipients.join(", ")},` +
+          ` Expected: ${expectedRecipient}`,
+      );
+      res.status(200).json({
+        message: "Email not for this environment, skipping",
+      });
       return;
     }
 

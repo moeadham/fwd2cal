@@ -281,3 +281,20 @@ export interface FileInfo {
   fileSize: number;
   contentSummary: string;
 }
+
+// ============================================================================
+// DISPATCH TYPES (used by routes + dispatchHandler)
+// ============================================================================
+
+export interface PostAuthTaskData {
+  emailId: string;
+  uid: string;
+  organize?: boolean;
+  proposal?: FileProposal;
+}
+
+export interface OrganizeActionTaskData {
+  proposalId: string;
+  action: string;
+  emailId: string;
+}

@@ -5,4 +5,4 @@ admin.initializeApp();
 const db = getFirestore();
 db.settings({ignoreUndefinedProperties: true});
 
-export * from "./endpoints";
+export * from "./routes";

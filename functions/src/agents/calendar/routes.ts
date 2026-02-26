@@ -3,26 +3,17 @@ import {onTaskDispatched, TaskQueueOptions} from "firebase-functions/v2/tasks";
 import {onRequest, HttpsOptions} from "firebase-functions/v2/https";
 import {onSchedule} from "firebase-functions/v2/scheduler";
 
-import {handleEmail} from "./emailHandler";
+import {handleResendInboundDispatch} from "./emailHandler";
 import {inviteAdditionalAttendees} from "./calendarHelper";
-import {processAttachments} from "./attachmentHandler";
 import {
   signupCallbackHandler,
   verifyAdditionalEmail,
   oauthCronJob,
 } from "../../auth/authHandler";
 import {getAgentCredentials, getRedirectUriIndex} from "../../auth/credentials";
-import {ENVIRONMENT_NAME} from "../../util/config";
-import {processInboundWebhook} from "../../resend/endpoints";
-import {
-  TaskRequest,
-  DispatchResult,
-} from "../../util/types";
-import {getLastSentEmail} from "../../util/resendMock";
-import {
-  fetchAndTransformEmail,
-  EmailFetchError,
-} from "../../resend/emailFetcher";
+import {ENVIRONMENT_NAME, MAIN_EMAIL_ADDRESS} from "../../util/config";
+import {processInboundWebhook} from "../../resend/webhookUtils";
+import {TaskRequest} from "../../util/types";
 
 // Global configuration for onRequest functions
 const onRequestConfig: HttpsOptions = {
@@ -41,7 +32,7 @@ const dispatchConfig: TaskQueueOptions = {
 };
 
 // ============================================================================
-// CALENDAR AGENT ENDPOINTS
+// CALENDAR AGENT ROUTES
 // ============================================================================
 
 export const v2signup = onRequest(
@@ -85,7 +76,7 @@ export const v2oauthCallback = onRequest(
 );
 
 // ============================================================================
-// CALENDAR DISPATCH + TEST
+// CALENDAR DISPATCH
 // ============================================================================
 
 export const v2resendInboundDispatch = onTaskDispatched(
@@ -108,80 +99,8 @@ export const v2testResendInboundDispatch = onRequest(
     },
 );
 
-async function handleResendInboundDispatch(
-    req: TaskRequest,
-): Promise<DispatchResult> {
-  const webhookData = req.data;
-
-  let transformedEmail;
-  let emailData;
-  let resend;
-  try {
-    const result = await fetchAndTransformEmail(webhookData);
-    transformedEmail = result.transformedEmail;
-    emailData = result.emailData;
-    resend = result.resend;
-  } catch (error) {
-    if (error instanceof EmailFetchError) {
-      return {message: "error", error: error.message};
-    }
-    throw error;
-  }
-
-  // Log FULL emailData as JSON for debugging
-  logger.info("Full emailData JSON response", emailData);
-
-  // Log SPF/DKIM extraction results
-  logger.info("SPF/DKIM extraction results", {
-    authResultsRaw: emailData.headers?.["authentication-results"] || "EMPTY",
-    spfResult: transformedEmail.SPF,
-    dkimResultRaw: transformedEmail.dkim,
-  });
-
-  // Log transformed email object for debugging
-  logger.info("Transformed email object", {
-    from: transformedEmail.from,
-    to: transformedEmail.to,
-    subject: transformedEmail.subject,
-    SPF: transformedEmail.SPF,
-    dkim: transformedEmail.dkim,
-    textLength: transformedEmail.text?.length || 0,
-    htmlLength: transformedEmail.html?.length || 0,
-    headerCount: Object.keys(transformedEmail.headers).length,
-  });
-
-  // Handle attachments (ICS files, images, and documents)
-  // eslint-disable-next-line camelcase
-  const {email_id} = webhookData.data;
-  const {icsFiles, imageUrls, documents} = await processAttachments(resend, email_id);
-
-  if (ENVIRONMENT_NAME.value() !== "production") {
-    logger.log("RESEND WEBHOOK DATA", webhookData);
-    logger.log("FETCHED EMAIL DATA", emailData);
-    logger.log("TRANSFORMED EMAIL", transformedEmail);
-    logger.log("ICS FILES", icsFiles);
-    logger.log("IMAGE URLS", imageUrls);
-    logger.log("DOCUMENTS", documents.map((d) => d.filename));
-  }
-
-  // Process the email
-  const outcome = await handleEmail(transformedEmail, icsFiles, imageUrls, documents);
-
-  // Get the sent email data from mock for testing (non-production only)
-  let sentEmail = null;
-  if (ENVIRONMENT_NAME.value() !== "production") {
-    sentEmail = getLastSentEmail(transformedEmail.from);
-  }
-
-  return {
-    message: "thanks",
-    data: outcome,
-    sentEmail: sentEmail,
-  };
-}
-
 // ============================================================================
-// ADDITIONAL CALENDAR ENDPOINTS
+// ADDITIONAL CALENDAR ROUTES
 // ============================================================================
 
 export const v2verifyAdditionalEmail = onRequest(
@@ -215,7 +134,7 @@ export const v2inviteAdditionalAttendees = onRequest(
 export const v2resendInboundCallback = onRequest(
     onRequestConfig,
     async (req, res) => {
-      await processInboundWebhook(req, res, "v2resendInboundDispatch");
+      await processInboundWebhook(req, res, "v2resendInboundDispatch", MAIN_EMAIL_ADDRESS.value());
     },
 );
 

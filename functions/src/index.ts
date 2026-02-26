@@ -6,6 +6,6 @@ admin.initializeApp();
 const db = getFirestore();
 db.settings({ignoreUndefinedProperties: true});
 
-// Re-export all endpoints
-export * from "./agents/calendar/endpoints";
-export * from "./agents/drive/endpoints";
+// Re-export all routes
+export * from "./agents/calendar/routes";
+export * from "./agents/drive/routes";

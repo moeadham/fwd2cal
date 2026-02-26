@@ -26,6 +26,7 @@ import {
 } from "../../util/emailUtils";
 import {sendEmailResend} from "../../util/resend";
 import {TransformedEmail, ResendOutboundAttachment} from "../../util/types";
+import {applyTemplate} from "./driveUtils";
 import {
   DriveFileEntry,
   DriveOrganizeProposal,
@@ -66,17 +67,6 @@ function signActionToken(proposalId: string, action: string): string {
       .digest("hex");
 }
 
-/**
- * Replace template placeholders in an HTML string.
- */
-function applyTemplate(html: string, replacements: Record<string, string>): string {
-  let result = html;
-  result = result.replace(/%SUPPORT_EMAIL%/g, getSupportEmail());
-  for (const [key, value] of Object.entries(replacements)) {
-    result = result.replace(new RegExp(`%${key}%`, "g"), value);
-  }
-  return result;
-}
 
 /**
  * Send a response email back to the sender.
