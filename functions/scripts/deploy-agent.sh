@@ -1,13 +1,14 @@
 #!/bin/bash
 # Deploy a specific agent's functions
-# Usage: ./scripts/deploy-agent.sh <calendar|drive>
+# Usage: ./scripts/deploy-agent.sh <calendar|drive> [--project <project>]
 
 set -e
 
 AGENT="$1"
+shift || true
 
 if [ -z "$AGENT" ]; then
-  echo "Usage: $0 <calendar|drive>"
+  echo "Usage: $0 <calendar|drive> [--project <project>]"
   exit 1
 fi
 
@@ -41,4 +42,4 @@ set_main "$AGENT_MAIN"
 trap 'set_main "$ORIGINAL_MAIN"' EXIT
 
 echo "Deploying ${AGENT} agent"
-firebase deploy --config "${AGENT_CONFIG}"
+firebase deploy --config "${AGENT_CONFIG}" "$@"
