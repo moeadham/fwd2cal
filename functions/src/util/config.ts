@@ -100,7 +100,7 @@ function getHostingBaseUrl(): string {
   if (process.env.GCLOUD_PROJECT === "fwd2cal-dev-2578e") {
     return "https://fwd2cal-dev-2578e.web.app";
   }
-  return "https://www.fwd2cal.com";
+  return "https://app.fwd2cal.com";
 }
 
 const DRIVE_ACTION_SIGNING_KEY = defineString("DRIVE_ACTION_SIGNING_KEY");

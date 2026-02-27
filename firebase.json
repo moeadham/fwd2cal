@@ -75,7 +75,7 @@
       },
       {
         "source": "/signup",
-        "function": "signup"
+        "function": "v2signup"
       },
       {
         "source": "/v2/verifyAdditionalEmail",

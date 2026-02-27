@@ -24,10 +24,39 @@
   "hosting": {
     "public": "public",
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "redirects": [],
     "rewrites": [
+      {
+        "source": "/not-found",
+        "destination": "/404.html"
+      },
       {
         "source": "/insufficient-permissions",
         "destination": "/insufficient-permissions.html"
+      },
+      {
+        "source": "/drive-insufficient-permissions",
+        "destination": "/insufficient-permissions.html"
+      },
+      {
+        "source": "/signup-with-google.png",
+        "destination": "/signin-with-google.png"
+      },
+      {
+        "source": "/auth/verifyAdditionalEmail",
+        "function": "verifyAdditionalEmail"
+      },
+      {
+        "source": "/auth/inviteAdditionalAttendees",
+        "function": "inviteAdditionalAttendees"
+      },
+      {
+        "source": "/auth/oauthCallback",
+        "function": "oauthCallback"
+      },
+      {
+        "source": "/signup",
+        "function": "v2signup"
       },
       {
         "source": "/v2/signup",
