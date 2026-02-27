@@ -7,11 +7,12 @@ import {handleResendInboundDispatch} from "./emailHandler";
 import {inviteAdditionalAttendees} from "./calendarHelper";
 import {
   signupCallbackHandler,
+  hasRequiredScopes,
   verifyAdditionalEmail,
   oauthCronJob,
 } from "../../auth/authHandler";
 import {getAgentCredentials, getRedirectUriIndex} from "../../auth/credentials";
-import {ENVIRONMENT_NAME, MAIN_EMAIL_ADDRESS, RESEND_SIGNING_SECRET} from "../../util/config";
+import {ENVIRONMENT_NAME, MAIN_EMAIL_ADDRESS, RESEND_SIGNING_SECRET, getHostingBaseUrl} from "../../util/config";
 import {processInboundWebhook} from "../../resend/webhookUtils";
 import {TaskRequest} from "../../util/types";
 
@@ -60,15 +61,40 @@ export const v2signup = onRequest(
 export const v2oauthCallback = onRequest(
     onRequestConfig,
     async (req, res) => {
+      let grantedScope: string;
       try {
-        await signupCallbackHandler(
+        const result = await signupCallbackHandler(
             req.query as Record<string, string>,
             "calendar",
         );
+        grantedScope = result.grantedScope;
       } catch (err) {
         const error = err as { code?: number; message: string };
         logger.warn("Error in oauthCallback", err);
         res.status(error.code || 500).send(error.message);
+        return;
+      }
+
+      if (!hasRequiredScopes(grantedScope, [
+        "https://www.googleapis.com/auth/calendar",
+      ])) {
+        logger.warn("Calendar signup: insufficient scopes", {grantedScope});
+        res.redirect(302, `${getHostingBaseUrl()}/insufficient-permissions`);
+        return;
+      }
+
+      res.redirect(302, "https://www.fwd2cal.com/thanks");
+    },
+);
+
+export const v2testOauthCallback = onRequest(
+    onRequestConfig,
+    async (req, res) => {
+      const grantedScope = req.body.scope || "";
+      if (!hasRequiredScopes(grantedScope, [
+        "https://www.googleapis.com/auth/calendar",
+      ])) {
+        res.redirect(302, `${getHostingBaseUrl()}/insufficient-permissions`);
         return;
       }
       res.redirect(302, "https://www.fwd2cal.com/thanks");

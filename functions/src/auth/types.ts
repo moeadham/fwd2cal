@@ -43,6 +43,12 @@ export interface OAuthTokens {
   id_token?: string;
 }
 
+// Result from signupCallbackHandler — includes granted scopes for validation
+export interface SignupCallbackResult {
+  user: FirebaseUserRecord;
+  grantedScope: string;
+}
+
 // Firebase user record
 export interface FirebaseUserRecord {
   uid: string;

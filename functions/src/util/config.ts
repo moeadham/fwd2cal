@@ -89,6 +89,20 @@ function getAdminEmail(): string {
   return `admin@${getEmailDomain(MAIN_EMAIL_ADDRESS.value())}`;
 }
 
+/**
+ * Returns the hosting base URL for the current environment.
+ * Must be called inside a function handler.
+ */
+function getHostingBaseUrl(): string {
+  if (process.env.FUNCTIONS_EMULATOR === "true") {
+    return "http://localhost:5002";
+  }
+  if (process.env.GCLOUD_PROJECT === "fwd2cal-dev-2578e") {
+    return "https://fwd2cal-dev-2578e.web.app";
+  }
+  return "https://www.fwd2cal.com";
+}
+
 const DRIVE_ACTION_SIGNING_KEY = defineString("DRIVE_ACTION_SIGNING_KEY");
 
 const ORGANIZE_DRIVE_COST_PER_FILE = defineString("ORGANIZE_DRIVE_COST_PER_FILE", {
@@ -144,4 +158,5 @@ export {
   ORGANIZE_DRIVE_CHUNK_SIZE,
   getSupportEmail,
   getAdminEmail,
+  getHostingBaseUrl,
 };

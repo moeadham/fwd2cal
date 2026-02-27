@@ -13,10 +13,10 @@ import {
   handleOrganizeActionTask,
   dispatchPostAuthTask,
 } from "./dispatchHandler";
-import {signupCallbackHandler, oauthCronJob} from "../../auth/authHandler";
+import {signupCallbackHandler, hasRequiredScopes, oauthCronJob} from "../../auth/authHandler";
 import {processInboundWebhook} from "../../resend/webhookUtils";
 import {getAgentCredentials, getRedirectUriIndex} from "../../auth/credentials";
-import {ENVIRONMENT_NAME, DRIVE_EMAIL_ADDRESS, DRIVE_RESEND_SIGNING_SECRET} from "../../util/config";
+import {ENVIRONMENT_NAME, DRIVE_EMAIL_ADDRESS, DRIVE_RESEND_SIGNING_SECRET, getHostingBaseUrl} from "../../util/config";
 import {TaskRequest} from "../../util/types";
 import {cleanupExpiredDriveFileData} from "../../util/firestoreHandler";
 import {sendEvent} from "../../util/analytics";
@@ -100,12 +100,14 @@ export const v2driveOauthCallback = onRequest(
     onRequestConfig,
     async (req, res) => {
       let uid: string;
+      let grantedScope: string;
       try {
-        const userRecord = await signupCallbackHandler(
+        const result = await signupCallbackHandler(
             req.query as Record<string, string>,
             "drive",
         );
-        uid = userRecord.uid;
+        uid = result.user.uid;
+        grantedScope = result.grantedScope;
         sendEvent(uid, "drive_sign_up");
       } catch (err) {
         const error = err as { code?: number; message: string };
@@ -114,12 +116,35 @@ export const v2driveOauthCallback = onRequest(
         return;
       }
 
-      // If state contains a resendEmailId (+ optional proposal), process the pending upload
+      // Parse state once for both scope determination and post-auth dispatch
       const state = req.query.state as string | undefined;
+      let parsedState: ReturnType<typeof parseOAuthState> | null = null;
       if (state) {
         try {
-          const {emailId, proposal, organize} = parseOAuthState(state);
-          // Dispatch as background task to avoid blocking the browser redirect
+          parsedState = parseOAuthState(state);
+        } catch {
+          // Invalid state, fall through to standard scope check
+        }
+      }
+
+      const requiredScopes = parsedState?.organize ?
+        ["https://www.googleapis.com/auth/drive"] :
+        [
+          "https://www.googleapis.com/auth/drive.file",
+          "https://www.googleapis.com/auth/drive.metadata",
+        ];
+
+      if (!hasRequiredScopes(grantedScope, requiredScopes)) {
+        logger.warn("Drive signup: insufficient scopes", {
+          uid, grantedScope, requiredScopes,
+        });
+        res.redirect(302, `${getHostingBaseUrl()}/drive-insufficient-permissions`);
+        return;
+      }
+
+      if (parsedState) {
+        try {
+          const {emailId, proposal, organize} = parsedState;
           await dispatchPostAuthTask({emailId, uid, organize, proposal});
         } catch (err) {
           logger.error("Drive: Failed to process after OAuth", {

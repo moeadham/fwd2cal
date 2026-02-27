@@ -26,6 +26,10 @@
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
     "rewrites": [
       {
+        "source": "/insufficient-permissions",
+        "destination": "/insufficient-permissions.html"
+      },
+      {
         "source": "/v2/signup",
         "function": "v2signup"
       },

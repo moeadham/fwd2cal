@@ -500,6 +500,22 @@ describe(`fwd2cal (${EMAIL_SERVICE.toUpperCase()})`, function() {
     }
   });
 
+  it("UT14.6 insufficient permissions redirects when user skips calendar scope", function(done) {
+    const DISPATCH_URL = "http://127.0.0.1:5001";
+    const DISPATCH_REGION = "us-central1";
+    const APP_ID = process.env.GCLOUD_PROJECT || "fwd2cal-dev-2578e";
+    chaiWithHttp.request(`${DISPATCH_URL}/${APP_ID}/${DISPATCH_REGION}`)
+      .post("/v2testOauthCallback")
+      .set("Content-Type", "application/json")
+      .send({ scope: "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile" })
+      .redirects(0)
+      .end((err: Error | null, res: Response) => {
+        expect(res).to.have.status(302);
+        expect(res.headers.location).to.include("/insufficient-permissions");
+        done(err);
+      });
+  });
+
   it("UT15 delete account", async function() {
     const testMessage = deleteAccount;
     const res = await sendResendWebhook(testMessage);

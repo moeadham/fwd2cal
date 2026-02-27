@@ -17,7 +17,7 @@ import {logger} from "firebase-functions/v2";
 import {isUUID} from "validator";
 import {sendEvent} from "../util/analytics";
 import {addContactToResend, addContactToSegment} from "../util/resend";
-import {OAuthTokens, FirebaseUserRecord, AgentName} from "./types";
+import {OAuthTokens, FirebaseUserRecord, AgentName, SignupCallbackResult} from "./types";
 import {RequestWithQuery} from "../util/types";
 import {Response} from "express";
 
@@ -105,7 +105,7 @@ async function deleteAccount(uid: string): Promise<void> {
 async function signupCallbackHandler(
     query: Record<string, string>,
     agentName: AgentName,
-): Promise<FirebaseUserRecord> {
+): Promise<SignupCallbackResult> {
   const credentials = getAgentCredentials(agentName);
   logger.log("oauthCallback", query);
   const redirectUriIndex = getRedirectUriIndex(ENVIRONMENT_NAME.value());
@@ -183,7 +183,7 @@ async function signupCallbackHandler(
         RESEND_REGISTERED_USERS_SEGMENT_ID.value(),
     );
 
-    return userRecord;
+    return {user: userRecord, grantedScope: tokens.scope || ""};
   } catch (error) {
     console.error("Error exchanging code for tokens", error);
     const err = new Error("Authentication failed") as Error & { code?: number };
@@ -220,11 +220,25 @@ async function verifyAdditionalEmail(
   return res.send({data: pendingEmail.ownerEmail});
 }
 
+function hasRequiredScopes(
+    grantedScope: string,
+    requiredScopes: string[],
+): boolean {
+  const granted = new Set(grantedScope.split(/\s+/));
+  if (granted.has("https://www.googleapis.com/auth/drive")) {
+    return requiredScopes.every(
+        (s) => s.startsWith("https://www.googleapis.com/auth/drive") || granted.has(s),
+    );
+  }
+  return requiredScopes.every((scope) => granted.has(scope));
+}
+
 export {
   getOauthClient,
   refreshOAuthTokens,
   oauthCronJob,
   signupCallbackHandler,
+  hasRequiredScopes,
   verifyAdditionalEmail,
   deleteAccount,
 };

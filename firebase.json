@@ -50,6 +50,14 @@
         "destination": "/404.html"
       },
       {
+        "source": "/insufficient-permissions",
+        "destination": "/insufficient-permissions.html"
+      },
+      {
+        "source": "/drive-insufficient-permissions",
+        "destination": "/insufficient-permissions.html"
+      },
+      {
         "source": "/signup-with-google.png",
         "destination": "/signin-with-google.png"
       },

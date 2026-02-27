@@ -26,6 +26,10 @@
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
     "rewrites": [
       {
+        "source": "/drive-insufficient-permissions",
+        "destination": "/insufficient-permissions.html"
+      },
+      {
         "source": "/v2/driveSignup",
         "function": "v2driveSignup"
       },
