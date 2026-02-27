@@ -112,6 +112,8 @@ async function processEmail(
   const eventResult = eventResponse as EventData;
   const timezoneResult = timezoneResponse as Timezone;
 
+  logger.info("LLM event response", {eventResult: JSON.stringify(eventResult)});
+
   // Clean up undefined values
   [eventResult, timezoneResult].forEach((res) => {
     Object.keys(res).forEach((key) => {

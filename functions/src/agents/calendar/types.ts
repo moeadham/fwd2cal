@@ -17,17 +17,17 @@ export {
 
 // Event schema - individual event within the events array
 export const EventSchema = z.object({
-  summary: z.string().describe("The title of the event"),
-  location: z.string().nullable().describe("A location of the event if one has been given"),
-  description: z.string().nullable().describe("A description of the event if one has been given"),
+  summary: z.string().max(200).describe("The title of the event"),
+  location: z.string().max(500).nullable().describe("A location of the event if one has been given"),
+  description: z.string().max(1000).nullable().describe("A description of the event if one has been given"),
   conference_call: z.boolean().describe("True or false, if the event is a conference call or virtual"),
-  date: z.string().describe("DD MMMM YYYY - the date of the event"),
-  start_time: z.string().describe("HH:mm - the start time of the event in 24 hour format"),
-  end_time: z.string().nullable().describe("HH:mm - the end time of the event in 24 hour format"),
-  attendees: z.array(z.string())
+  date: z.string().max(20).describe("DD MMMM YYYY - the date of the event"),
+  start_time: z.string().max(5).describe("HH:mm - the start time of the event in 24 hour format"),
+  end_time: z.string().max(5).nullable().describe("HH:mm - the end time of the event in 24 hour format"),
+  attendees: z.array(z.string().max(320))
       .describe("A list of attendees email addresses. ONLY INCLUDE VALID EMAIL ADDRESSES, NOT NAMES."),
-  selected_calendar_id: z.string().nullable().optional().describe("The calendar_id where this event should be added."),
-  timeZone: z.string().nullable().optional().describe("IANA timezone string"),
+  selected_calendar_id: z.string().max(320).nullable().optional()
+      .describe("The calendar_id where this event should be added."),
 });
 
 // Event data schema - main response for email processing
@@ -35,7 +35,6 @@ export const EventDataSchema = z.object({
   events: z.array(EventSchema).nullable().optional().describe("Array of events extracted from the email"),
   error: z.string().nullable().optional().describe("Error message if no date provided"),
   description: z.string().nullable().optional().describe("Error description if no date provided"),
-  reason: z.string().nullable().optional().describe("Reason for your choices. This is for debugging purposes only."),
 });
 
 // Timezone schema
@@ -201,8 +200,12 @@ export const ICSParserSchema = z.object({
 });
 
 // Inferred Types from Zod Schemas
-export type Event = z.infer<typeof EventSchema>;
-export type EventData = z.infer<typeof EventDataSchema>;
+export type Event = z.infer<typeof EventSchema> & {
+  timeZone?: string | null;
+};
+export type EventData = Omit<z.infer<typeof EventDataSchema>, "events"> & {
+  events?: Event[] | null;
+};
 export type Timezone = z.infer<typeof TimezoneSchema>;
 export type ICSParsedEvent = z.infer<typeof ICSParserSchema>;
 export type SkillSelection = z.infer<typeof SkillSelectionSchema>;
