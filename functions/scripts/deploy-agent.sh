@@ -20,6 +20,37 @@ if [ ! -f "$AGENT_CONFIG" ]; then
   exit 1
 fi
 
+# Determine target project: explicit --project flag takes priority, otherwise active Firebase project
+PROJECT=""
+ARGS=("$@")
+for ((i=0; i<${#ARGS[@]}; i++)); do
+  if [ "${ARGS[$i]}" = "--project" ] && [ $((i+1)) -lt ${#ARGS[@]} ]; then
+    PROJECT="${ARGS[$((i+1))]}"
+    break
+  fi
+done
+if [ -z "$PROJECT" ]; then
+  PROJECT=$(firebase use 2>/dev/null)
+fi
+
+# Verify OAuth credentials for the target project exist before building
+CREDS_DIR="src/agents/${AGENT}/auth"
+if [ "$PROJECT" = "fwd2cal-dev-2578e" ]; then
+  SUFFIX="-dev"
+else
+  SUFFIX=""
+fi
+
+case "$AGENT" in
+  calendar) CREDS_FILE="v2-google-auth-credentials-fwd2cal${SUFFIX}.json" ;;
+  drive)    CREDS_FILE="v2-google-auth-credentials-drive2cal${SUFFIX}.json" ;;
+esac
+
+if [ ! -f "${CREDS_DIR}/${CREDS_FILE}" ]; then
+  echo "Error: Missing OAuth credentials: ${CREDS_DIR}/${CREDS_FILE}"
+  exit 1
+fi
+
 # Build first
 npm run build
 
