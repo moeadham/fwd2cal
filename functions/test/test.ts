@@ -3,6 +3,8 @@ import chai from "chai";
 import chaiHttp from "chai-http";
 import { exec } from "child_process";
 import type { Response } from "superagent";
+import { initializeApp } from "firebase-admin/app";
+import { getFirestore } from "firebase-admin/firestore";
 
 // Extend chai with chaiHttp types
 const chaiWithHttp = chai as typeof chai & {
@@ -14,12 +16,14 @@ import {
   AttachmentWithUrl,
   emailFromMain,
   addEmailAddress,
+  addEmailAddressInBody,
   removeEmailAddress,
   deleteAccount,
   eventEmailFromSecondEmail,
   basicDetailedEmail,
   basicEmailFuture,
   emailWithICSAttachment,
+  emailWithPDFAttachment,
   multipleEventsEmail,
   emailWithImageAttachment,
   familyEvent,
@@ -31,12 +35,34 @@ const EMAIL_SERVICE = "resend";
 
 chai.use(chaiHttp);
 const expect = chai.expect;
-const apiURL = "http://127.0.0.1:5002"; // URL of your Vercel dev server
+const apiURL = "http://127.0.0.1:5002"; // URL of Firebase hosting emulator
 
 // Resend webhook endpoint
 const CALLBACK_ENDPOINT = "/v2/resendInboundCallback";
 
 const TESTER_PRIMARY_GOOGLE_ACCT = process.env.TESTER_PRIMARY_GOOGLE_ACCT || "";
+
+// Firebase Admin SDK for direct Firestore emulator access (test-only)
+process.env.FIRESTORE_EMULATOR_HOST = "127.0.0.1:8080";
+const testApp = initializeApp({ projectId: process.env.GCLOUD_PROJECT || "fwd2cal-dev-2578e" }, "test");
+const db = getFirestore(testApp);
+
+async function getUidFromEmail(email: string): Promise<string | null> {
+  const doc = await db.collection("EmailAddress").doc(email).get();
+  if (!doc.exists) return null;
+  return doc.data()?.uid || null;
+}
+
+async function getUserTokens(uid: string): Promise<{ access_token: string; refresh_token: string }> {
+  const doc = await db.collection("Users").doc(uid).get();
+  if (!doc.exists) throw new Error(`User ${uid} not found in Firestore`);
+  const data = doc.data()!;
+  return { access_token: data.access_token, refresh_token: data.refresh_token };
+}
+
+async function setUserTokens(uid: string, tokens: { access_token: string; refresh_token: string }): Promise<void> {
+  await db.collection("Users").doc(uid).update(tokens);
+}
 
 interface WebhookWithMock {
   type: string;
@@ -110,7 +136,7 @@ async function sendResendWebhook(testData: ResendTestData, attachmentsList: Atta
   const webhookData = callbackResponse.body.webhookData;
   const DISPATCH_URL = `http://127.0.0.1:5001`;
   const DISPATCH_REGION = `us-central1`;
-  const APP_ID = `fwd2cal`;
+  const APP_ID = process.env.GCLOUD_PROJECT || `fwd2cal-dev-2578e`;
   const response = await chaiWithHttp
     .request(`${DISPATCH_URL}/${APP_ID}/${DISPATCH_REGION}`)
     .post("/v2testResendInboundDispatch").set("Content-Type", "application/json")
@@ -180,6 +206,16 @@ describe(`fwd2cal (${EMAIL_SERVICE.toUpperCase()})`, function() {
     expect(res.body).to.be.an("object");
     expect((res.body.data as { verificationCode: string }).verificationCode).to.be.a("String");
     verificationCode = (res.body.data as { verificationCode: string }).verificationCode;
+  });
+
+  it("UT02b test adding email address from body (no subject)", async function() {
+    const testMessage = addEmailAddressInBody;
+    const res = await sendResendWebhook(testMessage);
+    expect(res).to.have.status(200);
+    console.log(res.body);
+    // Should detect add-email skill from body and get a verification code
+    expect(res.body).to.be.an("object");
+    expect((res.body.data as { verificationCode: string }).verificationCode).to.be.a("String");
   });
 
   it("UT03 try to email from secondary email address", async function() {
@@ -315,6 +351,27 @@ describe(`fwd2cal (${EMAIL_SERVICE.toUpperCase()})`, function() {
     expect((res.body.data as { result: string }).result).to.include("removed");
   });
 
+  it("UT10.5 email with PDF attachment containing event", async function() {
+    const testMessage = emailWithPDFAttachment;
+
+    const res = await sendResendWebhook(testMessage, testMessage.attachmentsList);
+    expect(res).to.have.status(200);
+    console.log(res.body);
+    expect(res.body).to.be.an("object");
+    // Should successfully create event from PDF document
+    expect(res.body.data).to.not.have.property("error");
+    expect((res.body.data as { kind: string }).kind).to.equal("calendar#event");
+
+    // Verify sent email
+    expect(res.body.sentEmail).to.be.an("object");
+    expect(res.body.sentEmail.html).to.include("Event added");
+
+    // Verify threading headers
+    const incomingMessageId = testMessage.emailContent.headers["message-id"];
+    expect(res.body.sentEmail.headers["In-Reply-To"]).to.equal(incomingMessageId);
+    expect(res.body.sentEmail.headers["References"]).to.equal(`<original-message-pdf> ${incomingMessageId}`);
+  });
+
   it("UT11 multiple events in one email", async function() {
     const testMessage = multipleEventsEmail;
     const res = await sendResendWebhook(testMessage);
@@ -399,6 +456,64 @@ describe(`fwd2cal (${EMAIL_SERVICE.toUpperCase()})`, function() {
       console.log(`Event added to calendar: ${(res.body.data as { calendarId: string }).calendarId}`);
       expect((res.body.data as { calendarId: string }).calendarId).to.include("visibl.ai");
     }
+  });
+
+  it("UT14.5 insufficient permissions sends oauthFailed email", async function() {
+    // Look up the test user's UID
+    const uid = await getUidFromEmail(TESTER_PRIMARY_GOOGLE_ACCT);
+    expect(uid).to.be.a("string", "Test user UID not found");
+
+    // Save real tokens, then corrupt them
+    const realTokens = await getUserTokens(uid!);
+    try {
+      await setUserTokens(uid!, {
+        access_token: "corrupted_invalid_token",
+        refresh_token: "corrupted_invalid_refresh",
+      });
+
+      // Deep clone emailFromMain with unique message-id
+      const testMessage = JSON.parse(JSON.stringify(emailFromMain)) as ResendTestData;
+      const uniqueId = `<test-14.5-${Date.now()}@mail.gmail.com>`;
+      testMessage.webhook.data.message_id = uniqueId;
+      testMessage.emailContent.headers["message-id"] = uniqueId;
+
+      const res = await sendResendWebhook(testMessage);
+      expect(res).to.have.status(200);
+      console.log("UT14.5 RESPONSE:", res.body);
+
+      // No event should be created (auth error returns undefined → null in JSON)
+      expect(res.body.data).to.satisfy(
+        (val: unknown) => val === undefined || val === null,
+        "Expected no event data for auth error",
+      );
+
+      // Verify oauthFailed email was sent
+      expect(res.body.sentEmail).to.be.an("object");
+      expect(res.body.sentEmail.html).to.be.a("string");
+      expect(res.body.sentEmail.html).to.include("issue authenticating with Google");
+      expect(res.body.sentEmail.html).to.include("to authorize Google again");
+    } finally {
+      // Always restore real tokens
+      if (uid) {
+        await setUserTokens(uid, realTokens);
+      }
+    }
+  });
+
+  it("UT14.6 insufficient permissions redirects when user skips calendar scope", function(done) {
+    const DISPATCH_URL = "http://127.0.0.1:5001";
+    const DISPATCH_REGION = "us-central1";
+    const APP_ID = process.env.GCLOUD_PROJECT || "fwd2cal-dev-2578e";
+    chaiWithHttp.request(`${DISPATCH_URL}/${APP_ID}/${DISPATCH_REGION}`)
+      .post("/v2testOauthCallback")
+      .set("Content-Type", "application/json")
+      .send({ scope: "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile" })
+      .redirects(0)
+      .end((err: Error | null, res: Response) => {
+        expect(res).to.have.status(302);
+        expect(res.headers.location).to.include("/insufficient-permissions");
+        done(err);
+      });
   });
 
   it("UT15 delete account", async function() {

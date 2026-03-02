@@ -1,7 +1,7 @@
 import {logger} from "firebase-functions/v2";
 import moment from "moment-timezone";
 import {sendEvent} from "./analytics";
-import {TransformedEmail, EmailThreadHeaders} from "../agents/calendar/types";
+import {TransformedEmail, EmailThreadHeaders} from "./types";
 
 /**
  * Validates an email address format

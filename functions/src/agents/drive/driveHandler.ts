@@ -1,0 +1,180 @@
+import {logger} from "firebase-functions/v2";
+import {getUserFromEmail, getUserFromUID} from "../../util/firestoreHandler";
+import {sendEvent} from "../../util/analytics";
+import {MAX_DRIVE_UPLOAD_BYTES} from "../../util/config";
+import {getSenderFromRawEmail, verifyEmail} from "../../util/emailUtils";
+import {TransformedEmail, ResendClient} from "../../util/types";
+import {DriveProcessingResult} from "./types";
+import {driveMailTemplates, driveSignupUrl} from "./mailTemplates";
+import {listAttachments} from "./fileProcessor";
+import {collectImageUrls} from "../../util/imageUtils";
+import {fastMatchSkill} from "../../util/skills/matcher";
+import {getSkills} from "./skills";
+import {handleOrganizeDrive, handleOrganizeApproval} from "./organizeHandler";
+import {
+  parseEmbeddedDriveData, parseOrganizeEmbeddedData,
+  applyTemplate, sendDriveEmailResponse, getNextFolderPrefix,
+  buildFileInfos, callProposalWithFallback, getExtension, ensureDatePrefix,
+} from "./driveUtils";
+import {processUpload} from "./uploadHandler";
+import {handleMoveReply} from "./moveHandler";
+
+/**
+ * Main drive handler — processes an inbound email.
+ * If the user has OAuth, uploads immediately and tells them they can reply to move.
+ * If not, sends an auth-required email with a signup link.
+ * Also detects replies for the move-file flow.
+ */
+async function handleDriveEmail(
+    email: TransformedEmail,
+    resend: ResendClient,
+    emailId: string,
+): Promise<DriveProcessingResult> {
+  const sender = getSenderFromRawEmail(email);
+  if (!sender) {
+    return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: [], error: "No sender found"};
+  }
+
+  // Verify email sender
+  if (!verifyEmail(email)) {
+    logger.warn("Drive: Unverified email", {sender});
+    return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: [], error: "Unverified email"};
+  }
+
+  // Check if this is a REPLY to an organize-drive proposal (approval)
+  // Must come before skill match — the quoted thread subject still matches "organize drive"
+  const organizeData = parseOrganizeEmbeddedData(email.html || "");
+  if (organizeData) {
+    logger.info("Drive: organize-drive approval detected", {sender, proposalId: organizeData.proposalId});
+    await handleOrganizeApproval(email, organizeData.proposalId);
+    return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: []};
+  }
+
+  // Check for organize-drive skill match
+  const skills = getSkills();
+  const skillMatch = fastMatchSkill(email.subject || "", "", skills);
+  if (skillMatch?.skillId === "organize-drive") {
+    logger.info("Drive: organize-drive skill matched", {sender, matchedIn: skillMatch.matchedIn});
+    await handleOrganizeDrive(email, emailId);
+    return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: []};
+  }
+
+  // Check if this is a REPLY to an existing upload (move request)
+  const parsedDriveData = await parseEmbeddedDriveData(email.html || "");
+  if (parsedDriveData) {
+    return handleMoveReply(
+        email, sender, parsedDriveData.files, parsedDriveData.fileDataId,
+    );
+  }
+
+  // Check if user already has OAuth — if so, organize immediately
+  const uid = await getUserFromEmail(sender);
+  if (uid) {
+    try {
+      const userData = await getUserFromUID(uid, "drive");
+      if (userData.access_token) {
+        logger.info("Drive: Returning user — organizing immediately", {sender, uid});
+        return processUpload(emailId, uid, resend, email);
+      }
+    } catch (err) {
+      logger.debug("Drive: No OAuth or user lookup failed, falling through to auth flow", {
+        uid, error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  // User doesn't have OAuth — send auth-required email
+  logger.info("Drive: New user — sending auth email", {sender});
+
+  // List attachment metadata
+  const maxUploadBytes = MAX_DRIVE_UPLOAD_BYTES.value();
+  const attachments = await listAttachments(resend, emailId, maxUploadBytes);
+
+  if (attachments.length === 0) {
+    logger.info("Drive: No attachments found", {sender});
+    const html = applyTemplate(driveMailTemplates.noAttachments.html, {});
+    await sendDriveEmailResponse(sender, email, html);
+    return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: [], error: "No attachments"};
+  }
+
+  // Download and extract content summaries for LLM preview
+  const fileInfos = await buildFileInfos(attachments);
+  const imageUrls = collectImageUrls(attachments);
+
+  // LLM: propose folder + filenames (no agent folders available without OAuth)
+  const nextPrefix = getNextFolderPrefix([]);
+  const proposal = await callProposalWithFallback(
+      fileInfos, email.subject || "", email.text || "",
+      [], nextPrefix, uid, attachments, imageUrls,
+  );
+  logger.info("Drive: LLM proposal", {
+    folder: proposal.folder_name,
+    isExisting: proposal.is_existing_folder,
+    files: proposal.proposals.map((p) => p.suggested_name),
+  });
+
+  // Build signup link with emailId + proposal as state (OAuth callback will reuse proposal)
+  const statePayload = JSON.stringify({
+    emailId,
+    proposal: {
+      folder_name: proposal.folder_name,
+      is_existing_folder: proposal.is_existing_folder,
+      proposals: proposal.proposals.map((p) => ({
+        file_index: p.file_index,
+        suggested_name: p.suggested_name,
+        reason: p.reason,
+      })),
+    },
+  });
+  const encodedState = Buffer.from(statePayload).toString("base64url");
+  const signupLink = `${driveSignupUrl}?state=${encodeURIComponent(encodedState)}`;
+
+  // Send auth-required email showing what we'll organize
+  const emailDate = email.headers?.date;
+  if (proposal.proposals.length === 1) {
+    const file = proposal.proposals[0];
+    const extension = getExtension(attachments[0].filename);
+    const withExt = file.suggested_name.endsWith(extension) ?
+      file.suggested_name : `${file.suggested_name}${extension}`;
+    const suggestedName = ensureDatePrefix(withExt, emailDate);
+    const html = applyTemplate(driveMailTemplates.fileProposal.html, {
+      PROPOSED_NAME: suggestedName,
+      PROPOSED_FOLDER: proposal.folder_name,
+      SIGNUP_LINK: signupLink,
+    });
+    await sendDriveEmailResponse(sender, email, html);
+  } else {
+    const fileListHtml = proposal.proposals.map((p) => {
+      const att = attachments[p.file_index];
+      const extension = att ? getExtension(att.filename) : "";
+      const withExt = p.suggested_name.endsWith(extension) ?
+        p.suggested_name : `${p.suggested_name}${extension}`;
+      const name = ensureDatePrefix(withExt, emailDate);
+      return `<b>${name}</b>`;
+    }).join("<br>");
+    const html = applyTemplate(driveMailTemplates.multipleFileProposal.html, {
+      PROPOSED_FOLDER: proposal.folder_name,
+      FILE_LIST: fileListHtml,
+      SIGNUP_LINK: signupLink,
+    });
+    await sendDriveEmailResponse(sender, email, html);
+  }
+
+  sendEvent(uid || sender, "driveFileProposed", {
+    filesCount: String(attachments.length),
+    folder: proposal.folder_name,
+  });
+
+  return {
+    filesProcessed: attachments.length,
+    filesSucceeded: 0,
+    filesFailed: 0,
+    results: [],
+  };
+}
+
+export {handleDriveEmail};
+
+// Re-exports for backward compatibility
+export {processUpload} from "./uploadHandler";
+export {getNextFolderPrefix, parseEmbeddedDriveData, buildEmbeddedDriveData} from "./driveUtils";

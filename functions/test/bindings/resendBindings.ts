@@ -5,6 +5,7 @@
 const TESTER_PRIMARY_GOOGLE_ACCT = process.env.TESTER_PRIMARY_GOOGLE_ACCT || "";
 const TESTER_SECONDARY_EMAIL_ACCT = process.env.TESTER_SECONDARY_EMAIL_ACCT || "";
 const MAIN_EMAIL_ADDRESS = process.env.MAIN_EMAIL_ADDRESS || "calendar@fwd2cal.com";
+const DRIVE_EMAIL_ADDRESS = process.env.DRIVE_EMAIL_ADDRESS || "drive@fwd2cal.com";
 
 interface WebhookData {
   type: string;
@@ -170,6 +171,44 @@ const addEmailAddress: ResendTestData = createResendTestData(
       "message-id": `<test-2-${Date.now()}@mail.gmail.com>`,
       "in-reply-to": "<original-message-2>",
       "references": "<original-message-2>",
+    },
+  },
+);
+
+// Test 2b: Add email address (in body only, no subject)
+const TESTER_BODYTEST_EMAIL = TESTER_PRIMARY_GOOGLE_ACCT.replace("@", "+bodytest@");
+const addEmailAddressInBody: ResendTestData = createResendTestData(
+  {
+    type: "email.received",
+    created_at: new Date().toISOString(),
+    data: {
+      email_id: "test-email-2b",
+      message_id: `<test-2b-${Date.now()}@mail.gmail.com>`,
+      from: TESTER_PRIMARY_GOOGLE_ACCT,
+      to: [MAIN_EMAIL_ADDRESS],
+      cc: [],
+      bcc: [],
+      subject: "Request",
+      created_at: new Date().toISOString(),
+      attachments: [],
+    },
+  },
+  {
+    id: "test-email-2b",
+    subject: "Request",
+    from: TESTER_PRIMARY_GOOGLE_ACCT,
+    to: [MAIN_EMAIL_ADDRESS],
+    html: `<div dir="ltr">Please add ${TESTER_BODYTEST_EMAIL} to my account.</div>`,
+    text: `Please add ${TESTER_BODYTEST_EMAIL} to my account.`,
+    headers: {
+      "authentication-results": generateAuthHeader(TESTER_PRIMARY_GOOGLE_ACCT),
+      "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
+      "to": MAIN_EMAIL_ADDRESS,
+      "subject": "Request",
+      "date": "Thu, 28 Mar 2025 10:45:00 +0000",
+      "message-id": `<test-2b-${Date.now()}@mail.gmail.com>`,
+      "in-reply-to": "<original-message-2b>",
+      "references": "<original-message-2b>",
     },
   },
 );
@@ -467,6 +506,71 @@ emailWithICSAttachment.attachmentsList = [
   },
 ];
 
+// Test: Email with PDF attachment containing event details
+// The email body intentionally has NO event details - event info is only in the PDF
+const emailWithPDFAttachment: ResendTestData = createResendTestData(
+  {
+    type: "email.received",
+    created_at: new Date().toISOString(),
+    data: {
+      email_id: "test-email-pdf",
+      message_id: `<test-pdf-${Date.now()}@mail.gmail.com>`,
+      from: TESTER_PRIMARY_GOOGLE_ACCT,
+      to: [MAIN_EMAIL_ADDRESS],
+      cc: [],
+      bcc: [],
+      subject: "Fwd: Conference Registration",
+      created_at: new Date().toISOString(),
+      attachments: [
+        {
+          id: "pdf-attachment-1",
+          filename: "conference_registration.pdf",
+          content_type: "application/pdf",
+          content_id: "<pdfattachment1>",
+          content_disposition: "attachment",
+          size: 15000,
+        },
+      ],
+    },
+  },
+  {
+    id: "test-email-pdf",
+    subject: "Fwd: Conference Registration",
+    from: TESTER_PRIMARY_GOOGLE_ACCT,
+    to: [MAIN_EMAIL_ADDRESS],
+    html: `<div dir="ltr"><p>Please see attached for the conference details.</p></div>`,
+    text: `Please see attached for the conference details.`,
+    headers: {
+      "authentication-results": generateAuthHeader(TESTER_PRIMARY_GOOGLE_ACCT),
+      "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
+      "to": MAIN_EMAIL_ADDRESS,
+      "subject": "Fwd: Conference Registration",
+      "date": "Mon, 1 Jul 2025 09:00:00 +0000",
+      "message-id": `<test-pdf-${Date.now()}@mail.gmail.com>`,
+      "in-reply-to": "<original-message-pdf>",
+      "references": "<original-message-pdf>",
+    },
+  },
+);
+
+// PDF test file with event details (Tech Conference 2026, July 15, 2026, 9:00 AM - 5:00 PM, San Francisco Convention Center)
+// File located at: test/bindings/conference_registration.pdf
+const PDF_FILE_PATH = require("path").join(__dirname, "conference_registration.pdf");
+
+// Add attachmentsList with file URL for PDF test
+emailWithPDFAttachment.attachmentsList = [
+  {
+    id: "pdf-attachment-1",
+    filename: "conference_registration.pdf",
+    content_type: "application/pdf",
+    content_id: "<pdfattachment1>",
+    content_disposition: "attachment",
+    size: 1500,
+    download_url: `file://${PDF_FILE_PATH}`,
+    expires_at: new Date(Date.now() + 3600000).toISOString(),
+  },
+];
+
 // Test 9: Multiple events in one email
 const multipleEventsEmail: ResendTestData = createResendTestData(
   {
@@ -699,19 +803,193 @@ Sarah`,
   },
 );
 
+// ============================================================================
+// DRIVE AGENT TEST DATA
+// ============================================================================
+
+// Drive Test 1: Single PDF attachment
+const driveEmailWithPDF: ResendTestData = createResendTestData(
+  {
+    type: "email.received",
+    created_at: new Date().toISOString(),
+    data: {
+      email_id: "test-drive-pdf",
+      message_id: `<test-drive-pdf-${Date.now()}@mail.gmail.com>`,
+      from: TESTER_PRIMARY_GOOGLE_ACCT,
+      to: [DRIVE_EMAIL_ADDRESS],
+      cc: [],
+      bcc: [],
+      subject: "Fwd: Conference Registration",
+      created_at: new Date().toISOString(),
+      attachments: [
+        {
+          id: "drive-pdf-1",
+          filename: "conference_registration.pdf",
+          content_type: "application/pdf",
+          content_disposition: "attachment",
+          size: 15000,
+        },
+      ],
+    },
+  },
+  {
+    id: "test-drive-pdf",
+    subject: "Fwd: Conference Registration",
+    from: TESTER_PRIMARY_GOOGLE_ACCT,
+    to: [DRIVE_EMAIL_ADDRESS],
+    html: "<p>Please save this to my drive.</p>",
+    text: "Please save this to my drive.",
+    headers: {
+      "authentication-results": generateAuthHeader(TESTER_PRIMARY_GOOGLE_ACCT),
+      "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
+      "to": DRIVE_EMAIL_ADDRESS,
+      "subject": "Fwd: Conference Registration",
+      "date": "Mon, 1 Jul 2025 09:00:00 +0000",
+      "message-id": `<test-drive-pdf-${Date.now()}@mail.gmail.com>`,
+      "in-reply-to": "<original-message-drive-pdf>",
+      "references": "<original-message-drive-pdf>",
+    },
+  },
+);
+driveEmailWithPDF.attachmentsList = [
+  {
+    id: "drive-pdf-1",
+    filename: "conference_registration.pdf",
+    content_type: "application/pdf",
+    content_disposition: "attachment",
+    size: 1500,
+    download_url: `file://${PDF_FILE_PATH}`,
+    expires_at: new Date(Date.now() + 3600000).toISOString(),
+  },
+];
+
+// Drive Test 2: No attachments
+const driveEmailNoAttachments: ResendTestData = createResendTestData(
+  {
+    type: "email.received",
+    created_at: new Date().toISOString(),
+    data: {
+      email_id: "test-drive-noattach",
+      message_id: `<test-drive-noattach-${Date.now()}@mail.gmail.com>`,
+      from: TESTER_PRIMARY_GOOGLE_ACCT,
+      to: [DRIVE_EMAIL_ADDRESS],
+      cc: [],
+      bcc: [],
+      subject: "Save this",
+      created_at: new Date().toISOString(),
+      attachments: [],
+    },
+  },
+  {
+    id: "test-drive-noattach",
+    subject: "Save this",
+    from: TESTER_PRIMARY_GOOGLE_ACCT,
+    to: [DRIVE_EMAIL_ADDRESS],
+    html: "<p>Oops, I forgot the attachment.</p>",
+    text: "Oops, I forgot the attachment.",
+    headers: {
+      "authentication-results": generateAuthHeader(TESTER_PRIMARY_GOOGLE_ACCT),
+      "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
+      "to": DRIVE_EMAIL_ADDRESS,
+      "subject": "Save this",
+      "date": "Mon, 1 Jul 2025 10:00:00 +0000",
+      "message-id": `<test-drive-noattach-${Date.now()}@mail.gmail.com>`,
+      "in-reply-to": "<original-message-drive-noattach>",
+      "references": "<original-message-drive-noattach>",
+    },
+  },
+);
+
+// Drive Test 3: Multiple attachments
+const driveEmailMultipleAttachments: ResendTestData = createResendTestData(
+  {
+    type: "email.received",
+    created_at: new Date().toISOString(),
+    data: {
+      email_id: "test-drive-multi",
+      message_id: `<test-drive-multi-${Date.now()}@mail.gmail.com>`,
+      from: TESTER_PRIMARY_GOOGLE_ACCT,
+      to: [DRIVE_EMAIL_ADDRESS],
+      cc: [],
+      bcc: [],
+      subject: "Fwd: Project documents",
+      created_at: new Date().toISOString(),
+      attachments: [
+        {
+          id: "drive-multi-1",
+          filename: "conference_registration.pdf",
+          content_type: "application/pdf",
+          content_disposition: "attachment",
+          size: 15000,
+        },
+        {
+          id: "drive-multi-2",
+          filename: "meeting_notes.pdf",
+          content_type: "application/pdf",
+          content_disposition: "attachment",
+          size: 15000,
+        },
+      ],
+    },
+  },
+  {
+    id: "test-drive-multi",
+    subject: "Fwd: Project documents",
+    from: TESTER_PRIMARY_GOOGLE_ACCT,
+    to: [DRIVE_EMAIL_ADDRESS],
+    html: "<p>Here are the project documents for Q2.</p>",
+    text: "Here are the project documents for Q2.",
+    headers: {
+      "authentication-results": generateAuthHeader(TESTER_PRIMARY_GOOGLE_ACCT),
+      "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
+      "to": DRIVE_EMAIL_ADDRESS,
+      "subject": "Fwd: Project documents",
+      "date": "Mon, 1 Jul 2025 12:00:00 +0000",
+      "message-id": `<test-drive-multi-${Date.now()}@mail.gmail.com>`,
+      "in-reply-to": "<original-message-drive-multi>",
+      "references": "<original-message-drive-multi>",
+    },
+  },
+);
+driveEmailMultipleAttachments.attachmentsList = [
+  {
+    id: "drive-multi-1",
+    filename: "conference_registration.pdf",
+    content_type: "application/pdf",
+    content_disposition: "attachment",
+    size: 1500,
+    download_url: `file://${PDF_FILE_PATH}`,
+    expires_at: new Date(Date.now() + 3600000).toISOString(),
+  },
+  {
+    id: "drive-multi-2",
+    filename: "meeting_notes.pdf",
+    content_type: "application/pdf",
+    content_disposition: "attachment",
+    size: 1500,
+    download_url: `file://${PDF_FILE_PATH}`,
+    expires_at: new Date(Date.now() + 3600000).toISOString(),
+  },
+];
+
 export {
   ResendTestData,
   AttachmentWithUrl,
   emailFromMain,
   addEmailAddress,
+  addEmailAddressInBody,
   removeEmailAddress,
   deleteAccount,
   eventEmailFromSecondEmail,
   basicDetailedEmail,
   basicEmailFuture,
   emailWithICSAttachment,
+  emailWithPDFAttachment,
   multipleEventsEmail,
   emailWithImageAttachment,
   familyEvent,
   workEventVisibl,
+  driveEmailWithPDF,
+  driveEmailNoAttachments,
+  driveEmailMultipleAttachments,
 };

@@ -1,22 +1,33 @@
 import {z} from "zod";
 
+// Re-export shared types so existing internal imports continue to work
+export {
+  TransformedEmail,
+  AttachmentInfo,
+  EmailThreadHeaders,
+  ChatMessage,
+  TextContent,
+  ImageURLContent,
+  MessageContent,
+} from "../../util/types";
+
 // ============================================================================
 // ZOD SCHEMAS
 // ============================================================================
 
 // Event schema - individual event within the events array
 export const EventSchema = z.object({
-  summary: z.string().describe("The title of the event"),
-  location: z.string().nullable().describe("A location of the event if one has been given"),
-  description: z.string().nullable().describe("A description of the event if one has been given"),
+  summary: z.string().max(200).describe("The title of the event"),
+  location: z.string().max(500).nullable().describe("A location of the event if one has been given"),
+  description: z.string().max(1000).nullable().describe("A description of the event if one has been given"),
   conference_call: z.boolean().describe("True or false, if the event is a conference call or virtual"),
-  date: z.string().describe("DD MMMM YYYY - the date of the event"),
-  start_time: z.string().describe("HH:mm - the start time of the event in 24 hour format"),
-  end_time: z.string().nullable().describe("HH:mm - the end time of the event in 24 hour format"),
-  attendees: z.array(z.string())
+  date: z.string().max(20).describe("DD MMMM YYYY - the date of the event"),
+  start_time: z.string().max(5).describe("HH:mm - the start time of the event in 24 hour format"),
+  end_time: z.string().max(5).nullable().describe("HH:mm - the end time of the event in 24 hour format"),
+  attendees: z.array(z.string().max(320))
       .describe("A list of attendees email addresses. ONLY INCLUDE VALID EMAIL ADDRESSES, NOT NAMES."),
-  selected_calendar_id: z.string().nullable().optional().describe("The calendar_id where this event should be added."),
-  timeZone: z.string().nullable().optional().describe("IANA timezone string"),
+  selected_calendar_id: z.string().max(320).nullable().optional()
+      .describe("The calendar_id where this event should be added."),
 });
 
 // Event data schema - main response for email processing
@@ -24,13 +35,21 @@ export const EventDataSchema = z.object({
   events: z.array(EventSchema).nullable().optional().describe("Array of events extracted from the email"),
   error: z.string().nullable().optional().describe("Error message if no date provided"),
   description: z.string().nullable().optional().describe("Error description if no date provided"),
-  reason: z.string().nullable().optional().describe("Reason for your choices. This is for debugging purposes only."),
 });
 
 // Timezone schema
 export const TimezoneSchema = z.object({
   reason: z.string().describe("Brief reasoning of why the timezone was chosen"),
   timezone: z.string().nullable().describe("IANA Time Zone Database formatted string"),
+});
+
+// Skill selection schema for LLM intent detection
+export const SkillSelectionSchema = z.object({
+  skill_id: z.string().describe("The skill ID to activate"),
+  confidence: z.number().min(0).max(1).describe("Confidence score from 0 to 1"),
+  reasoning: z.string().describe("Brief explanation of why this skill was selected"),
+  extracted_value: z.string().nullable().optional()
+      .describe("Any value extracted from the content, e.g., email address"),
 });
 
 // ICS Parser schema - complex Google Calendar event format
@@ -181,10 +200,15 @@ export const ICSParserSchema = z.object({
 });
 
 // Inferred Types from Zod Schemas
-export type Event = z.infer<typeof EventSchema>;
-export type EventData = z.infer<typeof EventDataSchema>;
+export type Event = z.infer<typeof EventSchema> & {
+  timeZone?: string | null;
+};
+export type EventData = Omit<z.infer<typeof EventDataSchema>, "events"> & {
+  events?: Event[] | null;
+};
 export type Timezone = z.infer<typeof TimezoneSchema>;
 export type ICSParsedEvent = z.infer<typeof ICSParserSchema>;
+export type SkillSelection = z.infer<typeof SkillSelectionSchema>;
 
 // ============================================================================
 // CALENDAR TYPES
@@ -335,18 +359,6 @@ export interface ICalTimezone {
 // EMAIL TYPES
 // ============================================================================
 
-// Transformed email from Resend webhook
-export interface TransformedEmail {
-  subject: string;
-  text: string;
-  html: string;
-  from: string;
-  to: string[];
-  headers: Record<string, string>;
-  SPF: "pass" | "fail";
-  dkim: string;
-}
-
 // Email headers
 export interface EmailHeaders {
   date?: string;
@@ -366,19 +378,18 @@ export interface ICSFile {
   mimetype: string;
 }
 
-// Attachment info from Resend
-export interface AttachmentInfo {
-  id: string;
+// Parsed document from attachment
+export interface ParsedDocument {
   filename: string;
-  content_type: string;
-  size: number;
-  download_url: string;
+  content: string;
+  mimeType: string;
 }
 
 // Processed attachments result
 export interface ProcessedAttachments {
   icsFiles: ICSFile[];
   imageUrls: string[];
+  documents: ParsedDocument[];
 }
 
 // Email response template
@@ -419,13 +430,6 @@ export interface HandleEmailResult {
   verificationCode?: string;
 }
 
-// Email thread headers for reply
-export interface EmailThreadHeaders {
-  "In-Reply-To"?: string;
-  References?: string;
-  [key: string]: string | undefined;
-}
-
 // Maps email response types to templates
 export interface EmailResponses {
   [key: string]: EmailResponseTemplate;
@@ -447,27 +451,6 @@ export interface HeadersForProcessing {
 // OPENAI/LLM TYPES
 // ============================================================================
 
-// OpenAI message content types
-export interface TextContent {
-  type: "text";
-  text: string;
-}
-
-export interface ImageURLContent {
-  type: "image_url";
-  image_url: {
-    url: string;
-  };
-}
-
-export type MessageContent = string | Array<TextContent | ImageURLContent>;
-
-// OpenAI chat message
-export interface ChatMessage {
-  role: "system" | "user" | "assistant";
-  content: MessageContent;
-}
-
 // Prompt configuration
 export interface PromptConfig {
   model: string;
@@ -479,6 +462,7 @@ export interface Prompts {
   getEventData: PromptConfig;
   getEventTimezone: PromptConfig;
   parseICS: PromptConfig;
+  selectSkill: PromptConfig;
 }
 
 // OpenAI completion response

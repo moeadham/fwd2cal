@@ -29,6 +29,9 @@
     "pubsub": {
       "port": 8085
     },
+    "hosting": {
+      "port": 5002
+    },
     "ui": {
       "enabled": true
     },
@@ -45,6 +48,14 @@
       {
         "source": "/not-found",
         "destination": "/404.html"
+      },
+      {
+        "source": "/insufficient-permissions",
+        "destination": "/insufficient-permissions.html"
+      },
+      {
+        "source": "/drive-insufficient-permissions",
+        "destination": "/insufficient-permissions.html"
       },
       {
         "source": "/signup-with-google.png",
@@ -64,7 +75,7 @@
       },
       {
         "source": "/signup",
-        "function": "signup"
+        "function": "v2signup"
       },
       {
         "source": "/v2/verifyAdditionalEmail",
@@ -85,6 +96,18 @@
       {
         "source": "/v2/resendInboundCallback",
         "function": "v2resendInboundCallback"
+      },
+      {
+        "source": "/v2/driveSignup",
+        "function": "v2driveSignup"
+      },
+      {
+        "source": "/v2/driveOauthCallback",
+        "function": "v2driveOauthCallback"
+      },
+      {
+        "source": "/v2/driveInboundCallback",
+        "function": "v2driveInboundCallback"
       }
     ]
   }

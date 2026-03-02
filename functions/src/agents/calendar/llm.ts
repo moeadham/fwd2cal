@@ -5,15 +5,18 @@ import {
   EventDataSchema,
   TimezoneSchema,
   ICSParserSchema,
+  SkillSelectionSchema,
   EventData,
   Timezone,
   ICSParsedEvent,
+  SkillSelection,
   ChatMessage,
   CalendarForLLM,
   TextContent,
   ImageURLContent,
   EmailForProcessing,
   HeadersForProcessing,
+  ParsedDocument,
 } from "./types";
 
 async function processEmail(
@@ -22,6 +25,7 @@ async function processEmail(
     uid: string | null = null,
     imageUrls: string[] = [],
     calendars: CalendarForLLM[] = [],
+    documents: ParsedDocument[] = [],
 ): Promise<EventData> {
   // Prepend calendar list if provided
   let calendarText = "";
@@ -29,10 +33,21 @@ async function processEmail(
     calendarText = `available_calendars:\n${JSON.stringify(calendars, null, 2)}\n\nemail_text:\n`;
   }
 
+  // Format document text if provided
+  let documentText = "";
+  if (documents && documents.length > 0) {
+    documentText = "\n\n--- ATTACHED DOCUMENTS ---\n" +
+      documents.map((doc) => `## ${doc.filename}\n${doc.content}`).join("\n\n");
+    logger.info("Including document text in LLM request", {
+      documentCount: documents.length,
+      totalChars: documentText.length,
+    });
+  }
+
   const text = `${calendarText}Date: ${headers.date}
   Subject: ${headers.subject}
   From: ${headers.from}
-  ${email.text}`;
+  ${email.text}${documentText}`;
 
   // Build user message content - text + images
   let userContent: string | Array<TextContent | ImageURLContent>;
@@ -97,6 +112,8 @@ async function processEmail(
   const eventResult = eventResponse as EventData;
   const timezoneResult = timezoneResponse as Timezone;
 
+  logger.info("LLM event response", {eventResult: JSON.stringify(eventResult)});
+
   // Clean up undefined values
   [eventResult, timezoneResult].forEach((res) => {
     Object.keys(res).forEach((key) => {
@@ -159,4 +176,35 @@ async function parseICS(ics: string): Promise<ICSParsedEvent> {
   )) as ICSParsedEvent;
 }
 
-export {processEmail, parseICS};
+async function selectSkill(
+    subject: string,
+    body: string,
+    skillsContext: string,
+    uid: string | null = null,
+): Promise<SkillSelection> {
+  // Replace placeholder in prompt with actual skills context
+  const systemPrompt = prompts.selectSkill.prompt.replace(
+      "{skills_context}",
+      skillsContext,
+  );
+
+  const userContent = `Subject: ${subject}\n\nBody:\n${body}`;
+
+  const messages: ChatMessage[] = [
+    {
+      role: "system",
+      content: systemPrompt,
+    },
+    {role: "user", content: userContent},
+  ];
+
+  return (await defaultCompletion<SkillSelection>(
+      messages,
+      prompts.selectSkill.model,
+      DEFAULT_TEMP,
+      SkillSelectionSchema,
+      uid,
+  )) as SkillSelection;
+}
+
+export {processEmail, parseICS, selectSkill};

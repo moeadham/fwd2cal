@@ -3,7 +3,7 @@ import {logger} from "firebase-functions/v2";
 import {RESEND_API_KEY, ENVIRONMENT_NAME} from "./config";
 import {getMockResendClient} from "./resendMock";
 import {sendEvent} from "./analytics";
-import {ResendEmailOptions, ResendAPIResponse, ResendClient} from "./types";
+import {ResendEmailOptions, ResendAPIResponse, ResendClient, ResendSendMessage} from "./types";
 
 let resend: Resend | null = null;
 
@@ -52,6 +52,7 @@ async function sendEmailResend({
   text,
   html,
   headers = {},
+  attachments,
 }: ResendEmailOptions): Promise<ResendAPIResponse> {
   try {
     const client = getResendClient();
@@ -69,14 +70,7 @@ async function sendEmailResend({
       hasApiKey: !!RESEND_API_KEY.value(),
     });
 
-    const message: {
-      from: string;
-      to: string;
-      subject: string;
-      text?: string;
-      html: string;
-      headers?: Record<string, string>;
-    } = {
+    const message: ResendSendMessage = {
       from: from,
       to: to,
       subject: subject,
@@ -87,6 +81,11 @@ async function sendEmailResend({
     // Add threading headers if provided
     if (headers && Object.keys(headers).length > 0) {
       message.headers = headers;
+    }
+
+    // Add attachments if provided
+    if (attachments && attachments.length > 0) {
+      message.attachments = attachments;
     }
 
     logger.info("Sending email via Resend", {

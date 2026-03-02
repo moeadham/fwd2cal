@@ -1,4 +1,10 @@
 // ============================================================================
+// AGENT TYPES
+// ============================================================================
+
+export type AgentName = "calendar" | "drive";
+
+// ============================================================================
 // USER AND OAUTH TYPES
 // ============================================================================
 
@@ -37,6 +43,12 @@ export interface OAuthTokens {
   id_token?: string;
 }
 
+// Result from signupCallbackHandler — includes granted scopes for validation
+export interface SignupCallbackResult {
+  user: FirebaseUserRecord;
+  grantedScope: string;
+}
+
 // Firebase user record
 export interface FirebaseUserRecord {
   uid: string;
@@ -60,6 +72,7 @@ export interface UserWithExpiringTokens {
   access_token: string;
   refresh_token: string;
   expiry_date: number;
+  agentName: AgentName;
 }
 
 // Email item for adding to user

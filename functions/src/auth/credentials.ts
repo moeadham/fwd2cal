@@ -1,17 +1,41 @@
 import fs from "fs";
 import path from "path";
-import {GoogleOAuthCredentials} from "./types";
+import {GoogleOAuthCredentials, AgentName} from "./types";
 
 const isDevProject = process.env.GCLOUD_PROJECT === "fwd2cal-dev-2578e";
-const credentialsFileName = isDevProject ?
-  "v2-google-auth-credentials-fwd2cal-dev.json" :
-  "v2-google-auth-credentials.json";
 
-const CREDENTIALS_PATH = path.join("auth", credentialsFileName);
+const credentialsFileNames: Record<AgentName, string> = {
+  calendar: isDevProject ?
+    "v2-google-auth-credentials-fwd2cal-dev.json" :
+    "v2-google-auth-credentials-fwd2cal.json",
+  drive: isDevProject ?
+    "v2-google-auth-credentials-drive2cal-dev.json" :
+    "v2-google-auth-credentials-drive2cal.json",
+};
 
-const CREDENTIALS: GoogleOAuthCredentials = JSON.parse(
-    fs.readFileSync(CREDENTIALS_PATH, {encoding: "utf-8"}),
-);
+const credentialsCache = new Map<AgentName, GoogleOAuthCredentials>();
+
+function getAgentCredentials(agentName: AgentName): GoogleOAuthCredentials {
+  const cached = credentialsCache.get(agentName);
+  if (cached) return cached;
+
+  const agentPath = path.join(
+      __dirname, "..", "agents", agentName, "auth",
+      credentialsFileNames[agentName],
+  );
+
+  if (!fs.existsSync(agentPath)) {
+    throw new Error(
+        `Missing OAuth credentials for agent "${agentName}" at ${agentPath}`,
+    );
+  }
+
+  const credentials: GoogleOAuthCredentials = JSON.parse(
+      fs.readFileSync(agentPath, {encoding: "utf-8"}),
+  );
+  credentialsCache.set(agentName, credentials);
+  return credentials;
+}
 
 // Helper functions that take environment param value
 const getRedirectUriIndex = (environment: string): number => {
@@ -24,4 +48,4 @@ const getApiUrl = (environment: string): string => {
     "http://127.0.0.1:5002/v2/";
 };
 
-export {CREDENTIALS, getRedirectUriIndex, getApiUrl};
+export {getAgentCredentials, getRedirectUriIndex, getApiUrl};

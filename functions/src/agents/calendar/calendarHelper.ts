@@ -6,8 +6,9 @@ import handleAsync from "../../util/handleAsync";
 import {getOauthClient} from "../../auth/authHandler";
 import ical from "node-ical";
 import _ from "underscore";
+import {findIana} from "windows-iana";
 import {sendEvent} from "../../util/analytics";
-import {MAIN_EMAIL_ADDRESS} from "../../util/config";
+import {MAIN_EMAIL_ADDRESS, DEFAULT_EVENT_LENGTH_MINUTES} from "../../util/config";
 import {
   Event,
   GoogleCalendar,
@@ -24,8 +25,33 @@ import {
 import {RequestWithQuery} from "../../util/types";
 import {Response} from "express";
 
-const DEFAULT_EVENT_LENGTH = 30;
 const ONLY_INVITE_HOST = true;
+
+/**
+ * Resolve a timezone string to a valid IANA timezone.
+ * Handles Windows-format timezone names (e.g. "Eastern Standard Time").
+ * Returns undefined if the timezone cannot be resolved.
+ */
+function resolveTimezone(tzid: string | undefined): string | undefined {
+  if (!tzid) return undefined;
+
+  // Check if it's already a valid IANA timezone
+  try {
+    new Intl.DateTimeFormat(undefined, {timeZone: tzid});
+    return tzid;
+  } catch {
+    // Not a valid IANA timezone, try Windows mapping
+  }
+
+  const ianaResults = findIana(tzid);
+  if (ianaResults && ianaResults.length > 0) {
+    logger.info(`Resolved Windows timezone "${tzid}" to IANA "${ianaResults[0]}"`);
+    return ianaResults[0];
+  }
+
+  logger.warn(`Unknown timezone format: "${tzid}", falling back to calendar timezone`);
+  return undefined;
+}
 
 function generateTimeObject(
     event: Event,
@@ -52,6 +78,7 @@ function generateTimeObject(
       .tz(startTime, "DD MMMM YYYY HH:mm", eventTimeZone)
       .toDate();
   const endTime = `${date} ${end_time}`; // eslint-disable-line camelcase
+  const defaultEventLength = parseInt(DEFAULT_EVENT_LENGTH_MINUTES.value());
   let endDate: Date;
   // eslint-disable-next-line camelcase
   if (end_time) {
@@ -62,12 +89,12 @@ function generateTimeObject(
       }
     } catch (_error) {
       sendEvent(uid, "dataQualityIssue", {reason: "invalid_end_time"});
-      // Default 30 minutes to start_time
-      endDate = new Date(startDate.getTime() + DEFAULT_EVENT_LENGTH * 60000);
+      // Default to configured event length
+      endDate = new Date(startDate.getTime() + defaultEventLength * 60000);
     }
   } else {
-    // Default 30 minutes to start_time
-    endDate = new Date(startDate.getTime() + DEFAULT_EVENT_LENGTH * 60000);
+    // Default to configured event length
+    endDate = new Date(startDate.getTime() + defaultEventLength * 60000);
   }
   const timeObject: TimeObject = {
     start: {
@@ -253,7 +280,12 @@ async function eventFromICS(icsFile: ICSFile): Promise<ParsedICSEvent> {
   }
   let timezone: string | undefined;
   if (timezones.length !== 0) {
-    timezone = timezones[0].tzid;
+    timezone = resolveTimezone(timezones[0].tzid);
+  }
+  if (!timezone) {
+    throw new Error(
+        `Unable to resolve timezone from ICS file: "${timezones[0]?.tzid || "none"}"`,
+    );
   }
   const events = _.select(_.values(ics) as ICalEvent[], (x) => {
     return x.type === "VEVENT";
@@ -266,10 +298,9 @@ async function eventFromICS(icsFile: ICSFile): Promise<ParsedICSEvent> {
     throw new Error("Event not found");
   }
 
-  const tz = timezone || "UTC";
-  const start = moment(event.start).tz(tz).format("HH:mm");
-  const end = moment(event.end).tz(tz).format("HH:mm");
-  const date = moment(event.start).tz(tz).format("DD MMMM YYYY");
+  const start = moment(event.start).tz(timezone).format("HH:mm");
+  const end = moment(event.end).tz(timezone).format("HH:mm");
+  const date = moment(event.start).tz(timezone).format("DD MMMM YYYY");
 
   let summary: string;
   if (event.summary && typeof event.summary === "object" && "val" in event.summary) {
@@ -294,11 +325,11 @@ async function eventFromICS(icsFile: ICSFile): Promise<ParsedICSEvent> {
 
   const attendees: string[] = [];
   if (event.organizer?.val) {
-    attendees.push(event.organizer.val.replace("MAILTO:", ""));
+    attendees.push(event.organizer.val.replace(/^mailto:/i, ""));
   }
   if (event.attendee && event.attendee.length > 0 && event.attendee[0].val) {
     attendees.push(
-        ...event.attendee.map((attendee) => attendee.val.replace("MAILTO:", "")),
+        ...event.attendee.map((attendee) => attendee.val.replace(/^mailto:/i, "")),
     );
   }
 
@@ -400,7 +431,7 @@ async function inviteAdditionalAttendees(
   }
 
   // Can we authenticate with their calendar?
-  const [oauthErr, oauth2Client] = await handleAsync(() => getOauthClient(uid));
+  const [oauthErr, oauth2Client] = await handleAsync(() => getOauthClient(uid, "calendar"));
   if (oauthErr || !oauth2Client) {
     logger.warn("Error getting oauth2Client", oauthErr);
     return res.redirect(302, "https://www.fwd2cal.com/404");

@@ -7,7 +7,7 @@ import {
   getPendingEmailAddressByCode,
 } from "../util/firestoreHandler";
 import {google, Auth} from "googleapis";
-import {CREDENTIALS, getRedirectUriIndex} from "./credentials";
+import {getAgentCredentials, getRedirectUriIndex} from "./credentials";
 import {
   ENVIRONMENT_NAME,
   RESEND_REGISTERED_USERS_SEGMENT_ID,
@@ -17,16 +17,19 @@ import {logger} from "firebase-functions/v2";
 import {isUUID} from "validator";
 import {sendEvent} from "../util/analytics";
 import {addContactToResend, addContactToSegment} from "../util/resend";
-import {OAuthTokens, FirebaseUserRecord} from "./types";
+import {OAuthTokens, FirebaseUserRecord, AgentName, SignupCallbackResult} from "./types";
 import {RequestWithQuery} from "../util/types";
 import {Response} from "express";
 
-async function refreshOAuthTokens(uid: string): Promise<void> {
-  const oauth2Client = await getOauthClient(uid);
+async function refreshOAuthTokens(
+    uid: string,
+    agentName: AgentName,
+): Promise<void> {
+  const oauth2Client = await getOauthClient(uid, agentName);
   let tokens: OAuthTokens;
   try {
     tokens = await refreshAccessToken(oauth2Client);
-    await updateUserTokens(tokens, uid);
+    await updateUserTokens(tokens, uid, agentName);
     logger.log(`uid ${uid} access token refreshed to ${tokens.expiry_date}`);
   } catch (error) {
     logger.warn("Failed to refresh access token:", uid, error);
@@ -49,13 +52,17 @@ async function refreshAccessToken(
   });
 }
 
-async function getOauthClient(uid: string): Promise<Auth.OAuth2Client> {
-  const userData = await getUserFromUID(uid);
+async function getOauthClient(
+    uid: string,
+    agentName: AgentName,
+): Promise<Auth.OAuth2Client> {
+  const credentials = getAgentCredentials(agentName);
+  const userData = await getUserFromUID(uid, agentName);
   const redirectUriIndex = getRedirectUriIndex(ENVIRONMENT_NAME.value());
   const oauth2Client = new google.auth.OAuth2(
-      CREDENTIALS.web.client_id,
-      CREDENTIALS.web.client_secret,
-      CREDENTIALS.web.redirect_uris[redirectUriIndex],
+      credentials.web.client_id,
+      credentials.web.client_secret,
+      credentials.web.redirect_uris[redirectUriIndex],
   );
   oauth2Client.setCredentials({
     access_token: userData.access_token,
@@ -64,16 +71,16 @@ async function getOauthClient(uid: string): Promise<Auth.OAuth2Client> {
   return oauth2Client;
 }
 
-async function oauthCronJob(): Promise<void> {
+async function oauthCronJob(agentName?: AgentName): Promise<void> {
   try {
-    const users = await findUsersWithExpiringTokens();
+    const users = await findUsersWithExpiringTokens(agentName);
     logger.log(
         "Refreshing tokens for Users with expiring tokens ",
         users.length,
     );
     for (const user of users) {
       try {
-        await refreshOAuthTokens(user.id);
+        await refreshOAuthTokens(user.id, user.agentName);
       } catch (error) {
         logger.warn(`Failed to refresh tokens for user ${user.id}:`, error);
         sendEvent(user.id, "tokenRefreshFailed");
@@ -97,13 +104,15 @@ async function deleteAccount(uid: string): Promise<void> {
 
 async function signupCallbackHandler(
     query: Record<string, string>,
-): Promise<FirebaseUserRecord> {
+    agentName: AgentName,
+): Promise<SignupCallbackResult> {
+  const credentials = getAgentCredentials(agentName);
   logger.log("oauthCallback", query);
   const redirectUriIndex = getRedirectUriIndex(ENVIRONMENT_NAME.value());
   const oauth2Client = new google.auth.OAuth2(
-      CREDENTIALS.web.client_id,
-      CREDENTIALS.web.client_secret,
-      CREDENTIALS.web.redirect_uris[redirectUriIndex],
+      credentials.web.client_id,
+      credentials.web.client_secret,
+      credentials.web.redirect_uris[redirectUriIndex],
   );
   try {
     const {tokens} = await oauth2Client.getToken({code: query.code});
@@ -161,8 +170,9 @@ async function signupCallbackHandler(
       }
     }
 
-    await storeUser(tokens as OAuthTokens, userRecord);
+    await storeUser(tokens as OAuthTokens, userRecord, agentName);
     await addUserEmailAddress(userRecord, [{email: userEmail, default: true}]);
+
     sendEvent(userRecord.uid, "sign_up");
     sendEvent(userEmail, "signupConversion");
 
@@ -173,7 +183,7 @@ async function signupCallbackHandler(
         RESEND_REGISTERED_USERS_SEGMENT_ID.value(),
     );
 
-    return userRecord;
+    return {user: userRecord, grantedScope: tokens.scope || ""};
   } catch (error) {
     console.error("Error exchanging code for tokens", error);
     const err = new Error("Authentication failed") as Error & { code?: number };
@@ -196,9 +206,8 @@ async function verifyAdditionalEmail(
   if (!pendingEmail) {
     return res.redirect(302, "https://www.fwd2cal.com/not-found");
   }
-  const mainUser = await getUserFromUID(pendingEmail.ownerUid);
   await addUserEmailAddress(
-      {uid: mainUser.uid, email: mainUser.email},
+      {uid: pendingEmail.ownerUid, email: pendingEmail.ownerEmail},
       [
         {
           email: pendingEmail.id,
@@ -206,9 +215,22 @@ async function verifyAdditionalEmail(
         },
       ],
   );
-  logger.log(`added ${pendingEmail.id} to user account ${mainUser.uid}`);
-  sendEvent(mainUser.uid, "addUserConfirmed");
-  return res.send({data: mainUser.email});
+  logger.log(`added ${pendingEmail.id} to user account ${pendingEmail.ownerUid}`);
+  sendEvent(pendingEmail.ownerUid, "addUserConfirmed");
+  return res.send({data: pendingEmail.ownerEmail});
+}
+
+function hasRequiredScopes(
+    grantedScope: string,
+    requiredScopes: string[],
+): boolean {
+  const granted = new Set(grantedScope.split(/\s+/));
+  if (granted.has("https://www.googleapis.com/auth/drive")) {
+    return requiredScopes.every(
+        (s) => s.startsWith("https://www.googleapis.com/auth/drive") || granted.has(s),
+    );
+  }
+  return requiredScopes.every((scope) => granted.has(scope));
 }
 
 export {
@@ -216,6 +238,7 @@ export {
   refreshOAuthTokens,
   oauthCronJob,
   signupCallbackHandler,
+  hasRequiredScopes,
   verifyAdditionalEmail,
   deleteAccount,
 };
