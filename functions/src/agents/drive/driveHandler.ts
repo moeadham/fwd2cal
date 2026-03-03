@@ -107,6 +107,15 @@ async function handleDriveEmail(
   const attachments = await listAttachments(resend, emailId, maxUploadBytes);
 
   if (attachments.length === 0) {
+    if (!uid) {
+      // New user with no attachments — send welcome/signup invitation
+      logger.info("Drive: New user without attachments — sending signup invitation", {sender});
+      const html = applyTemplate(driveMailTemplates.noUserFound.html, {});
+      await sendDriveEmailResponse(sender, email, html);
+      sendEvent(sender, "driveUserInvited");
+      return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: []};
+    }
+    // Returning user who forgot attachments
     logger.info("Drive: No attachments found", {sender});
     const html = applyTemplate(driveMailTemplates.noAttachments.html, {});
     await sendDriveEmailResponse(sender, email, html);

@@ -937,6 +937,43 @@ const driveEmailNoAttachments: ResendTestData = createResendTestData(
   },
 );
 
+// Drive Test: Signup via email (no attachments, unknown user)
+const driveSignup: ResendTestData = createResendTestData(
+  {
+    type: "email.received",
+    created_at: new Date().toISOString(),
+    data: {
+      email_id: "test-drive-signup",
+      message_id: `<test-drive-signup-${Date.now()}@mail.gmail.com>`,
+      from: TESTER_PRIMARY_GOOGLE_ACCT,
+      to: [DRIVE_EMAIL_ADDRESS],
+      cc: [],
+      bcc: [],
+      subject: "Hi",
+      created_at: new Date().toISOString(),
+      attachments: [],
+    },
+  },
+  {
+    id: "test-drive-signup",
+    subject: "Hi",
+    from: TESTER_PRIMARY_GOOGLE_ACCT,
+    to: [DRIVE_EMAIL_ADDRESS],
+    html: "<p>I want to sign up</p>",
+    text: "I want to sign up",
+    headers: {
+      "authentication-results": generateAuthHeader(TESTER_PRIMARY_GOOGLE_ACCT),
+      "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
+      "to": DRIVE_EMAIL_ADDRESS,
+      "subject": "Hi",
+      "date": "Mon, 1 Jul 2025 08:00:00 +0000",
+      "message-id": `<test-drive-signup-${Date.now()}@mail.gmail.com>`,
+      "in-reply-to": "<original-message-drive-signup>",
+      "references": "<original-message-drive-signup>",
+    },
+  },
+);
+
 // Drive Test 3: Multiple attachments
 const driveEmailMultipleAttachments: ResendTestData = createResendTestData(
   {
@@ -1027,6 +1064,7 @@ export {
   familyEvent,
   workEventVisibl,
   driveDeleteAccount,
+  driveSignup,
   driveEmailWithPDF,
   driveEmailNoAttachments,
   driveEmailMultipleAttachments,

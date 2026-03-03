@@ -236,6 +236,7 @@ export interface DriveMailTemplates {
   multipleFilesMoved: DriveMailTemplate;
   driveAuthFailed: DriveMailTemplate;
   noAttachments: DriveMailTemplate;
+  noUserFound: DriveMailTemplate;
   uploadFailed: DriveMailTemplate;
   moveFailed: DriveMailTemplate;
   organizeAuthRequired: DriveMailTemplate;

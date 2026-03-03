@@ -13,6 +13,7 @@ import {
   AttachmentWithUrl,
   driveEmailWithPDF,
   driveDeleteAccount,
+  driveSignup,
 } from "./bindings/resendBindings";
 
 chai.use(chaiHttp);
@@ -322,5 +323,29 @@ describe("fwd2cal Drive Agent", function() {
     expect(res.body.sentEmail).to.be.an("object");
     expect(res.body.sentEmail.html).to.be.a("string");
     expect(res.body.sentEmail.html).to.include("account has been deleted");
+  });
+
+  it("DT06 signup via email — unknown user with no attachments gets signup invitation", async function() {
+    const testMessage = driveSignup;
+    const res = await sendDriveWebhook(testMessage);
+    expect(res).to.have.status(200);
+    console.log("DRIVE SIGNUP RESPONSE:", res.body);
+
+    expect(res.body).to.be.an("object");
+    expect(res.body.data).to.be.an("object");
+    expect(res.body.data).to.not.have.property("error");
+
+    // No files processed
+    expect(res.body.data.filesProcessed).to.equal(0);
+
+    // Verify welcome/signup email was sent
+    expect(res.body.sentEmail).to.be.an("object");
+    expect(res.body.sentEmail.html).to.be.a("string");
+    expect(res.body.sentEmail.html).to.include("Welcome to fwd2drive");
+    expect(res.body.sentEmail.html).to.include("Sign Up with Google");
+    expect(res.body.sentEmail.html).to.include("driveSignup");
+
+    // Verify it does NOT contain the old "no attachments" error
+    expect(res.body.sentEmail.html).to.not.include("didn't have any attachments");
   });
 });
