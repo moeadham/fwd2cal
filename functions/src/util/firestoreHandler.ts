@@ -4,7 +4,6 @@ import {ENVIRONMENT_NAME} from "./config";
 import {v4 as uuidv4} from "uuid";
 import {sendEvent} from "./analytics";
 import {
-  AgentName,
   UserDocument,
   OAuthTokens,
   FirebaseUserRecord,
@@ -13,16 +12,12 @@ import {
   EmailItem,
 } from "../auth/types";
 
-function getAgentCollection(agentName: AgentName): string {
-  return agentName === "drive" ? "DriveUsers" : "Users";
-}
+const USERS_COLLECTION = "Users";
 
 async function getUserFromUID(
     uid: string,
-    agentName: AgentName,
 ): Promise<UserDocument> {
-  const collection = getAgentCollection(agentName);
-  const userDoc = await getFirestore().collection(collection).doc(uid).get();
+  const userDoc = await getFirestore().collection(USERS_COLLECTION).doc(uid).get();
   if (!userDoc.exists) {
     throw new Error("User document does not exist");
   }
@@ -38,34 +33,26 @@ async function getUserFromEmail(email: string): Promise<string | null> {
   return userObject?.uid || null;
 }
 
-async function findUsersWithExpiringTokens(
-    filterAgent?: AgentName,
-): Promise<UserWithExpiringTokens[]> {
+async function findUsersWithExpiringTokens(): Promise<UserWithExpiringTokens[]> {
   const now = new Date();
   const twoHoursLater = new Date(now.getTime() + 2 * 60 * 60 * 1000);
   const users: UserWithExpiringTokens[] = [];
 
-  const agents: AgentName[] = filterAgent ?
-    [filterAgent] :
-    ["calendar", "drive"];
-  for (const agentName of agents) {
-    const collection = getAgentCollection(agentName);
-    const usersRef = getFirestore().collection(collection);
-    let querySnapshot;
-    if (ENVIRONMENT_NAME.value() === "production") {
-      querySnapshot = await usersRef
-          .where("expiry_date", "<=", twoHoursLater)
-          .get();
-    } else {
-      querySnapshot = await usersRef.get(); // For Local testing.
-    }
-    querySnapshot.forEach((doc) => {
-      console.log(`User ${doc.id} (${agentName}) has a token expiring soon.`);
-      users.push({
-        id: doc.id, ...doc.data(), agentName,
-      } as UserWithExpiringTokens);
-    });
+  const usersRef = getFirestore().collection(USERS_COLLECTION);
+  let querySnapshot;
+  if (ENVIRONMENT_NAME.value() === "production") {
+    querySnapshot = await usersRef
+        .where("expiry_date", "<=", twoHoursLater)
+        .get();
+  } else {
+    querySnapshot = await usersRef.get(); // For Local testing.
   }
+  querySnapshot.forEach((doc) => {
+    console.log(`User ${doc.id} has a token expiring soon.`);
+    users.push({
+      id: doc.id, ...doc.data(),
+    } as UserWithExpiringTokens);
+  });
 
   if (users.length === 0) {
     console.log("No users with tokens expiring in the next hour found.");
@@ -76,11 +63,9 @@ async function findUsersWithExpiringTokens(
 async function storeUser(
     tokens: OAuthTokens,
     user: FirebaseUserRecord,
-    agentName: AgentName,
 ): Promise<void> {
   try {
-    const collection = getAgentCollection(agentName);
-    await getFirestore().collection(collection).doc(user.uid).set({
+    await getFirestore().collection(USERS_COLLECTION).doc(user.uid).set({
       email: user.email,
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,
@@ -97,11 +82,9 @@ async function storeUser(
 async function updateUserTokens(
     tokens: OAuthTokens,
     uid: string,
-    agentName: AgentName,
 ): Promise<void> {
   try {
-    const collection = getAgentCollection(agentName);
-    await getFirestore().collection(collection).doc(uid).update({
+    await getFirestore().collection(USERS_COLLECTION).doc(uid).update({
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,
       expiry_date: tokens.expiry_date,
@@ -200,7 +183,7 @@ async function getPendingEmailAddressByCode(
   } as PendingEmailAddressDocument;
 }
 
-async function deleteUser(uid: string, agentName: AgentName): Promise<void> {
+async function deleteUser(uid: string): Promise<void> {
   // Delete all email addresses associated to the uid.
   const batch = getFirestore().batch();
   const emailSnapshot = await getFirestore()
@@ -220,10 +203,8 @@ async function deleteUser(uid: string, agentName: AgentName): Promise<void> {
   });
 
   await batch.commit();
-  // Delete the agent-specific user document.
-  const collection = getAgentCollection(agentName);
-  await getFirestore().collection(collection).doc(uid).delete();
-  // You still need to delete the user from firebase.
+  // Delete the user document.
+  await getFirestore().collection(USERS_COLLECTION).doc(uid).delete();
 }
 
 // ============================================================================

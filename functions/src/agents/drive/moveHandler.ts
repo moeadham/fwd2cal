@@ -40,7 +40,7 @@ export async function handleMoveReply(
 
   let oauth2Client;
   try {
-    oauth2Client = await getOauthClient(uid, "drive");
+    oauth2Client = await getOauthClient(uid);
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     logger.error("Drive: OAuth failed for move", {uid, error: errMsg});

@@ -12,13 +12,13 @@ import {
   ResendTestData,
   AttachmentWithUrl,
   driveEmailWithPDF,
-  deleteAccount,
+  driveDeleteAccount,
 } from "./bindings/resendBindings";
 
 chai.use(chaiHttp);
 const expect = chai.expect;
 const apiURL = "http://127.0.0.1:5002";
-const CALLBACK_ENDPOINT = "/v2/resendInboundCallback";
+const DRIVE_CALLBACK_ENDPOINT = "/v2/driveInboundCallback";
 const TESTER_PRIMARY_GOOGLE_ACCT = process.env.TESTER_PRIMARY_GOOGLE_ACCT || "";
 const DRIVE_EMAIL_ADDRESS = process.env.DRIVE_EMAIL_ADDRESS || "drive@fwd2cal.com";
 const DISPATCH_URL = "http://127.0.0.1:5001";
@@ -83,9 +83,9 @@ async function sendDriveWebhook(testData: ResendTestData, attachmentsList: Attac
     },
   };
 
-  // Step 1: Send to callback endpoint (sets up mock data)
+  // Step 1: Send to drive callback endpoint (sets up mock data)
   const callbackResponse = await chaiWithHttp.request(apiURL)
-    .post(CALLBACK_ENDPOINT)
+    .post(DRIVE_CALLBACK_ENDPOINT)
     .set("Content-Type", "application/json")
     .set("svix-id", "msg_test_" + Date.now())
     .set("svix-timestamp", Math.floor(Date.now() / 1000).toString())
@@ -116,31 +116,6 @@ async function sendDriveProcessUpload(testData: ResendTestData): Promise<DriveDi
       },
     });
   return response as unknown as DriveDispatchResponse;
-}
-
-// Helper: send calendar webhook (for delete account)
-async function sendResendWebhook(testData: ResendTestData): Promise<{body: {data: {result?: string}}; status: number}> {
-  const webhookWithMock: WebhookWithMock = {
-    ...testData.webhook,
-    mockData: {
-      emailContent: testData.emailContent,
-      attachmentsList: [],
-    },
-  };
-  const callbackResponse = await chaiWithHttp.request(apiURL)
-    .post(CALLBACK_ENDPOINT)
-    .set("Content-Type", "application/json")
-    .set("svix-id", "msg_test_" + Date.now())
-    .set("svix-timestamp", Math.floor(Date.now() / 1000).toString())
-    .set("svix-signature", "v1,dummy_signature_for_testing")
-    .send(webhookWithMock);
-  const webhookData = callbackResponse.body.webhookData;
-  const response = await chaiWithHttp
-    .request(`${DISPATCH_URL}/${APP_ID}/${DISPATCH_REGION}`)
-    .post("/v2testResendInboundDispatch")
-    .set("Content-Type", "application/json")
-    .send({data: webhookData});
-  return response as unknown as {body: {data: {result?: string}}; status: number};
 }
 
 // Shared state: upload confirmation HTML is saved in DT03 and used by DT04
@@ -299,9 +274,9 @@ describe("fwd2cal Drive Agent", function() {
       },
     };
 
-    // Step 1: Send to callback endpoint (sets up mock data)
+    // Step 1: Send to drive callback endpoint (sets up mock data)
     const callbackResponse = await chaiWithHttp.request(apiURL)
-      .post(CALLBACK_ENDPOINT)
+      .post(DRIVE_CALLBACK_ENDPOINT)
       .set("Content-Type", "application/json")
       .set("svix-id", "msg_test_" + Date.now())
       .set("svix-timestamp", Math.floor(Date.now() / 1000).toString())
@@ -334,12 +309,18 @@ describe("fwd2cal Drive Agent", function() {
     expect(res.body.sentEmail.html).to.include("fwd2drive.com/d?r=");
   });
 
-  it("DT05 delete account", async function() {
-    const testMessage = deleteAccount;
-    const res = await sendResendWebhook(testMessage);
+  it("DT05 delete account via drive agent", async function() {
+    const testMessage = driveDeleteAccount;
+    const res = await sendDriveWebhook(testMessage);
     expect(res).to.have.status(200);
-    console.log(res.body);
+    console.log("DRIVE DELETE RESPONSE:", res.body);
     expect(res.body).to.be.an("object");
-    expect(res.body.data.result).to.include("deleted");
+    expect(res.body.data).to.be.an("object");
+    expect(res.body.data).to.not.have.property("error");
+
+    // Verify deletion confirmation email was sent
+    expect(res.body.sentEmail).to.be.an("object");
+    expect(res.body.sentEmail.html).to.be.a("string");
+    expect(res.body.sentEmail.html).to.include("account has been deleted");
   });
 });

@@ -162,6 +162,19 @@ const driveMailTemplates: DriveMailTemplates = {
 <br><br>All files have been moved back to their original locations and renamed to their original names.
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
   },
+  userDeleted: {
+    html: `Your fwd2drive account has been deleted. All your data has been removed.
+<br><br>Your files in Google Drive have not been affected.
+<br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
+  },
+  emailRemoved: {
+    html: `The email address <b>%EMAIL_TO_REMOVE%</b> has been removed from your account.
+<br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
+  },
+  emailNotOwned: {
+    html: `The email address <b>%EMAIL_TO_REMOVE%</b> is not associated with your account and cannot be removed.
+<br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
+  },
 };
 
 export {driveMailTemplates};

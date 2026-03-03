@@ -259,7 +259,7 @@ export async function handleDriveConfirm(
   const uid = await getUserFromEmail(sender);
   if (uid) {
     try {
-      const userData = await getUserFromUID(uid, "drive");
+      const userData = await getUserFromUID(uid);
       if (userData.access_token) {
         // User has OAuth — process upload directly
         await processUpload(emailId, uid, resend, transformedEmail);

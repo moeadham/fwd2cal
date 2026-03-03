@@ -16,7 +16,8 @@ import {
 import {signupCallbackHandler, hasRequiredScopes, oauthCronJob} from "../../auth/authHandler";
 import {processInboundWebhook} from "../../resend/webhookUtils";
 import {getAgentCredentials, getRedirectUriIndex} from "../../auth/credentials";
-import {ENVIRONMENT_NAME, DRIVE_EMAIL_ADDRESS, DRIVE_RESEND_SIGNING_SECRET, getHostingBaseUrl} from "../../util/config";
+import {ENVIRONMENT_NAME, getHostingBaseUrl} from "../../util/config";
+import {DRIVE_EMAIL_ADDRESS, DRIVE_RESEND_SIGNING_SECRET} from "./config";
 import {TaskRequest} from "../../util/types";
 import {cleanupExpiredDriveFileData} from "../../util/firestoreHandler";
 import {sendEvent} from "../../util/analytics";
@@ -45,7 +46,7 @@ const driveDispatchConfig: TaskQueueOptions = {
 export const v2driveSignup = onRequest(
     onRequestConfig,
     async (req, res) => {
-      const credentials = getAgentCredentials("drive");
+      const credentials = getAgentCredentials();
       const redirectUriIndex = getRedirectUriIndex(ENVIRONMENT_NAME.value());
       const scopes = [
         "https://www.googleapis.com/auth/userinfo.email",
@@ -73,7 +74,7 @@ export const v2driveSignup = onRequest(
 export const v2driveFullScopeSignup = onRequest(
     onRequestConfig,
     async (req, res) => {
-      const credentials = getAgentCredentials("drive");
+      const credentials = getAgentCredentials();
       const redirectUriIndex = getRedirectUriIndex(ENVIRONMENT_NAME.value());
       const scopes = [
         "https://www.googleapis.com/auth/userinfo.email",
@@ -104,7 +105,6 @@ export const v2driveOauthCallback = onRequest(
       try {
         const result = await signupCallbackHandler(
             req.query as Record<string, string>,
-            "drive",
         );
         uid = result.user.uid;
         grantedScope = result.grantedScope;
@@ -262,6 +262,6 @@ export const v2driveRefreshTokensScheduled = onSchedule(
       memory: "512MiB",
     },
     async () => {
-      await oauthCronJob("drive");
+      await oauthCronJob();
     },
 );

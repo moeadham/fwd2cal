@@ -9,15 +9,15 @@ import {
 } from "../../util/firestoreHandler";
 import {getOauthClient} from "../../auth/authHandler";
 import {sendEvent} from "../../util/analytics";
+import {getSupportEmail} from "../../util/config";
 import {
-  getSupportEmail,
   DRIVE_EMAIL_ADDRESS,
   DRIVE_ACTION_SIGNING_KEY,
   ORGANIZE_DRIVE_COST_PER_FILE,
   ORGANIZE_DRIVE_MAX_FILES,
   ORGANIZE_DRIVE_MAX_PREVIEW_ROWS,
   ORGANIZE_DRIVE_CHUNK_SIZE,
-} from "../../util/config";
+} from "./config";
 import {
   getSenderFromRawEmail,
   verifyEmail,
@@ -455,7 +455,7 @@ async function handleOrganizeDrive(
 
   let userData;
   try {
-    userData = await getUserFromUID(uid, "drive");
+    userData = await getUserFromUID(uid);
   } catch (err) {
     logger.debug("Drive organize: User lookup failed", {
       uid, error: err instanceof Error ? err.message : String(err),
@@ -531,7 +531,7 @@ async function scanAndPropose(
 
   let oauth2Client;
   try {
-    oauth2Client = await getOauthClient(uid, "drive");
+    oauth2Client = await getOauthClient(uid);
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     logger.error("Drive organize: OAuth failed", {uid, error: errMsg});
@@ -793,7 +793,7 @@ async function handleOrganizeApproval(
   // Get OAuth client
   let oauth2Client;
   try {
-    oauth2Client = await getOauthClient(uid, "drive");
+    oauth2Client = await getOauthClient(uid);
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     logger.error("Drive organize approval: OAuth failed", {uid, error: errMsg});
@@ -1199,7 +1199,7 @@ async function handleOrganizeUndo(
 
   let oauth2Client;
   try {
-    oauth2Client = await getOauthClient(uid, "drive");
+    oauth2Client = await getOauthClient(uid);
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     logger.error("Drive organize undo: OAuth failed", {uid, error: errMsg});

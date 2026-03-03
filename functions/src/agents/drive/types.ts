@@ -244,6 +244,9 @@ export interface DriveMailTemplates {
   organizeNoFiles: DriveMailTemplate;
   organizeComplete: DriveMailTemplate;
   organizeUndone: DriveMailTemplate;
+  userDeleted: DriveMailTemplate;
+  emailRemoved: DriveMailTemplate;
+  emailNotOwned: DriveMailTemplate;
 }
 
 // ============================================================================

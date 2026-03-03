@@ -17,19 +17,18 @@ import {logger} from "firebase-functions/v2";
 import {isUUID} from "validator";
 import {sendEvent} from "../util/analytics";
 import {addContactToResend, addContactToSegment} from "../util/resend";
-import {OAuthTokens, FirebaseUserRecord, AgentName, SignupCallbackResult} from "./types";
+import {OAuthTokens, FirebaseUserRecord, SignupCallbackResult} from "./types";
 import {RequestWithQuery} from "../util/types";
 import {Response} from "express";
 
 async function refreshOAuthTokens(
     uid: string,
-    agentName: AgentName,
 ): Promise<void> {
-  const oauth2Client = await getOauthClient(uid, agentName);
+  const oauth2Client = await getOauthClient(uid);
   let tokens: OAuthTokens;
   try {
     tokens = await refreshAccessToken(oauth2Client);
-    await updateUserTokens(tokens, uid, agentName);
+    await updateUserTokens(tokens, uid);
     logger.log(`uid ${uid} access token refreshed to ${tokens.expiry_date}`);
   } catch (error) {
     logger.warn("Failed to refresh access token:", uid, error);
@@ -54,10 +53,9 @@ async function refreshAccessToken(
 
 async function getOauthClient(
     uid: string,
-    agentName: AgentName,
 ): Promise<Auth.OAuth2Client> {
-  const credentials = getAgentCredentials(agentName);
-  const userData = await getUserFromUID(uid, agentName);
+  const credentials = getAgentCredentials();
+  const userData = await getUserFromUID(uid);
   const redirectUriIndex = getRedirectUriIndex(ENVIRONMENT_NAME.value());
   const oauth2Client = new google.auth.OAuth2(
       credentials.web.client_id,
@@ -71,16 +69,16 @@ async function getOauthClient(
   return oauth2Client;
 }
 
-async function oauthCronJob(agentName?: AgentName): Promise<void> {
+async function oauthCronJob(): Promise<void> {
   try {
-    const users = await findUsersWithExpiringTokens(agentName);
+    const users = await findUsersWithExpiringTokens();
     logger.log(
         "Refreshing tokens for Users with expiring tokens ",
         users.length,
     );
     for (const user of users) {
       try {
-        await refreshOAuthTokens(user.id, user.agentName);
+        await refreshOAuthTokens(user.id);
       } catch (error) {
         logger.warn(`Failed to refresh tokens for user ${user.id}:`, error);
         sendEvent(user.id, "tokenRefreshFailed");
@@ -104,9 +102,8 @@ async function deleteAccount(uid: string): Promise<void> {
 
 async function signupCallbackHandler(
     query: Record<string, string>,
-    agentName: AgentName,
 ): Promise<SignupCallbackResult> {
-  const credentials = getAgentCredentials(agentName);
+  const credentials = getAgentCredentials();
   logger.log("oauthCallback", query);
   const redirectUriIndex = getRedirectUriIndex(ENVIRONMENT_NAME.value());
   const oauth2Client = new google.auth.OAuth2(
@@ -170,7 +167,7 @@ async function signupCallbackHandler(
       }
     }
 
-    await storeUser(tokens as OAuthTokens, userRecord, agentName);
+    await storeUser(tokens as OAuthTokens, userRecord);
     await addUserEmailAddress(userRecord, [{email: userEmail, default: true}]);
 
     sendEvent(userRecord.uid, "sign_up");

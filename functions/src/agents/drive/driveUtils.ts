@@ -3,7 +3,8 @@ import {
   saveDriveFileData, getDriveFileData,
 } from "../../util/firestoreHandler";
 import {sendEmailResend} from "../../util/resend";
-import {getSupportEmail, DRIVE_EMAIL_ADDRESS} from "../../util/config";
+import {getSupportEmail} from "../../util/config";
+import {DRIVE_EMAIL_ADDRESS} from "./config";
 import {getEmailThreadHeaders, threadEmailHtml} from "../../util/emailUtils";
 import {TransformedEmail} from "../../util/types";
 import {

@@ -47,7 +47,7 @@ export async function eventHandler(
     documents: ParsedDocument[] = [],
 ): Promise<GoogleCalendarEvent | GoogleCalendarEvent[] | undefined> {
   // Can we authenticate with their calendar?
-  const [oauthErr, oauth2Client] = await handleAsync(() => getOauthClient(uid, "calendar"));
+  const [oauthErr, oauth2Client] = await handleAsync(() => getOauthClient(uid));
   if (oauthErr || !oauth2Client) {
     logger.warn("Error getting OAuth client: ", oauthErr);
     await sendEmailResponse(sender, email, EMAIL_RESPONSES.oauthFailed, true);

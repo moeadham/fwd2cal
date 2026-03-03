@@ -1,7 +1,7 @@
 import {logger} from "firebase-functions/v2";
 import {getUserFromEmail, getUserFromUID} from "../../util/firestoreHandler";
 import {sendEvent} from "../../util/analytics";
-import {MAX_DRIVE_UPLOAD_BYTES} from "../../util/config";
+import {MAX_DRIVE_UPLOAD_BYTES} from "./config";
 import {getSenderFromRawEmail, verifyEmail} from "../../util/emailUtils";
 import {TransformedEmail, ResendClient} from "../../util/types";
 import {DriveProcessingResult} from "./types";
@@ -11,6 +11,7 @@ import {collectImageUrls} from "../../util/imageUtils";
 import {fastMatchSkill} from "../../util/skills/matcher";
 import {getSkills} from "./skills";
 import {handleOrganizeDrive, handleOrganizeApproval} from "./organizeHandler";
+import {driveDeleteUserAccount, driveRemoveEmailFromUser} from "./accountHandler";
 import {
   parseEmbeddedDriveData, parseOrganizeEmbeddedData,
   applyTemplate, sendDriveEmailResponse, getNextFolderPrefix,
@@ -50,13 +51,28 @@ async function handleDriveEmail(
     return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: []};
   }
 
-  // Check for organize-drive skill match
+  // Check for skill match (organize-drive, delete-account, remove-email)
   const skills = getSkills();
-  const skillMatch = fastMatchSkill(email.subject || "", "", skills);
+  const skillMatch = fastMatchSkill(email.subject || "", email.text || "", skills);
   if (skillMatch?.skillId === "organize-drive") {
     logger.info("Drive: organize-drive skill matched", {sender, matchedIn: skillMatch.matchedIn});
     await handleOrganizeDrive(email, emailId);
     return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: []};
+  }
+
+  // Account management skills require a known user
+  if (skillMatch?.skillId === "delete-account" || skillMatch?.skillId === "remove-email") {
+    const uid = await getUserFromEmail(sender);
+    if (uid) {
+      logger.info("Drive: account skill matched", {sender, skill: skillMatch.skillId});
+      if (skillMatch.skillId === "delete-account") {
+        await driveDeleteUserAccount(email, sender, uid);
+      } else {
+        await driveRemoveEmailFromUser(email, sender, uid, skillMatch.extractedValue);
+      }
+      return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: []};
+    }
+    // Unknown user — fall through to auth flow below
   }
 
   // Check if this is a REPLY to an existing upload (move request)
@@ -71,7 +87,7 @@ async function handleDriveEmail(
   const uid = await getUserFromEmail(sender);
   if (uid) {
     try {
-      const userData = await getUserFromUID(uid, "drive");
+      const userData = await getUserFromUID(uid);
       if (userData.access_token) {
         logger.info("Drive: Returning user — organizing immediately", {sender, uid});
         return processUpload(emailId, uid, resend, email);

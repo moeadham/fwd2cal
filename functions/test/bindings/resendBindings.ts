@@ -807,6 +807,43 @@ Sarah`,
 // DRIVE AGENT TEST DATA
 // ============================================================================
 
+// Drive Test: Delete account (addressed to drive agent)
+const driveDeleteAccount: ResendTestData = createResendTestData(
+  {
+    type: "email.received",
+    created_at: new Date().toISOString(),
+    data: {
+      email_id: "test-drive-delete",
+      message_id: `<test-drive-delete-${Date.now()}@mail.gmail.com>`,
+      from: TESTER_PRIMARY_GOOGLE_ACCT,
+      to: [DRIVE_EMAIL_ADDRESS],
+      cc: [],
+      bcc: [],
+      subject: "delete account",
+      created_at: new Date().toISOString(),
+      attachments: [],
+    },
+  },
+  {
+    id: "test-drive-delete",
+    subject: "delete account",
+    from: TESTER_PRIMARY_GOOGLE_ACCT,
+    to: [DRIVE_EMAIL_ADDRESS],
+    html: "",
+    text: "",
+    headers: {
+      "authentication-results": generateAuthHeader(TESTER_PRIMARY_GOOGLE_ACCT),
+      "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
+      "to": DRIVE_EMAIL_ADDRESS,
+      "subject": "delete account",
+      "date": "Fri, 30 May 2025 12:00:00 +0000",
+      "message-id": `<test-drive-delete-${Date.now()}@mail.gmail.com>`,
+      "in-reply-to": "<original-message-drive-delete>",
+      "references": "<original-message-drive-delete>",
+    },
+  },
+);
+
 // Drive Test 1: Single PDF attachment
 const driveEmailWithPDF: ResendTestData = createResendTestData(
   {
@@ -989,6 +1026,7 @@ export {
   emailWithImageAttachment,
   familyEvent,
   workEventVisibl,
+  driveDeleteAccount,
   driveEmailWithPDF,
   driveEmailNoAttachments,
   driveEmailMultipleAttachments,
