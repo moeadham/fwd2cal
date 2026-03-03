@@ -221,12 +221,12 @@ export async function processUpload(
     });
     proposal = savedProposal;
   } else {
-    // Extract content summaries and propose placement via LLM
-    const fileInfos = await buildFileInfos(attachments);
-    const imageUrls = collectImageUrls(attachments);
+    // Extract content summaries + document page images and propose placement via LLM
+    const {fileInfos, documentImageUrls} = await buildFileInfos(attachments);
+    const allImageUrls = [...collectImageUrls(attachments), ...documentImageUrls];
     proposal = await callProposalWithFallback(
         fileInfos, originalEmail.subject || "", originalEmail.text || "",
-        agentFolderNames, nextPrefix, uid, attachments, imageUrls,
+        agentFolderNames, nextPrefix, uid, attachments, allImageUrls,
     );
   }
 

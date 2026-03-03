@@ -84,6 +84,37 @@ async function parseDocument(
   }
 }
 
+/**
+ * Render PDF pages as base64 data URL screenshots for LLM vision.
+ * Returns one data URL per page (first N pages, rendered at 768px width
+ * for a good balance of readability and payload size ~100-200KB/page).
+ */
+async function extractDocumentImages(
+    buffer: Buffer,
+    docType: string,
+    maxPages: number = 2,
+    desiredWidth: number = 768,
+): Promise<string[]> {
+  if (docType !== "pdf") return [];
+  const parser = new PDFParse({data: buffer});
+  try {
+    const result = await parser.getScreenshot({
+      first: maxPages,
+      desiredWidth,
+      imageDataUrl: true,
+      imageBuffer: false,
+    });
+    return result.pages.map((page) => page.dataUrl);
+  } catch (error) {
+    logger.warn("Failed to extract PDF screenshots", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return [];
+  } finally {
+    await parser.destroy();
+  }
+}
+
 export {
   DOCUMENT_MIME_TYPES,
   parsePDF,
@@ -92,4 +123,5 @@ export {
   parseCSV,
   parseTXT,
   parseDocument,
+  extractDocumentImages,
 };

@@ -122,15 +122,15 @@ async function handleDriveEmail(
     return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: [], error: "No attachments"};
   }
 
-  // Download and extract content summaries for LLM preview
-  const fileInfos = await buildFileInfos(attachments);
-  const imageUrls = collectImageUrls(attachments);
+  // Download and extract content summaries + document page images for LLM preview
+  const {fileInfos, documentImageUrls} = await buildFileInfos(attachments);
+  const allImageUrls = [...collectImageUrls(attachments), ...documentImageUrls];
 
   // LLM: propose folder + filenames (no agent folders available without OAuth)
   const nextPrefix = getNextFolderPrefix([]);
   const proposal = await callProposalWithFallback(
       fileInfos, email.subject || "", email.text || "",
-      [], nextPrefix, uid, attachments, imageUrls,
+      [], nextPrefix, uid, attachments, allImageUrls,
   );
   logger.info("Drive: LLM proposal", {
     folder: proposal.folder_name,

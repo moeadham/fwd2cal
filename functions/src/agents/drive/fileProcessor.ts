@@ -5,7 +5,7 @@ import {ReadableStream as WebReadableStream} from "stream/web";
 import {DriveAttachment} from "./types";
 import {ResendClient} from "../../util/types";
 import {AttachmentInfo} from "../../util/types";
-import {DOCUMENT_MIME_TYPES, parseDocument} from "../../util/documentParser";
+import {DOCUMENT_MIME_TYPES, parseDocument, extractDocumentImages} from "../../util/documentParser";
 import {
   MAX_CHARS_PER_DOCUMENT,
   MAX_CHARS_PER_SHEET,
@@ -199,4 +199,27 @@ async function streamFromUrl(url: string): Promise<Readable> {
   return Readable.fromWeb(response.body as WebReadableStream);
 }
 
-export {listAttachments, downloadAttachmentBuffer, extractContentSummary, streamFromUrl};
+/**
+ * Extract images from a document buffer as base64 data URLs for LLM vision.
+ */
+async function extractDocumentImageUrls(
+    buffer: Buffer,
+    contentType: string,
+): Promise<string[]> {
+  const docType = DOCUMENT_MIME_TYPES[contentType.toLowerCase()];
+  if (!docType) return [];
+
+  try {
+    return await extractDocumentImages(buffer, docType);
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : String(error);
+    logger.warn("Failed to extract document images", {
+      contentType,
+      error: errorMessage,
+    });
+    return [];
+  }
+}
+
+export {listAttachments, downloadAttachmentBuffer, extractContentSummary, extractDocumentImageUrls, streamFromUrl};

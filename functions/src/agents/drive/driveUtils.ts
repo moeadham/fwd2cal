@@ -11,7 +11,7 @@ import {
   DriveEmbeddedData, DriveEmbeddedFileData, DriveAttachment,
   DriveFolder, FileProposal, FileInfo, OrganizeEmbeddedData,
 } from "./types";
-import {downloadAttachmentBuffer, extractContentSummary} from "./fileProcessor";
+import {downloadAttachmentBuffer, extractContentSummary, extractDocumentImageUrls} from "./fileProcessor";
 import {proposeFilePlacement} from "./llm";
 
 /**
@@ -228,17 +228,25 @@ export function findFolderByName(
 }
 
 /**
- * Download attachments and extract content summaries for LLM processing.
+ * Download attachments and extract content summaries + document images for LLM processing.
  */
 export async function buildFileInfos(
     attachments: DriveAttachment[],
-): Promise<FileInfo[]> {
-  return Promise.all(attachments.map(async (attachment) => {
+): Promise<{fileInfos: FileInfo[]; documentImageUrls: string[]}> {
+  const allDocumentImageUrls: string[] = [];
+
+  const fileInfos = await Promise.all(attachments.map(async (attachment) => {
     const buffer = await downloadAttachmentBuffer(
         attachment.downloadUrl, attachment.filename,
     );
     const contentSummary = buffer ?
       await extractContentSummary(buffer, attachment.contentType) : "";
+
+    if (buffer) {
+      const docImages = await extractDocumentImageUrls(buffer, attachment.contentType);
+      allDocumentImageUrls.push(...docImages);
+    }
+
     return {
       fileName: attachment.filename,
       mimeType: attachment.contentType,
@@ -246,6 +254,8 @@ export async function buildFileInfos(
       contentSummary,
     };
   }));
+
+  return {fileInfos, documentImageUrls: allDocumentImageUrls};
 }
 
 /**

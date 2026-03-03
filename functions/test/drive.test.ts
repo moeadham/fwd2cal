@@ -2,6 +2,8 @@
 import chai from "chai";
 import chaiHttp from "chai-http";
 import {exec} from "child_process";
+import * as fs from "fs";
+import * as path from "path";
 import type {Response} from "superagent";
 
 const chaiWithHttp = chai as typeof chai & {
@@ -15,6 +17,7 @@ import {
   driveDeleteAccount,
   driveSignup,
 } from "./bindings/resendBindings";
+import {extractDocumentImages} from "../src/util/documentParser";
 
 chai.use(chaiHttp);
 const expect = chai.expect;
@@ -121,6 +124,20 @@ async function sendDriveProcessUpload(testData: ResendTestData): Promise<DriveDi
 
 // Shared state: upload confirmation HTML is saved in DT03 and used by DT04
 let uploadConfirmationHtml = "";
+
+describe("extractDocumentImages", function() {
+  it("DT00 extract page screenshots from a PDF", async function() {
+    const pdfBuffer = fs.readFileSync(path.join(__dirname, "bindings", "conference_registration.pdf"));
+    const images = await extractDocumentImages(pdfBuffer, "pdf");
+
+    expect(images).to.be.an("array").with.length.greaterThan(0);
+    expect(images.length).to.be.at.most(2);
+    for (const dataUrl of images) {
+      expect(dataUrl).to.match(/^data:image\/(png|jpeg);base64,/);
+    }
+    console.log(`Extracted ${images.length} page screenshot(s), first image size: ${images[0].length} chars`);
+  });
+});
 
 describe("fwd2cal Drive Agent", function() {
   it("DT01 propose folder and filename for a single PDF attachment", async function() {
