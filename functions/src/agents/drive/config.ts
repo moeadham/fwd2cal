@@ -6,7 +6,7 @@ export const AGENT_NAME: AgentName = "drive";
 export const DRIVE_RESEND_SIGNING_SECRET = defineString("DRIVE_RESEND_SIGNING_SECRET");
 
 export const DRIVE_EMAIL_ADDRESS = defineString("DRIVE_EMAIL_ADDRESS", {
-  default: "drive@fwd2cal.com",
+  default: "drive@fwd2drive.com",
 });
 
 export const MAX_DRIVE_UPLOAD_BYTES = defineInt("MAX_DRIVE_UPLOAD_BYTES", {

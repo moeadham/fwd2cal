@@ -35,8 +35,8 @@ else
   echo 'AGENT_NAME=drive' >> .env.local
 fi
 
-echo "Starting firebase emulator (using dev project)"
-firebase emulators:start --project fwd2cal-dev-2578e > /dev/stdout &
+echo "Starting firebase emulator (using drive-dev project)"
+firebase emulators:start --config ../firebase.drive.json --project fwd2drive-dev > /dev/stdout &
 LOGS_PID=$!
 sleep 30
 

@@ -138,7 +138,7 @@ export const v2driveOauthCallback = onRequest(
         logger.warn("Drive signup: insufficient scopes", {
           uid, grantedScope, requiredScopes,
         });
-        res.redirect(302, `${getHostingBaseUrl()}/drive-insufficient-permissions`);
+        res.redirect(302, `${getHostingBaseUrl()}/insufficient-permissions`);
         return;
       }
 
@@ -154,7 +154,7 @@ export const v2driveOauthCallback = onRequest(
         }
       }
 
-      res.redirect(302, "https://www.fwd2cal.com/drive-thanks");
+      res.redirect(302, "https://www.fwd2drive.com/thanks");
     },
 );
 

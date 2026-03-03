@@ -18,12 +18,12 @@ import {
 chai.use(chaiHttp);
 const expect = chai.expect;
 const apiURL = "http://127.0.0.1:5002";
-const DRIVE_CALLBACK_ENDPOINT = "/v2/driveInboundCallback";
+const DRIVE_CALLBACK_ENDPOINT = "/v2/inboundCallback";
 const TESTER_PRIMARY_GOOGLE_ACCT = process.env.TESTER_PRIMARY_GOOGLE_ACCT || "";
-const DRIVE_EMAIL_ADDRESS = process.env.DRIVE_EMAIL_ADDRESS || "drive@fwd2cal.com";
+const DRIVE_EMAIL_ADDRESS = process.env.DRIVE_EMAIL_ADDRESS || "drive@fwd2drive.com";
 const DISPATCH_URL = "http://127.0.0.1:5001";
 const DISPATCH_REGION = "us-central1";
-const APP_ID = process.env.GCLOUD_PROJECT || "fwd2cal-dev-2578e";
+const APP_ID = process.env.GCLOUD_PROJECT || "fwd2drive-dev";
 
 interface WebhookWithMock {
   type: string;
@@ -155,7 +155,7 @@ describe("fwd2cal Drive Agent", function() {
 
   it("DT02 get Drive login URL and wait for tester to authorize Drive scope", function(done) {
     chaiWithHttp.request(apiURL)
-      .get("/v2/driveSignup")
+      .get("/v2/signup")
       .redirects(0)
       .end((err: Error | null, res: Response) => {
         expect(res).to.have.status(302);

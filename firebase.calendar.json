@@ -21,6 +21,27 @@
       ]
     }
   ],
+  "emulators": {
+    "functions": {
+      "port": 5001
+    },
+    "firestore": {
+      "port": 8080
+    },
+    "pubsub": {
+      "port": 8085
+    },
+    "hosting": {
+      "port": 5002
+    },
+    "ui": {
+      "enabled": true
+    },
+    "singleProjectMode": true,
+    "auth": {
+      "port": 9099
+    }
+  },
   "hosting": {
     "public": "public",
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
@@ -32,10 +53,6 @@
       },
       {
         "source": "/insufficient-permissions",
-        "destination": "/insufficient-permissions.html"
-      },
-      {
-        "source": "/drive-insufficient-permissions",
         "destination": "/insufficient-permissions.html"
       },
       {

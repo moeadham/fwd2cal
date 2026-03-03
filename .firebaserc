@@ -1,6 +1,8 @@
 {
   "projects": {
     "default": "fwd2cal",
-    "dev": "fwd2cal-dev-2578e"
+    "dev": "fwd2cal-dev-2578e",
+    "drive": "fwd2drive",
+    "drive-dev": "fwd2drive-dev"
   }
 }

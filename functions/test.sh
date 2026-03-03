@@ -42,7 +42,7 @@ else
 fi
 
 echo "Starting firebase emulator"
-firebase emulators:start --project fwd2cal-dev-2578e > /dev/stdout &
+firebase emulators:start --config ../firebase.calendar.json --project fwd2cal-dev-2578e > /dev/stdout &
 LOGS_PID=$!
 sleep 30
 

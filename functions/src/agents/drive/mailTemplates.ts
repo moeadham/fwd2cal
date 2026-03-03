@@ -1,19 +1,19 @@
 /* eslint-disable max-len */
 import {DriveMailTemplates} from "./types";
 
-const isDevProject = process.env.GCLOUD_PROJECT === "fwd2cal-dev-2578e";
+const isDevProject = process.env.GCLOUD_PROJECT?.includes("-dev") ?? false;
 
 export const driveFullScopeSignupUrl = isDevProject ?
-  "https://us-central1-fwd2cal-dev-2578e.cloudfunctions.net/v2driveFullScopeSignup" :
-  "https://www.fwd2cal.com/drive-full-scope-consent";
+  "https://us-central1-fwd2drive-dev.cloudfunctions.net/v2driveFullScopeSignup" :
+  "https://www.fwd2drive.com/full-scope-consent";
 
 export const driveSignupUrl = isDevProject ?
-  "https://us-central1-fwd2cal-dev-2578e.cloudfunctions.net/v2driveSignup" :
-  "https://www.fwd2cal.com/drive-signup-consent";
+  "https://us-central1-fwd2drive-dev.cloudfunctions.net/v2driveSignup" :
+  "https://www.fwd2drive.com/signup-consent";
 
 export const driveOrganizeActionUrl = isDevProject ?
-  "https://us-central1-fwd2cal-dev-2578e.cloudfunctions.net/v2driveOrganizeAction" :
-  "https://www.fwd2cal.com/drive-organize-action";
+  "https://us-central1-fwd2drive-dev.cloudfunctions.net/v2driveOrganizeAction" :
+  "https://www.fwd2drive.com/organize-action";
 
 const driveMailTemplates: DriveMailTemplates = {
   fileProposal: {

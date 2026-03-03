@@ -35,7 +35,7 @@ fi
 
 # Verify OAuth credentials for the target project exist before building
 CREDS_DIR="src/agents/${AGENT}/auth"
-if [ "$PROJECT" = "fwd2cal-dev-2578e" ]; then
+if [[ "$PROJECT" == *-dev* ]]; then
   SUFFIX="-dev"
 else
   SUFFIX=""
@@ -43,7 +43,7 @@ fi
 
 case "$AGENT" in
   calendar) CREDS_FILE="v2-google-auth-credentials-fwd2cal${SUFFIX}.json" ;;
-  drive)    CREDS_FILE="v2-google-auth-credentials-drive2cal${SUFFIX}.json" ;;
+  drive)    CREDS_FILE="v2-google-auth-credentials-fwd2drive${SUFFIX}.json" ;;
 esac
 
 if [ ! -f "${CREDS_DIR}/${CREDS_FILE}" ]; then

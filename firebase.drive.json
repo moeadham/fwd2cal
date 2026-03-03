@@ -21,25 +21,62 @@
       ]
     }
   ],
+  "emulators": {
+    "functions": {
+      "port": 5001
+    },
+    "firestore": {
+      "port": 8080
+    },
+    "pubsub": {
+      "port": 8085
+    },
+    "hosting": {
+      "port": 5002
+    },
+    "ui": {
+      "enabled": true
+    },
+    "singleProjectMode": true,
+    "auth": {
+      "port": 9099
+    }
+  },
   "hosting": {
-    "public": "public",
+    "public": "public-drive",
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
     "rewrites": [
       {
-        "source": "/drive-insufficient-permissions",
+        "source": "/not-found",
+        "destination": "/404.html"
+      },
+      {
+        "source": "/insufficient-permissions",
         "destination": "/insufficient-permissions.html"
       },
       {
-        "source": "/v2/driveSignup",
+        "source": "/signup-with-google.png",
+        "destination": "/signin-with-google.png"
+      },
+      {
+        "source": "/v2/signup",
         "function": "v2driveSignup"
       },
       {
-        "source": "/v2/driveOauthCallback",
+        "source": "/v2/oauthCallback",
         "function": "v2driveOauthCallback"
       },
       {
-        "source": "/v2/driveInboundCallback",
+        "source": "/v2/inboundCallback",
         "function": "v2driveInboundCallback"
+      },
+      {
+        "source": "/v2/fullScopeSignup",
+        "function": "v2driveFullScopeSignup"
+      },
+      {
+        "source": "/v2/organizeAction",
+        "function": "v2driveOrganizeAction"
       }
     ]
   }

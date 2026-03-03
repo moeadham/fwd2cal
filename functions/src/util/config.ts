@@ -91,8 +91,12 @@ function getHostingBaseUrl(): string {
   if (process.env.FUNCTIONS_EMULATOR === "true") {
     return "http://localhost:5002";
   }
-  if (process.env.GCLOUD_PROJECT === "fwd2cal-dev-2578e") {
-    return "https://fwd2cal-dev-2578e.web.app";
+  const project = process.env.GCLOUD_PROJECT ?? "";
+  if (project.includes("-dev")) {
+    return `https://${project}.web.app`;
+  }
+  if (project === "fwd2drive") {
+    return "https://app.fwd2drive.com";
   }
   return "https://app.fwd2cal.com";
 }

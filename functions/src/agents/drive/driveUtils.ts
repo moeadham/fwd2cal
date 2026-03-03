@@ -196,7 +196,7 @@ export async function parseEmbeddedDriveData(
  * Looks for the visible "View proposal" link with encoded proposalId.
  */
 export function parseOrganizeEmbeddedData(html: string): OrganizeEmbeddedData | null {
-  const linkMatch = html.match(/fwd2cal\.com\/d\?o=([A-Za-z0-9_-]+)/);
+  const linkMatch = html.match(/fwd2drive\.com\/d\?o=([A-Za-z0-9_-]+)/);
   if (linkMatch) {
     try {
       const json = Buffer.from(linkMatch[1], "base64url").toString();

@@ -328,7 +328,7 @@ function buildProposalCsv(proposal: DriveOrganizeProposal): string {
 function buildOrganizeEmbeddedData(data: OrganizeEmbeddedData): string {
   const json = JSON.stringify(data);
   const encoded = Buffer.from(json).toString("base64url");
-  const link = `<br><a href="https://www.fwd2cal.com/d?o=${encoded}"` +
+  const link = `<br><a href="https://www.fwd2drive.com/d?o=${encoded}"` +
     ` style="color:#999;font-size:11px;">View proposal</a>`;
   return link;
 }

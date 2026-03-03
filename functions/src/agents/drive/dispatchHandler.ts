@@ -263,7 +263,7 @@ export async function handleDriveConfirm(
       if (userData.access_token) {
         // User has OAuth — process upload directly
         await processUpload(emailId, uid, resend, transformedEmail);
-        res.redirect(302, "https://www.fwd2cal.com/drive-upload-success");
+        res.redirect(302, "https://www.fwd2drive.com/upload-success");
         return;
       }
     } catch (err) {
