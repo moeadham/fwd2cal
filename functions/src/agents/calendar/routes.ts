@@ -12,8 +12,8 @@ import {
   oauthCronJob,
 } from "../../auth/authHandler";
 import {getAgentCredentials, getRedirectUriIndex} from "../../auth/credentials";
-import {ENVIRONMENT_NAME, MAIN_EMAIL_ADDRESS, getHostingBaseUrl} from "../../util/config";
-import {RESEND_SIGNING_SECRET} from "./config";
+import {ENVIRONMENT_NAME} from "../../util/config";
+import {AGENT_NAME, AGENT_HOSTING_URL, AGENT_EMAIL_ADDRESS, RESEND_SIGNING_SECRET} from "./config";
 import {processInboundWebhook} from "../../resend/webhookUtils";
 import {TaskRequest} from "../../util/types";
 
@@ -40,7 +40,7 @@ const dispatchConfig: TaskQueueOptions = {
 export const v2signup = onRequest(
     onRequestConfig,
     async (_req, res) => {
-      const credentials = getAgentCredentials();
+      const credentials = getAgentCredentials(AGENT_NAME);
       const redirectUriIndex = getRedirectUriIndex(ENVIRONMENT_NAME.value());
       const scopes = [
         "https://www.googleapis.com/auth/calendar",
@@ -66,6 +66,7 @@ export const v2oauthCallback = onRequest(
       try {
         const result = await signupCallbackHandler(
             req.query as Record<string, string>,
+            AGENT_NAME,
         );
         grantedScope = result.grantedScope;
       } catch (err) {
@@ -79,7 +80,7 @@ export const v2oauthCallback = onRequest(
         "https://www.googleapis.com/auth/calendar",
       ])) {
         logger.warn("Calendar signup: insufficient scopes", {grantedScope});
-        res.redirect(302, `${getHostingBaseUrl()}/insufficient-permissions`);
+        res.redirect(302, `${AGENT_HOSTING_URL.value()}/insufficient-permissions`);
         return;
       }
 
@@ -94,7 +95,7 @@ export const v2testOauthCallback = onRequest(
       if (!hasRequiredScopes(grantedScope, [
         "https://www.googleapis.com/auth/calendar",
       ])) {
-        res.redirect(302, `${getHostingBaseUrl()}/insufficient-permissions`);
+        res.redirect(302, `${AGENT_HOSTING_URL.value()}/insufficient-permissions`);
         return;
       }
       res.redirect(302, "https://www.fwd2cal.com/thanks");
@@ -162,7 +163,7 @@ export const v2resendInboundCallback = onRequest(
     async (req, res) => {
       await processInboundWebhook(
           req, res, "v2resendInboundDispatch",
-          MAIN_EMAIL_ADDRESS.value(), RESEND_SIGNING_SECRET.value(),
+          AGENT_EMAIL_ADDRESS.value(), RESEND_SIGNING_SECRET.value(),
       );
     },
 );
@@ -174,6 +175,6 @@ export const v2refreshTokensScheduled = onSchedule(
       memory: "512MiB",
     },
     async () => {
-      await oauthCronJob();
+      await oauthCronJob(AGENT_NAME);
     },
 );

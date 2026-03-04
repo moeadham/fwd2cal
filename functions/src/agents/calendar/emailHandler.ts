@@ -6,12 +6,12 @@ import {fastMatchSkill} from "../../util/skills/matcher";
 import {sendEmailResend} from "../../util/resend";
 import {
   ENVIRONMENT_NAME,
-  MAIN_EMAIL_ADDRESS,
   SKILL_CONFIDENCE_THRESHOLD,
   SKILL_BODY_EXCERPT_LENGTH,
   getSupportEmail,
   getAdminEmail,
 } from "../../util/config";
+import {AGENT_EMAIL_ADDRESS} from "./config";
 import {
   getSenderFromRawEmail,
   getRecipientsFromRawEmail,
@@ -69,8 +69,8 @@ async function handleEmail(
   // Is this a support email?
   const to = getRecipientsFromRawEmail(email);
   if (
-    to.includes(getSupportEmail()) ||
-    to.includes(getAdminEmail()) ||
+    to.includes(getSupportEmail(AGENT_EMAIL_ADDRESS.value())) ||
+    to.includes(getAdminEmail(AGENT_EMAIL_ADDRESS.value())) ||
     (email.subject &&
       email.subject.toLowerCase().startsWith("verify your email address"))
   ) {
@@ -122,7 +122,7 @@ async function sendToSupport(
   const content = `From: ${sender} <br><br> Subject: ${email.subject} <br><br> ${email.html}`;
   await sendEmailResend({
     to: "fwd2cal@googlegroups.com",
-    from: MAIN_EMAIL_ADDRESS.value(),
+    from: AGENT_EMAIL_ADDRESS.value(),
     subject: email.subject,
     html: content,
   });

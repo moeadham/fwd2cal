@@ -8,7 +8,7 @@
     "test:drive": "./test-drive.sh",
     "lint": "eslint 'src/**/*.ts'",
     "serve:calendar": "npm run build && firebase emulators:start --config ../firebase.calendar.json --project fwd2cal-dev-2578e",
-    "serve:drive": "npm run build && firebase emulators:start --config ../firebase.drive.json --project fwd2drive-dev",
+    "serve:drive": "npm run build && firebase emulators:start --config ../firebase.drive.json --project fwd2cal-dev-2578e",
     "shell": "npm run build && firebase functions:shell",
     "start": "npm run shell",
     "deploy:calendar": "./scripts/deploy-agent.sh calendar",

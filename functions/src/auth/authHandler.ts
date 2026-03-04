@@ -8,6 +8,7 @@ import {
 } from "../util/firestoreHandler";
 import {google, Auth} from "googleapis";
 import {getAgentCredentials, getRedirectUriIndex} from "./credentials";
+import {AgentName} from "./types";
 import {
   ENVIRONMENT_NAME,
   RESEND_REGISTERED_USERS_SEGMENT_ID,
@@ -23,8 +24,9 @@ import {Response} from "express";
 
 async function refreshOAuthTokens(
     uid: string,
+    agentName: AgentName,
 ): Promise<void> {
-  const oauth2Client = await getOauthClient(uid);
+  const oauth2Client = await getOauthClient(uid, agentName);
   let tokens: OAuthTokens;
   try {
     tokens = await refreshAccessToken(oauth2Client);
@@ -53,8 +55,9 @@ async function refreshAccessToken(
 
 async function getOauthClient(
     uid: string,
+    agentName: AgentName,
 ): Promise<Auth.OAuth2Client> {
-  const credentials = getAgentCredentials();
+  const credentials = getAgentCredentials(agentName);
   const userData = await getUserFromUID(uid);
   const redirectUriIndex = getRedirectUriIndex(ENVIRONMENT_NAME.value());
   const oauth2Client = new google.auth.OAuth2(
@@ -69,7 +72,7 @@ async function getOauthClient(
   return oauth2Client;
 }
 
-async function oauthCronJob(): Promise<void> {
+async function oauthCronJob(agentName: AgentName): Promise<void> {
   try {
     const users = await findUsersWithExpiringTokens();
     logger.log(
@@ -78,7 +81,7 @@ async function oauthCronJob(): Promise<void> {
     );
     for (const user of users) {
       try {
-        await refreshOAuthTokens(user.id);
+        await refreshOAuthTokens(user.id, agentName);
       } catch (error) {
         logger.warn(`Failed to refresh tokens for user ${user.id}:`, error);
         sendEvent(user.id, "tokenRefreshFailed");
@@ -102,8 +105,9 @@ async function deleteAccount(uid: string): Promise<void> {
 
 async function signupCallbackHandler(
     query: Record<string, string>,
+    agentName: AgentName,
 ): Promise<SignupCallbackResult> {
-  const credentials = getAgentCredentials();
+  const credentials = getAgentCredentials(agentName);
   logger.log("oauthCallback", query);
   const redirectUriIndex = getRedirectUriIndex(ENVIRONMENT_NAME.value());
   const oauth2Client = new google.auth.OAuth2(

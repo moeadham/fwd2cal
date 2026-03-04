@@ -1,6 +1,7 @@
 import {logger} from "firebase-functions/v2";
 import {sendEmailResend} from "../../util/resend";
-import {MAIN_EMAIL_ADDRESS, getSupportEmail} from "../../util/config";
+import {getSupportEmail} from "../../util/config";
+import {AGENT_EMAIL_ADDRESS} from "./config";
 import {getEmailThreadHeaders, threadEmailHtml} from "../../util/emailUtils";
 import {mailTemplates} from "./mailTemplates";
 import {
@@ -96,8 +97,8 @@ export function getHtml(messageType: EmailResponseTemplate): string {
     html = html.replace(new RegExp(`%${key}%`, "g"), messageType.replace[key]);
   });
   // Replace email placeholders with configured values
-  const supportEmail = getSupportEmail();
-  const mainEmail = MAIN_EMAIL_ADDRESS.value();
+  const mainEmail = AGENT_EMAIL_ADDRESS.value();
+  const supportEmail = getSupportEmail(mainEmail);
   html = html.replace(/%SUPPORT_EMAIL%/g, supportEmail);
   html = html.replace(/%MAIN_EMAIL%/g, mainEmail);
   return html;
@@ -132,7 +133,7 @@ export async function sendEmailResponse(
   }
   await sendEmailResend({
     to: sender,
-    from: MAIN_EMAIL_ADDRESS.value(),
+    from: AGENT_EMAIL_ADDRESS.value(),
     subject: subject,
     html: html,
     headers: getEmailThreadHeaders(originalEmail.headers),

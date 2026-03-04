@@ -2,12 +2,13 @@
 import {MailTemplates} from "./types";
 
 // Get base URL based on project ID
-const isDevProject = process.env.GCLOUD_PROJECT === "fwd2cal-dev-2578e";
+const isDevProject = process.env.GCLOUD_PROJECT?.includes("-dev") ?? false;
+const devFunctionsBase = `https://us-central1-${process.env.GCLOUD_PROJECT}.cloudfunctions.net`;
 const signupUrl = isDevProject ?
-  "https://us-central1-fwd2cal-dev-2578e.cloudfunctions.net/v2signup" :
+  `${devFunctionsBase}/v2signup` :
   "https://www.fwd2cal.com/signup-consent";
 const appBaseUrl = isDevProject ?
-  "https://us-central1-fwd2cal-dev-2578e.cloudfunctions.net" :
+  devFunctionsBase :
   "https://app.fwd2cal.com";
 
 const mailTemplates: MailTemplates = {

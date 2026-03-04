@@ -3,9 +3,13 @@ import {AgentName} from "../../auth/types";
 
 export const AGENT_NAME: AgentName = "drive";
 
+export const AGENT_HOSTING_URL = defineString("DRIVE_AGENT_HOSTING_URL", {
+  default: "https://app.fwd2drive.com",
+});
+
 export const DRIVE_RESEND_SIGNING_SECRET = defineString("DRIVE_RESEND_SIGNING_SECRET");
 
-export const DRIVE_EMAIL_ADDRESS = defineString("DRIVE_EMAIL_ADDRESS", {
+export const AGENT_EMAIL_ADDRESS = defineString("DRIVE_EMAIL_ADDRESS", {
   default: "drive@fwd2drive.com",
 });
 

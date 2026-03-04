@@ -28,15 +28,8 @@ if [ -f .env.local ]; then
   set +a
 fi
 
-# Set AGENT_NAME in .env.local so the Firebase emulator picks it up
-if grep -q '^AGENT_NAME=' .env.local 2>/dev/null; then
-  sed -i '' 's/^AGENT_NAME=.*/AGENT_NAME=drive/' .env.local
-else
-  echo 'AGENT_NAME=drive' >> .env.local
-fi
-
-echo "Starting firebase emulator (using drive-dev project)"
-firebase emulators:start --config ../firebase.drive.json --project fwd2drive-dev > /dev/stdout &
+echo "Starting firebase emulator (using dev project)"
+firebase emulators:start --config ../firebase.drive.json --project fwd2cal-dev-2578e > /dev/stdout &
 LOGS_PID=$!
 sleep 30
 

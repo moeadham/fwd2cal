@@ -33,9 +33,16 @@ if [ -z "$PROJECT" ]; then
   PROJECT=$(firebase use 2>/dev/null)
 fi
 
+# Resolve Firebase alias to actual project ID (e.g. "dev" → "fwd2cal-dev-2578e")
+RESOLVED_PROJECT=$(node -e "
+  const rc = JSON.parse(require('fs').readFileSync('../.firebaserc', 'utf-8'));
+  const p = rc.projects['${PROJECT}'] || '${PROJECT}';
+  console.log(p);
+")
+
 # Verify OAuth credentials for the target project exist before building
 CREDS_DIR="src/agents/${AGENT}/auth"
-if [[ "$PROJECT" == *-dev* ]]; then
+if [[ "$RESOLVED_PROJECT" == *-dev* ]]; then
   SUFFIX="-dev"
 else
   SUFFIX=""

@@ -43,6 +43,7 @@
     }
   },
   "hosting": {
+    "target": "calendar",
     "public": "public",
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
     "redirects": [],

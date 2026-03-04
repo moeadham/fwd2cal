@@ -1,5 +1,6 @@
 import {logger} from "firebase-functions/v2";
 import {getOauthClient} from "../../auth/authHandler";
+import {AGENT_NAME} from "./config";
 import {sendEvent} from "../../util/analytics";
 import {MAX_DRIVE_UPLOAD_BYTES} from "./config";
 import {getSenderFromRawEmail} from "../../util/emailUtils";
@@ -187,7 +188,7 @@ export async function processUpload(
   // Get OAuth client
   let oauth2Client;
   try {
-    oauth2Client = await getOauthClient(uid);
+    oauth2Client = await getOauthClient(uid, AGENT_NAME);
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     logger.error("Drive: OAuth failed during upload", {uid, error: errMsg});

@@ -43,6 +43,7 @@
     }
   },
   "hosting": {
+    "target": "drive",
     "public": "public-drive",
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
     "rewrites": [
@@ -59,23 +60,23 @@
         "destination": "/signin-with-google.png"
       },
       {
-        "source": "/v2/signup",
+        "source": "/drive/v2/signup",
         "function": "v2driveSignup"
       },
       {
-        "source": "/v2/oauthCallback",
+        "source": "/drive/v2/oauthCallback",
         "function": "v2driveOauthCallback"
       },
       {
-        "source": "/v2/inboundCallback",
+        "source": "/drive/v2/inboundCallback",
         "function": "v2driveInboundCallback"
       },
       {
-        "source": "/v2/fullScopeSignup",
+        "source": "/drive/v2/fullScopeSignup",
         "function": "v2driveFullScopeSignup"
       },
       {
-        "source": "/v2/organizeAction",
+        "source": "/drive/v2/organizeAction",
         "function": "v2driveOrganizeAction"
       }
     ]

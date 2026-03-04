@@ -1,5 +1,6 @@
 import {logger} from "firebase-functions/v2";
 import {getOauthClient} from "../../auth/authHandler";
+import {AGENT_NAME} from "./config";
 import {processEmail} from "./llm";
 import {
   addEvent,
@@ -11,9 +12,9 @@ import {sendEmailResend} from "../../util/resend";
 import {getApiUrl} from "../../auth/credentials";
 import {
   ENVIRONMENT_NAME,
-  MAIN_EMAIL_ADDRESS,
   getSupportEmail,
 } from "../../util/config";
+import {AGENT_EMAIL_ADDRESS} from "./config";
 import handleAsync from "../../util/handleAsync";
 import {
   isValidEmail,
@@ -47,7 +48,7 @@ export async function eventHandler(
     documents: ParsedDocument[] = [],
 ): Promise<GoogleCalendarEvent | GoogleCalendarEvent[] | undefined> {
   // Can we authenticate with their calendar?
-  const [oauthErr, oauth2Client] = await handleAsync(() => getOauthClient(uid));
+  const [oauthErr, oauth2Client] = await handleAsync(() => getOauthClient(uid, AGENT_NAME));
   if (oauthErr || !oauth2Client) {
     logger.warn("Error getting OAuth client: ", oauthErr);
     await sendEmailResponse(sender, email, EMAIL_RESPONSES.oauthFailed, true);
@@ -493,7 +494,7 @@ async function addEventsAndSendResponse(
     await sendEmailResponse(sender, email, response, true);
   } else {
     // Multiple events - send custom HTML email
-    const supportEmail = getSupportEmail();
+    const supportEmail = getSupportEmail(AGENT_EMAIL_ADDRESS.value());
     const customHtml = `
 ${successfulEvents.length} events added to your calendar.
 ${responseHtml}
@@ -502,7 +503,7 @@ ${responseHtml}
 
     await sendEmailResend({
       to: sender,
-      from: MAIN_EMAIL_ADDRESS.value(),
+      from: AGENT_EMAIL_ADDRESS.value(),
       subject: `Re: ${email.subject}`,
       html: threadEmailHtml(email, customHtml),
       headers: getEmailThreadHeaders(email.headers),

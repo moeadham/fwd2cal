@@ -16,8 +16,8 @@ import {
 import {signupCallbackHandler, hasRequiredScopes, oauthCronJob} from "../../auth/authHandler";
 import {processInboundWebhook} from "../../resend/webhookUtils";
 import {getAgentCredentials, getRedirectUriIndex} from "../../auth/credentials";
-import {ENVIRONMENT_NAME, getHostingBaseUrl} from "../../util/config";
-import {DRIVE_EMAIL_ADDRESS, DRIVE_RESEND_SIGNING_SECRET} from "./config";
+import {ENVIRONMENT_NAME} from "../../util/config";
+import {AGENT_NAME, AGENT_HOSTING_URL, AGENT_EMAIL_ADDRESS, DRIVE_RESEND_SIGNING_SECRET} from "./config";
 import {TaskRequest} from "../../util/types";
 import {cleanupExpiredDriveFileData} from "../../util/firestoreHandler";
 import {sendEvent} from "../../util/analytics";
@@ -46,7 +46,7 @@ const driveDispatchConfig: TaskQueueOptions = {
 export const v2driveSignup = onRequest(
     onRequestConfig,
     async (req, res) => {
-      const credentials = getAgentCredentials();
+      const credentials = getAgentCredentials(AGENT_NAME);
       const redirectUriIndex = getRedirectUriIndex(ENVIRONMENT_NAME.value());
       const scopes = [
         "https://www.googleapis.com/auth/userinfo.email",
@@ -74,7 +74,7 @@ export const v2driveSignup = onRequest(
 export const v2driveFullScopeSignup = onRequest(
     onRequestConfig,
     async (req, res) => {
-      const credentials = getAgentCredentials();
+      const credentials = getAgentCredentials(AGENT_NAME);
       const redirectUriIndex = getRedirectUriIndex(ENVIRONMENT_NAME.value());
       const scopes = [
         "https://www.googleapis.com/auth/userinfo.email",
@@ -105,6 +105,7 @@ export const v2driveOauthCallback = onRequest(
       try {
         const result = await signupCallbackHandler(
             req.query as Record<string, string>,
+            AGENT_NAME,
         );
         uid = result.user.uid;
         grantedScope = result.grantedScope;
@@ -138,7 +139,7 @@ export const v2driveOauthCallback = onRequest(
         logger.warn("Drive signup: insufficient scopes", {
           uid, grantedScope, requiredScopes,
         });
-        res.redirect(302, `${getHostingBaseUrl()}/insufficient-permissions`);
+        res.redirect(302, `${AGENT_HOSTING_URL.value()}/insufficient-permissions`);
         return;
       }
 
@@ -250,7 +251,7 @@ export const v2driveInboundCallback = onRequest(
     async (req, res) => {
       await processInboundWebhook(
           req, res, "v2driveInboundDispatch",
-          DRIVE_EMAIL_ADDRESS.value(), DRIVE_RESEND_SIGNING_SECRET.value(),
+          AGENT_EMAIL_ADDRESS.value(), DRIVE_RESEND_SIGNING_SECRET.value(),
       );
     },
 );
@@ -262,6 +263,6 @@ export const v2driveRefreshTokensScheduled = onSchedule(
       memory: "512MiB",
     },
     async () => {
-      await oauthCronJob();
+      await oauthCronJob(AGENT_NAME);
     },
 );

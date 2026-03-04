@@ -1,8 +1,20 @@
 {
   "projects": {
     "default": "fwd2cal",
-    "dev": "fwd2cal-dev-2578e",
-    "drive": "fwd2drive",
-    "drive-dev": "fwd2drive-dev"
+    "dev": "fwd2cal-dev-2578e"
+  },
+  "targets": {
+    "fwd2cal": {
+      "hosting": {
+        "calendar": ["fwd2cal"],
+        "drive": ["fwd2drive"]
+      }
+    },
+    "fwd2cal-dev-2578e": {
+      "hosting": {
+        "calendar": ["fwd2cal-dev-2578e"],
+        "drive": ["fwd2drive-dev-e8844"]
+      }
+    }
   }
 }

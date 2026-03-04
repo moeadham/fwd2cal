@@ -3,6 +3,7 @@ import {
   getUserFromEmail, updateDriveFileData,
 } from "../../util/firestoreHandler";
 import {getOauthClient} from "../../auth/authHandler";
+import {AGENT_NAME} from "./config";
 import {sendEvent} from "../../util/analytics";
 import {TransformedEmail} from "../../util/types";
 import {
@@ -40,7 +41,7 @@ export async function handleMoveReply(
 
   let oauth2Client;
   try {
-    oauth2Client = await getOauthClient(uid);
+    oauth2Client = await getOauthClient(uid, AGENT_NAME);
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     logger.error("Drive: OAuth failed for move", {uid, error: errMsg});

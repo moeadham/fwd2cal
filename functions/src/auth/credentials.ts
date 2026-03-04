@@ -1,7 +1,6 @@
 import fs from "fs";
 import path from "path";
 import {GoogleOAuthCredentials, AgentName} from "./types";
-import {AGENT_NAME} from "../util/config";
 
 const isDevProject = process.env.GCLOUD_PROJECT?.includes("-dev") ?? false;
 
@@ -16,8 +15,7 @@ const credentialsFileNames: Record<AgentName, string> = {
 
 const credentialsCache = new Map<AgentName, GoogleOAuthCredentials>();
 
-function getAgentCredentials(): GoogleOAuthCredentials {
-  const agentName = AGENT_NAME.value() as AgentName;
+function getAgentCredentials(agentName: AgentName): GoogleOAuthCredentials {
   const cached = credentialsCache.get(agentName);
   if (cached) return cached;
 

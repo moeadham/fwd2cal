@@ -7,10 +7,6 @@
 
 import {defineString} from "firebase-functions/params";
 
-const AGENT_NAME = defineString("AGENT_NAME", {
-  default: "calendar",
-});
-
 const ENVIRONMENT_NAME = defineString("ENVIRONMENT_NAME", {
   default: "production",
 });
@@ -22,9 +18,6 @@ const RESEND_REGISTERED_USERS_SEGMENT_ID = defineString(
     "RESEND_REGISTERED_USERS_SEGMENT_ID",
 );
 
-const MAIN_EMAIL_ADDRESS = defineString("MAIN_EMAIL_ADDRESS", {
-  default: "calendar@fwd2cal.com",
-});
 
 const SKILL_CONFIDENCE_THRESHOLD = defineString("SKILL_CONFIDENCE_THRESHOLD", {
   default: "0.3",
@@ -67,46 +60,19 @@ function getEmailDomain(email: string): string {
   return email.split("@")[1];
 }
 
-/**
- * Gets the support email address derived from MAIN_EMAIL_ADDRESS domain.
- * Must be called inside a function handler.
- */
-function getSupportEmail(): string {
-  return `support@${getEmailDomain(MAIN_EMAIL_ADDRESS.value())}`;
+function getSupportEmail(agentEmail: string): string {
+  return `support@${getEmailDomain(agentEmail)}`;
 }
 
-/**
- * Gets the admin email address derived from MAIN_EMAIL_ADDRESS domain.
- * Must be called inside a function handler.
- */
-function getAdminEmail(): string {
-  return `admin@${getEmailDomain(MAIN_EMAIL_ADDRESS.value())}`;
+function getAdminEmail(agentEmail: string): string {
+  return `admin@${getEmailDomain(agentEmail)}`;
 }
 
-/**
- * Returns the hosting base URL for the current environment.
- * Must be called inside a function handler.
- */
-function getHostingBaseUrl(): string {
-  if (process.env.FUNCTIONS_EMULATOR === "true") {
-    return "http://localhost:5002";
-  }
-  const project = process.env.GCLOUD_PROJECT ?? "";
-  if (project.includes("-dev")) {
-    return `https://${project}.web.app`;
-  }
-  if (project === "fwd2drive") {
-    return "https://app.fwd2drive.com";
-  }
-  return "https://app.fwd2cal.com";
-}
 
 export {
-  AGENT_NAME,
   ENVIRONMENT_NAME,
   OPENROUTER_API_KEY,
   POSTHOG_API_KEY,
-  MAIN_EMAIL_ADDRESS,
   RESEND_API_KEY,
   RESEND_REGISTERED_USERS_SEGMENT_ID,
   SKILL_CONFIDENCE_THRESHOLD,
@@ -119,5 +85,4 @@ export {
   MAX_TOTAL_DOCUMENT_BYTES,
   getSupportEmail,
   getAdminEmail,
-  getHostingBaseUrl,
 };

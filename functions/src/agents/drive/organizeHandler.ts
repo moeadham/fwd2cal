@@ -8,10 +8,11 @@ import {
   updateOrganizeProposalStatus,
 } from "../../util/firestoreHandler";
 import {getOauthClient} from "../../auth/authHandler";
+import {AGENT_NAME} from "./config";
 import {sendEvent} from "../../util/analytics";
 import {getSupportEmail} from "../../util/config";
 import {
-  DRIVE_EMAIL_ADDRESS,
+  AGENT_EMAIL_ADDRESS,
   DRIVE_ACTION_SIGNING_KEY,
   ORGANIZE_DRIVE_MAX_FILES,
   ORGANIZE_DRIVE_CHUNK_SIZE,
@@ -80,7 +81,7 @@ async function sendOrganizeEmailResponse(
   const threadedHtml = threadEmailHtml(originalEmail, html);
   await sendEmailResend({
     to: sender,
-    from: DRIVE_EMAIL_ADDRESS.value(),
+    from: AGENT_EMAIL_ADDRESS.value(),
     subject: originalEmail.subject || "Re: Organize your Drive",
     html: threadedHtml,
     headers: getEmailThreadHeaders(originalEmail.headers),
@@ -509,7 +510,7 @@ async function scanAndPropose(
 
   let oauth2Client;
   try {
-    oauth2Client = await getOauthClient(uid);
+    oauth2Client = await getOauthClient(uid, AGENT_NAME);
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     logger.error("Drive organize: OAuth failed", {uid, error: errMsg});
@@ -554,12 +555,14 @@ async function scanAndPropose(
   }
 
   // Check for drives that are too large
+  const supportEmail = getSupportEmail(AGENT_EMAIL_ADDRESS.value());
   if (nonFolderFiles.length > maxFiles) {
     await sendOrganizeEmailResponse(sender, email,
         `Your Google Drive has over ${maxFiles.toLocaleString()} files. ` +
         `We currently support drives with up to ${maxFiles.toLocaleString()} files. ` +
         `We're working on expanding this limit!<br><br>` +
-        `You can always ask for help: <a href="mailto:${getSupportEmail()}">${getSupportEmail()}</a>`);
+        `You can always ask for help: ` +
+        `<a href="mailto:${supportEmail}">${supportEmail}</a>`);
     return {
       totalFiles: nonFolderFiles.length, filesToMove: 0, filesToRename: 0,
       totalCost: 0, proposalSent: false, error: "Drive too large",
@@ -737,13 +740,16 @@ async function handleOrganizeApproval(
     return handleOrganizeUndo(email, sender, uid, proposalId, proposalDoc);
   }
 
+  const supportEmail = getSupportEmail(AGENT_EMAIL_ADDRESS.value());
+  const helpLink = `<a href="mailto:${supportEmail}">${supportEmail}</a>`;
+
   if (proposalDoc.status !== "pending" && proposalDoc.status !== "executing") {
     logger.warn("Drive organize: Proposal not pending", {
       proposalId, status: proposalDoc.status,
     });
     const html = `This proposal has already been ${proposalDoc.status}. ` +
       `Send a new &quot;organize my drive&quot; email to create a fresh proposal.` +
-      `<br><br>You can always ask for help: <a href="mailto:${getSupportEmail()}">${getSupportEmail()}</a><br>`;
+      `<br><br>You can always ask for help: ${helpLink}<br>`;
     await sendOrganizeEmailResponse(sender, email, html);
     return emptyResult(`Proposal already ${proposalDoc.status}`);
   }
@@ -753,7 +759,7 @@ async function handleOrganizeApproval(
     logger.warn("Drive organize: Proposal expired", {proposalId});
     const html = `This proposal has expired. ` +
       `Send a new &quot;organize my drive&quot; email to create a fresh proposal.` +
-      `<br><br>You can always ask for help: <a href="mailto:${getSupportEmail()}">${getSupportEmail()}</a><br>`;
+      `<br><br>You can always ask for help: ${helpLink}<br>`;
     await sendOrganizeEmailResponse(sender, email, html);
     return emptyResult("Proposal expired");
   }
@@ -764,7 +770,7 @@ async function handleOrganizeApproval(
   // Get OAuth client
   let oauth2Client;
   try {
-    oauth2Client = await getOauthClient(uid);
+    oauth2Client = await getOauthClient(uid, AGENT_NAME);
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     logger.error("Drive organize approval: OAuth failed", {uid, error: errMsg});
@@ -807,7 +813,7 @@ async function handleOrganizeApproval(
     const html = `We ran into some issues while organizing your Drive and ` +
       `have reverted all changes. Your files are back where they were.` +
       `<br><br>Please try again by sending a new &quot;organize my drive&quot; email.` +
-      `<br><br>You can always ask for help: <a href="mailto:${getSupportEmail()}">${getSupportEmail()}</a><br>`;
+      `<br><br>You can always ask for help: ${helpLink}<br>`;
     await sendOrganizeEmailResponse(sender, email, html);
 
     sendEvent(uid, "driveOrganizeFailed", {
@@ -1148,10 +1154,13 @@ async function handleOrganizeUndo(
 ): Promise<OrganizeProcessingResult> {
   const snapshot = proposalDoc.snapshot;
 
+  const supportEmail = getSupportEmail(AGENT_EMAIL_ADDRESS.value());
+  const helpLink = `<a href="mailto:${supportEmail}">${supportEmail}</a>`;
+
   if (!snapshot || snapshot.length === 0) {
     logger.warn("Drive organize undo: No snapshot found", {proposalId});
     const html = `Unable to undo &mdash; no snapshot was saved for this proposal.` +
-      `<br><br>You can always ask for help: <a href="mailto:${getSupportEmail()}">${getSupportEmail()}</a><br>`;
+      `<br><br>You can always ask for help: ${helpLink}<br>`;
     await sendOrganizeEmailResponse(sender, email, html);
     return emptyResult("No snapshot");
   }
@@ -1162,7 +1171,7 @@ async function handleOrganizeUndo(
     const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
     if (new Date().getTime() - new Date(completedAt).getTime() > thirtyDaysMs) {
       const html = `The 30-day undo window has expired for this proposal.` +
-        `<br><br>You can always ask for help: <a href="mailto:${getSupportEmail()}">${getSupportEmail()}</a><br>`;
+        `<br><br>You can always ask for help: ${helpLink}<br>`;
       await sendOrganizeEmailResponse(sender, email, html);
       return emptyResult("Undo window expired");
     }
@@ -1170,7 +1179,7 @@ async function handleOrganizeUndo(
 
   let oauth2Client;
   try {
-    oauth2Client = await getOauthClient(uid);
+    oauth2Client = await getOauthClient(uid, AGENT_NAME);
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     logger.error("Drive organize undo: OAuth failed", {uid, error: errMsg});
