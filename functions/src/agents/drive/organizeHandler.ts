@@ -13,10 +13,11 @@ import {getSupportEmail} from "../../util/config";
 import {
   DRIVE_EMAIL_ADDRESS,
   DRIVE_ACTION_SIGNING_KEY,
-  ORGANIZE_DRIVE_COST_PER_FILE,
   ORGANIZE_DRIVE_MAX_FILES,
-  ORGANIZE_DRIVE_MAX_PREVIEW_ROWS,
   ORGANIZE_DRIVE_CHUNK_SIZE,
+  ORGANIZE_DRIVE_TEXT_MAX_TOKENS,
+  ORGANIZE_DRIVE_IMAGE_MAX_TOKENS,
+  ORGANIZE_DRIVE_COST_PER_M_INPUT_TOKENS,
 } from "./config";
 import {
   getSenderFromRawEmail,
@@ -25,7 +26,7 @@ import {
   threadEmailHtml,
 } from "../../util/emailUtils";
 import {sendEmailResend} from "../../util/resend";
-import {TransformedEmail, ResendOutboundAttachment} from "../../util/types";
+import {TransformedEmail} from "../../util/types";
 import {applyTemplate} from "./driveUtils";
 import {
   DriveFileEntry,
@@ -75,7 +76,6 @@ async function sendOrganizeEmailResponse(
     sender: string,
     originalEmail: TransformedEmail,
     html: string,
-    attachments?: ResendOutboundAttachment[],
 ): Promise<void> {
   const threadedHtml = threadEmailHtml(originalEmail, html);
   await sendEmailResend({
@@ -84,7 +84,6 @@ async function sendOrganizeEmailResponse(
     subject: originalEmail.subject || "Re: Organize your Drive",
     html: threadedHtml,
     headers: getEmailThreadHeaders(originalEmail.headers),
-    attachments,
   });
 }
 
@@ -214,12 +213,33 @@ function buildDriveStructureSummary(
 }
 
 /**
- * Calculate the cost of the proposed reorganization.
+ * Check if a MIME type represents an image file.
+ */
+function isImageMimeType(mimeType: string): boolean {
+  return mimeType.startsWith("image/");
+}
+
+/**
+ * Calculate the cost of the proposed reorganization based on file type.
+ * Text documents are costed by max tokens in 2 pages; images by max OCR tokens.
  */
 function calculateOrganizeCost(
     proposal: DriveOrganizeProposal,
+    fileEntries: DriveFileEntry[],
 ): OrganizeCostBreakdown {
-  const costPerFile = parseFloat(ORGANIZE_DRIVE_COST_PER_FILE.value());
+  const textMaxTokens = ORGANIZE_DRIVE_TEXT_MAX_TOKENS.value();
+  const imageMaxTokens = ORGANIZE_DRIVE_IMAGE_MAX_TOKENS.value();
+  const costPerMTokens = parseFloat(ORGANIZE_DRIVE_COST_PER_M_INPUT_TOKENS.value());
+
+  const costPerTextFile = (textMaxTokens * costPerMTokens) / 1_000_000;
+  const costPerImageFile = (imageMaxTokens * costPerMTokens) / 1_000_000;
+
+  // Build file_id → mimeType lookup
+  const mimeMap = new Map<string, string>();
+  for (const entry of fileEntries) {
+    mimeMap.set(entry.id, entry.mimeType);
+  }
+
   const actions = proposal.file_actions;
   const filesToMove = actions.filter(
       (a) => a.action === "move" || a.action === "move_and_rename",
@@ -228,15 +248,32 @@ function calculateOrganizeCost(
       (a) => a.action === "rename" || a.action === "move_and_rename",
   ).length;
   const filesToKeep = actions.filter((a) => a.action === "keep").length;
-  const filesToChange = actions.filter((a) => a.action !== "keep").length;
+  const changedActions = actions.filter((a) => a.action !== "keep");
+
+  let textFiles = 0;
+  let imageFiles = 0;
+  for (const action of changedActions) {
+    const mime = mimeMap.get(action.file_id) || "";
+    if (isImageMimeType(mime)) {
+      imageFiles++;
+    } else {
+      textFiles++;
+    }
+  }
+
+  const totalCost =
+    textFiles * costPerTextFile + imageFiles * costPerImageFile;
 
   return {
     totalFiles: actions.length,
     filesToMove,
     filesToRename,
     filesToKeep,
-    costPerFile,
-    totalCost: filesToChange * costPerFile,
+    textFiles,
+    imageFiles,
+    costPerTextFile,
+    costPerImageFile,
+    totalCost,
   };
 }
 
@@ -261,65 +298,6 @@ function renderFolderTree(proposal: DriveOrganizeProposal): string {
     }
   }
   return tree;
-}
-
-/**
- * Render file changes preview as HTML table.
- */
-function renderFileChangesPreview(
-    proposal: DriveOrganizeProposal,
-): string {
-  const maxPreviewRows = ORGANIZE_DRIVE_MAX_PREVIEW_ROWS.value();
-  const changes = proposal.file_actions.filter((a) => a.action !== "keep");
-  const shown = changes.slice(0, maxPreviewRows);
-
-  let html = "<table style=\"width:100%;border-collapse:collapse;font-size:13px;\">";
-  html += "<tr style=\"border-bottom:1px solid #eee;\">" +
-    "<th style=\"text-align:left;padding:4px 8px;\">Current</th>" +
-    "<th style=\"text-align:left;padding:4px 8px;\">Proposed</th></tr>";
-
-  for (const change of shown) {
-    html += "<tr style=\"border-bottom:1px solid #f5f5f5;\">";
-    html += `<td style="padding:4px 8px;color:#999;">${change.current_path}/${change.current_name}</td>`;
-    html += `<td style="padding:4px 8px;"><b>${change.new_folder}/${change.new_name}</b></td>`;
-    html += "</tr>";
-  }
-
-  html += "</table>";
-
-  if (changes.length > maxPreviewRows) {
-    html += `<br><em>...and ${changes.length - maxPreviewRows} more files</em>`;
-  }
-
-  return html;
-}
-
-/**
- * Escape a value for CSV (double-quote if it contains commas, quotes, or newlines).
- */
-function csvEscape(value: string): string {
-  if (value.includes(",") || value.includes("\"") || value.includes("\n")) {
-    return `"${value.replace(/"/g, "\"\"")}"`;
-  }
-  return value;
-}
-
-/**
- * Generate a CSV string from the full proposal (all file actions).
- */
-function buildProposalCsv(proposal: DriveOrganizeProposal): string {
-  const header = "Action,Current Path,Current Name,New Folder,New Name,Reason";
-  const rows = proposal.file_actions.map((a) =>
-    [
-      csvEscape(a.action),
-      csvEscape(a.current_path),
-      csvEscape(a.current_name),
-      csvEscape(a.new_folder),
-      csvEscape(a.new_name),
-      csvEscape(a.reason),
-    ].join(","),
-  );
-  return header + "\n" + rows.join("\n");
 }
 
 /**
@@ -622,7 +600,7 @@ async function scanAndPropose(
   proposal.file_actions.push(...folderRenameActions);
 
   // Calculate cost
-  const cost = calculateOrganizeCost(proposal);
+  const cost = calculateOrganizeCost(proposal, nonFolderFiles);
 
   // Save proposal to Firestore
   let proposalId: string;
@@ -655,7 +633,6 @@ async function scanAndPropose(
 
   // Render proposal email
   const folderTreeHtml = renderFolderTree(proposal);
-  const fileChangesHtml = renderFileChangesPreview(proposal);
 
   const approveToken = signActionToken(proposalId, "approve");
   const approveLink = `${driveOrganizeActionUrl}?proposalId=${proposalId}&action=approve&token=${approveToken}`;
@@ -666,22 +643,16 @@ async function scanAndPropose(
     FILES_TO_CHANGE: String(cost.totalFiles - cost.filesToKeep),
     FILES_TO_KEEP: String(cost.filesToKeep),
     FOLDER_TREE: folderTreeHtml,
-    FILE_CHANGES_PREVIEW: fileChangesHtml,
     TOTAL_COST: `$${cost.totalCost.toFixed(2)}`,
-    COST_PER_FILE: `$${cost.costPerFile.toFixed(2)}`,
+    TEXT_FILES: String(cost.textFiles),
+    TEXT_COST: `$${(cost.textFiles * cost.costPerTextFile).toFixed(2)}`,
+    IMAGE_FILES: String(cost.imageFiles),
+    IMAGE_COST: `$${(cost.imageFiles * cost.costPerImageFile).toFixed(2)}`,
     EMBEDDED_DATA: embeddedHtml,
     APPROVE_LINK: approveLink,
   });
 
-  // Build CSV attachment with the full proposal
-  const csvContent = buildProposalCsv(proposal);
-  const csvAttachment: ResendOutboundAttachment = {
-    content: Buffer.from(csvContent, "utf-8"),
-    filename: "drive-reorganization-proposal.csv",
-    content_type: "text/csv",
-  };
-
-  await sendOrganizeEmailResponse(sender, email, html, [csvAttachment]);
+  await sendOrganizeEmailResponse(sender, email, html);
 
   sendEvent(uid, "driveOrganizeProposed", {
     totalFiles: String(cost.totalFiles),

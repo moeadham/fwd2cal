@@ -162,7 +162,10 @@ export interface OrganizeCostBreakdown {
   filesToMove: number;
   filesToRename: number;
   filesToKeep: number;
-  costPerFile: number;
+  textFiles: number;
+  imageFiles: number;
+  costPerTextFile: number;
+  costPerImageFile: number;
   totalCost: number;
 }
 

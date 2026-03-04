@@ -127,12 +127,7 @@ Once authorized, you can forward emails with attachments to <a href="mailto:driv
 </div>
 <br>
 <hr style="border:none;border-top:1px solid #eee;margin:16px 0;">
-<b>File changes preview:</b>
-<br><br>
-%FILE_CHANGES_PREVIEW%
-<br>
-<hr style="border:none;border-top:1px solid #eee;margin:16px 0;">
-<b>Cost:</b> %TOTAL_COST% (%COST_PER_FILE% per file &times; %FILES_TO_CHANGE% files)
+<b>Cost:</b> %TOTAL_COST% (%TEXT_FILES% text files: %TEXT_COST% | %IMAGE_FILES% images: %IMAGE_COST%)
 <br><br>
 <a href="%APPROVE_LINK%" style="display:inline-block; padding:10px 20px; margin:5px 0; background-color:#3498db; color:white; text-align:center; text-decoration:none; font-weight:bold; border-radius:5px; border:none; cursor:pointer;">Approve &amp; Organize</a>
 <br><br>
