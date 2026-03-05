@@ -60,6 +60,17 @@ function generateTimeObject(
     primaryCalendar: GoogleCalendar | MappedCalendar,
     uid: string,
 ): TimeObject {
+  // All-day event: no start_time
+  if (!event.start_time) {
+    const startDate = moment(event.date, "DD MMMM YYYY").format("YYYY-MM-DD");
+    // Google Calendar all-day events use exclusive end date
+    const endDate = moment(event.date, "DD MMMM YYYY").add(1, "day").format("YYYY-MM-DD");
+    return {
+      start: {date: startDate},
+      end: {date: endDate},
+    };
+  }
+
   const timezone = primaryCalendar.timeZone;
   let eventTimeZone = event.timeZone || timezone;
   logger.debug(
@@ -243,14 +254,12 @@ async function addEvent(
     htmlLink: insertEvent.htmlLink || "",
     summary: insertEvent.summary || "",
     description: insertEvent.description,
-    start: {
-      dateTime: insertEvent.start?.dateTime || "",
-      timeZone: insertEvent.start?.timeZone || "",
-    },
-    end: {
-      dateTime: insertEvent.end?.dateTime || "",
-      timeZone: insertEvent.end?.timeZone || "",
-    },
+    start: insertEvent.start?.date ?
+      {date: insertEvent.start.date} :
+      {dateTime: insertEvent.start?.dateTime || "", timeZone: insertEvent.start?.timeZone || ""},
+    end: insertEvent.end?.date ?
+      {date: insertEvent.end.date} :
+      {dateTime: insertEvent.end?.dateTime || "", timeZone: insertEvent.end?.timeZone || ""},
     attendees: insertEvent.attendees?.map((a) => ({
       email: a.email || "",
       responseStatus: a.responseStatus,

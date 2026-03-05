@@ -28,6 +28,7 @@ import {
   emailWithImageAttachment,
   familyEvent,
   workEventVisibl,
+  allDayEvent,
 } from "./bindings/resendBindings";
 
 // Using Resend for email service
@@ -456,6 +457,40 @@ describe(`fwd2cal (${EMAIL_SERVICE.toUpperCase()})`, function() {
       console.log(`Event added to calendar: ${(res.body.data as { calendarId: string }).calendarId}`);
       expect((res.body.data as { calendarId: string }).calendarId).to.include("visibl.ai");
     }
+  });
+
+  it("UT14.7 all-day event (date with no time)", async function() {
+    const testMessage = allDayEvent;
+    const res = await sendResendWebhook(testMessage);
+    expect(res).to.have.status(200);
+    console.log(res.body);
+    expect(res.body).to.be.an("object");
+    // Should successfully create an event
+    expect(res.body.data).to.not.have.property("error");
+    expect((res.body.data as { kind: string }).kind).to.equal("calendar#event");
+
+    // Should be an all-day event (start.date instead of start.dateTime)
+    const data = res.body.data as { start: { date?: string; dateTime?: string }; end: { date?: string; dateTime?: string } };
+    expect(data.start).to.have.property("date");
+    expect(data.start.date).to.be.a("string");
+    expect(data.start.date).to.match(/^\d{4}-\d{2}-\d{2}$/); // YYYY-MM-DD format
+    expect(data.start).to.not.have.property("dateTime");
+    expect(data.end).to.have.property("date");
+    expect(data.end.date).to.be.a("string");
+
+    // Verify sent email doesn't include a time in the date line
+    expect(res.body.sentEmail).to.be.an("object");
+    expect(res.body.sentEmail.html).to.be.a("string");
+    expect(res.body.sentEmail.html).to.include("Event added");
+    // Date line should show date only, not "at HH:MM AM/PM"
+    const dateLineMatch = (res.body.sentEmail.html as string).match(/Date: ([^\n<]+)/);
+    expect(dateLineMatch).to.not.be.null;
+    expect(dateLineMatch![1]).to.not.match(/at \d+:\d+/);
+
+    // Verify threading headers
+    const incomingMessageId = testMessage.emailContent.headers["message-id"];
+    expect(res.body.sentEmail.headers["In-Reply-To"]).to.equal(incomingMessageId);
+    expect(res.body.sentEmail.headers["References"]).to.equal(`<original-message-allday> ${incomingMessageId}`);
   });
 
   it("UT14.5 insufficient permissions sends oauthFailed email", async function() {

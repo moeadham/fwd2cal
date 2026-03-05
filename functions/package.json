@@ -11,6 +11,7 @@
     "serve:drive": "npm run build && firebase emulators:start --config ../firebase.drive.json --project fwd2cal-dev-2578e",
     "shell": "npm run build && firebase functions:shell",
     "start": "npm run shell",
+    "deploy": "./scripts/deploy-agent.sh calendar && ./scripts/deploy-agent.sh drive",
     "deploy:calendar": "./scripts/deploy-agent.sh calendar",
     "deploy:drive": "./scripts/deploy-agent.sh drive",
     "logs": "firebase functions:log",

@@ -803,6 +803,54 @@ Sarah`,
   },
 );
 
+// Test: All-day event (email with date but no time)
+const allDayEvent: ResendTestData = createResendTestData(
+  {
+    type: "email.received",
+    created_at: new Date().toISOString(),
+    data: {
+      email_id: "test-allday",
+      message_id: `<test-allday-${Date.now()}@mail.gmail.com>`,
+      from: TESTER_PRIMARY_GOOGLE_ACCT,
+      to: [MAIN_EMAIL_ADDRESS],
+      cc: [],
+      bcc: [],
+      subject: "Fwd: Appointment Reminder",
+      created_at: new Date().toISOString(),
+      attachments: [],
+    },
+  },
+  {
+    id: "test-allday",
+    subject: "Fwd: Appointment Reminder",
+    from: TESTER_PRIMARY_GOOGLE_ACCT,
+    to: [MAIN_EMAIL_ADDRESS],
+    html: `<div dir="ltr"><br><div class="gmail_quote"><div dir="ltr" class="gmail_attr">---------- Forwarded message ---------<br>From: <strong class="gmail_sendername" dir="auto">Smile Dental</strong> <span dir="auto">&lt;<a href="mailto:noreply@smiledental.com">noreply@smiledental.com</a>&gt;</span><br>Date: Mon, Mar 3, 2025 at 9:00 AM<br>Subject: Appointment Reminder<br>To: &lt;<a href="mailto:${TESTER_PRIMARY_GOOGLE_ACCT}">${TESTER_PRIMARY_GOOGLE_ACCT}</a>&gt;<br></div><br><p>This is a reminder that you have a dental appointment on March 15, 2026.</p><p>Please arrive 10 minutes early.</p><p>Smile Dental<br>123 Main St, Chicago, IL 60601</p></div></div>`,
+    text: `---------- Forwarded message ---------
+From: Smile Dental <noreply@smiledental.com>
+Date: Mon, Mar 3, 2025 at 9:00 AM
+Subject: Appointment Reminder
+To: ${TESTER_PRIMARY_GOOGLE_ACCT}
+
+This is a reminder that you have a dental appointment on March 15, 2026.
+
+Please arrive 10 minutes early.
+
+Smile Dental
+123 Main St, Chicago, IL 60601`,
+    headers: {
+      "authentication-results": generateAuthHeader(TESTER_PRIMARY_GOOGLE_ACCT),
+      "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
+      "to": MAIN_EMAIL_ADDRESS,
+      "subject": "Fwd: Appointment Reminder",
+      "date": "Mon, 3 Mar 2025 10:00:00 +0000",
+      "message-id": `<test-allday-${Date.now()}@mail.gmail.com>`,
+      "in-reply-to": "<original-message-allday>",
+      "references": "<original-message-allday>",
+    },
+  },
+);
+
 // ============================================================================
 // DRIVE AGENT TEST DATA
 // ============================================================================
@@ -1063,6 +1111,7 @@ export {
   emailWithImageAttachment,
   familyEvent,
   workEventVisibl,
+  allDayEvent,
   driveDeleteAccount,
   driveSignup,
   driveEmailWithPDF,

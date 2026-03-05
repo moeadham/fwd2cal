@@ -256,8 +256,17 @@ export async function eventHandler(
 }
 
 function validateEventTimes(event: Event): EventValidationResult {
-  if (!event.date || !event.start_time) {
-    return {isValid: false, error: "Missing required date or start_time"};
+  if (!event.date) {
+    return {isValid: false, error: "Missing required date"};
+  }
+
+  // All-day event (no start_time) - just validate the date parses
+  if (!event.start_time) {
+    const dateOnly = moment(event.date, "DD MMMM YYYY");
+    if (!dateOnly.isValid()) {
+      return {isValid: false, error: `Invalid date: ${event.date}`};
+    }
+    return {isValid: true};
   }
 
   // Try to parse the start time
@@ -389,9 +398,11 @@ async function addEventsAndSendResponse(
   let responseHtml = "";
 
   for (const eventObject of successfulEvents) {
-    const eventDate = moment(eventObject.start.dateTime)
-        .tz(eventObject.start.timeZone)
-        .format("dddd, MMMM Do [at] h:mm A z");
+    const eventDate = eventObject.start.date ?
+        moment(eventObject.start.date).format("dddd, MMMM Do, YYYY") :
+        moment(eventObject.start.dateTime)
+            .tz(eventObject.start.timeZone!)
+            .format("dddd, MMMM Do [at] h:mm A z");
 
     responseHtml += `<p><strong>${eventObject.summary}</strong><br>`;
     responseHtml += `Date: ${eventDate}<br>`;
@@ -467,9 +478,11 @@ async function addEventsAndSendResponse(
         ...EMAIL_RESPONSES.eventAddedAttendees,
         replace: {
           EVENT_LINK: eventObject.htmlLink,
-          EVENT_DATE: moment(eventObject.start.dateTime)
-              .tz(eventObject.start.timeZone)
-              .format("dddd, MMMM Do, YYYY [at] h:mm A z"),
+          EVENT_DATE: eventObject.start.date ?
+              moment(eventObject.start.date).format("dddd, MMMM Do, YYYY") :
+              moment(eventObject.start.dateTime)
+                  .tz(eventObject.start.timeZone!)
+                  .format("dddd, MMMM Do, YYYY [at] h:mm A z"),
           INVITE_LINK: eventObject.inviteOthersLink,
           EVENT_ATTENDEES: inviteesWithoutHost.join(", "),
           CALENDAR_NAME: calendarNameText,
@@ -480,9 +493,11 @@ async function addEventsAndSendResponse(
         ...EMAIL_RESPONSES.eventAdded,
         replace: {
           EVENT_LINK: eventObject.htmlLink,
-          EVENT_DATE: moment(eventObject.start.dateTime)
-              .tz(eventObject.start.timeZone)
-              .format("dddd, MMMM Do, YYYY [at] h:mm A z"),
+          EVENT_DATE: eventObject.start.date ?
+              moment(eventObject.start.date).format("dddd, MMMM Do, YYYY") :
+              moment(eventObject.start.dateTime)
+                  .tz(eventObject.start.timeZone!)
+                  .format("dddd, MMMM Do, YYYY [at] h:mm A z"),
           EVENT_ATTENDEES: eventObject.attendees ?
             eventObject.attendees.map((attendee) => attendee.email).join(", ") :
             "",

@@ -75,9 +75,10 @@ async function proposeFilePlacement(
     {role: "user", content: userContent},
   ];
 
-  logger.debug("Calling LLM for file placement proposal", {
-    fileCount: files.length,
-    agentFolderCount: agentFolderNames.length,
+  logger.info("File placement proposal prompt", {
+    system: prompts.proposeFilePlacement.prompt,
+    user: userText,
+    imageCount: imageUrls.length,
   });
 
   const result = await defaultCompletion<FileProposal>(
