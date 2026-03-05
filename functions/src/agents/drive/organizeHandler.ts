@@ -28,7 +28,7 @@ import {
 } from "../../util/emailUtils";
 import {sendEmailResend} from "../../util/resend";
 import {TransformedEmail} from "../../util/types";
-import {applyTemplate} from "./driveUtils";
+import {applyTemplate, isDriveAuthError} from "./driveUtils";
 import {
   DriveFileEntry,
   DriveOrganizeProposal,
@@ -514,6 +514,9 @@ async function scanAndPropose(
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     logger.error("Drive organize: OAuth failed", {uid, error: errMsg});
+    if (isDriveAuthError(errMsg)) {
+      return sendOrganizeAuthRequiredEmail(email, sender, emailId);
+    }
     const html = applyTemplate(driveMailTemplates.organizeError.html, {});
     await sendOrganizeEmailResponse(sender, email, html);
     return emptyResult("OAuth failed");
@@ -529,6 +532,9 @@ async function scanAndPropose(
     logger.error("Drive organize: Failed to list files", {
       uid, error: errMsg,
     });
+    if (isDriveAuthError(errMsg)) {
+      return sendOrganizeAuthRequiredEmail(email, sender, emailId);
+    }
     const html = applyTemplate(driveMailTemplates.organizeError.html, {});
     await sendOrganizeEmailResponse(sender, email, html);
     return emptyResult("Drive scan failed");
@@ -775,6 +781,9 @@ async function handleOrganizeApproval(
     const errMsg = error instanceof Error ? error.message : String(error);
     logger.error("Drive organize approval: OAuth failed", {uid, error: errMsg});
     await updateOrganizeProposalStatus(proposalId, "pending");
+    if (isDriveAuthError(errMsg)) {
+      return sendOrganizeAuthRequiredEmail(email, sender, proposalDoc.emailId);
+    }
     const html = applyTemplate(driveMailTemplates.organizeError.html, {});
     await sendOrganizeEmailResponse(sender, email, html);
     return emptyResult("OAuth failed");
@@ -791,6 +800,9 @@ async function handleOrganizeApproval(
       proposalId, error: errMsg,
     });
     await updateOrganizeProposalStatus(proposalId, "pending");
+    if (isDriveAuthError(errMsg)) {
+      return sendOrganizeAuthRequiredEmail(email, sender, proposalDoc.emailId);
+    }
     const html = applyTemplate(driveMailTemplates.organizeError.html, {});
     await sendOrganizeEmailResponse(sender, email, html);
     return emptyResult("Execution failed");
@@ -1183,6 +1195,9 @@ async function handleOrganizeUndo(
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     logger.error("Drive organize undo: OAuth failed", {uid, error: errMsg});
+    if (isDriveAuthError(errMsg)) {
+      return sendOrganizeAuthRequiredEmail(email, sender, proposalDoc.emailId);
+    }
     const html = applyTemplate(driveMailTemplates.organizeError.html, {});
     await sendOrganizeEmailResponse(sender, email, html);
     return emptyResult("OAuth failed");

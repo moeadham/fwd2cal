@@ -21,6 +21,7 @@ import {
   toTitleCase, getExtension, ensureDatePrefix,
   applyTemplate, sendDriveEmailResponse, getNextFolderPrefix,
   buildEmbeddedDriveData, buildFileInfos, callProposalWithFallback,
+  isDriveAuthError,
 } from "./driveUtils";
 import {Auth} from "googleapis";
 
@@ -210,7 +211,20 @@ export async function processUpload(
   }
 
   // Get agent-managed folders
-  const agentFolders = await findAgentManagedFolders(oauth2Client);
+  let agentFolders;
+  try {
+    agentFolders = await findAgentManagedFolders(oauth2Client);
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    if (isDriveAuthError(errMsg)) {
+      logger.warn("Drive: Auth error fetching agent folders", {uid, error: errMsg});
+      const html = applyTemplate(driveMailTemplates.driveAuthFailed.html, {});
+      await sendDriveEmailResponse(sender, originalEmail, html);
+      sendEvent(uid, "driveAuthFailed");
+      return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: [], error: "Auth failed"};
+    }
+    throw error;
+  }
   const agentFolderNames = agentFolders.map((f) => f.name);
   const nextPrefix = getNextFolderPrefix(agentFolderNames);
 
@@ -245,16 +259,37 @@ export async function processUpload(
   try {
     rootFolderId = await getRootFolderId(oauth2Client);
   } catch (err) {
-    logger.debug("Drive: Could not get root folder ID, using 'root'", {
-      error: err instanceof Error ? err.message : String(err),
-    });
+    const errMsg = err instanceof Error ? err.message : String(err);
+    if (isDriveAuthError(errMsg)) {
+      logger.warn("Drive: Auth error fetching root folder", {uid, error: errMsg});
+      const html = applyTemplate(driveMailTemplates.driveAuthFailed.html, {});
+      await sendDriveEmailResponse(sender, originalEmail, html);
+      sendEvent(uid, "driveAuthFailed");
+      return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: [], error: "Auth failed"};
+    }
+    logger.debug("Drive: Could not get root folder ID, using 'root'", {error: errMsg});
     rootFolderId = "root";
   }
 
-  const {folderId: targetFolderId, folderPath: targetFolderPath} =
-    await resolveTargetFolder(
+  let targetFolderId: string;
+  let targetFolderPath: string;
+  try {
+    const resolved = await resolveTargetFolder(
         oauth2Client, proposal, agentFolders, nextPrefix, rootFolderId,
     );
+    targetFolderId = resolved.folderId;
+    targetFolderPath = resolved.folderPath;
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    if (isDriveAuthError(errMsg)) {
+      logger.warn("Drive: Auth error resolving target folder", {uid, error: errMsg});
+      const html = applyTemplate(driveMailTemplates.driveAuthFailed.html, {});
+      await sendDriveEmailResponse(sender, originalEmail, html);
+      sendEvent(uid, "driveAuthFailed");
+      return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: [], error: "Auth failed"};
+    }
+    throw error;
+  }
 
   // Upload all files in parallel
   const results = await uploadAttachments(

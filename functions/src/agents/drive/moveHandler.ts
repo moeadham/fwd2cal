@@ -20,7 +20,7 @@ import {interpretMoveInstructions} from "./llm";
 import {
   toTitleCase, applyTemplate, sendDriveEmailResponse,
   getNextFolderPrefix, buildEmbeddedDriveHtml,
-  buildEmbeddedDriveData, findFolderByName,
+  buildEmbeddedDriveData, findFolderByName, isDriveAuthError,
 } from "./driveUtils";
 
 /**
@@ -55,13 +55,32 @@ export async function handleMoveReply(
   try {
     folderTree = await getDriveFolderTree(oauth2Client);
   } catch (err) {
-    logger.debug("Drive: Could not fetch folder tree", {
-      error: err instanceof Error ? err.message : String(err),
-    });
+    const errMsg = err instanceof Error ? err.message : String(err);
+    if (isDriveAuthError(errMsg)) {
+      logger.warn("Drive: Auth error fetching folder tree", {uid, error: errMsg});
+      const html = applyTemplate(driveMailTemplates.driveAuthFailed.html, {});
+      await sendDriveEmailResponse(sender, email, html);
+      sendEvent(uid, "driveAuthFailed");
+      return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: [], error: "Auth failed"};
+    }
+    logger.debug("Drive: Could not fetch folder tree", {error: errMsg});
     folderTree = [];
   }
 
-  const agentFolders = await findAgentManagedFolders(oauth2Client);
+  let agentFolders;
+  try {
+    agentFolders = await findAgentManagedFolders(oauth2Client);
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    if (isDriveAuthError(errMsg)) {
+      logger.warn("Drive: Auth error fetching agent folders", {uid, error: errMsg});
+      const html = applyTemplate(driveMailTemplates.driveAuthFailed.html, {});
+      await sendDriveEmailResponse(sender, email, html);
+      sendEvent(uid, "driveAuthFailed");
+      return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: [], error: "Auth failed"};
+    }
+    throw err;
+  }
 
   // LLM: interpret move instructions (only agent-managed folders)
   const replyText = email.text || "";
@@ -254,6 +273,16 @@ export async function handleMoveReply(
       }
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
+      if (isDriveAuthError(errMsg)) {
+        logger.warn("Drive: Auth error during move", {uid, fileId: file.id, error: errMsg});
+        const html = applyTemplate(driveMailTemplates.driveAuthFailed.html, {});
+        await sendDriveEmailResponse(sender, email, html);
+        sendEvent(uid, "driveAuthFailed");
+        return {
+          filesProcessed: files.length, filesSucceeded: 0,
+          filesFailed: files.length, results: [], error: "Auth failed",
+        };
+      }
       logger.error("Drive: Failed to move file", {
         fileId: file.id, error: errMsg,
       });

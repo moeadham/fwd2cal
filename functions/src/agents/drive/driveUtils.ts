@@ -15,6 +15,18 @@ import {downloadAttachmentBuffer, extractContentSummary, extractDocumentImageUrl
 import {proposeFilePlacement} from "./llm";
 
 /**
+ * Check if an error message indicates an OAuth/authentication failure.
+ * Matches the same error strings as the calendar agent's isAuthError check.
+ */
+export function isDriveAuthError(errMsg: string): boolean {
+  return errMsg.includes("invalid_grant") ||
+    errMsg.includes("Token has been expired") ||
+    errMsg.includes("No refresh token") ||
+    errMsg.includes("Insufficient Permission") ||
+    errMsg.includes("unauthorized_client");
+}
+
+/**
  * Convert a string to Title Case (e.g. "tax documents" → "Tax Documents").
  * Preserves existing NNN- prefixes if present.
  */

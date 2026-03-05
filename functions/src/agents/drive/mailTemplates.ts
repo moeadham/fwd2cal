@@ -1,5 +1,6 @@
 /* eslint-disable max-len */
 import {DriveMailTemplates} from "./types";
+import {AGENT_HOSTING_URL} from "./config";
 
 const isDevProject = process.env.GCLOUD_PROJECT?.includes("-dev") ?? false;
 const devFunctionsBase = `https://us-central1-${process.env.GCLOUD_PROJECT}.cloudfunctions.net`;
@@ -76,6 +77,9 @@ const driveMailTemplates: DriveMailTemplates = {
   },
   driveAuthFailed: {
     html: `Sorry - there was an issue authenticating with Google Drive. Please click <a href="${driveSignupUrl}">to authorize Google Drive again</a>, and then forward your file another time.
+
+Make sure you complete the checkbox to allow fwd2drive to access your Google Drive.
+<img src="${AGENT_HOSTING_URL.value()}/fwd2drivePermissions.png" alt="Google Permissions" width="394" style="display: block;">
 
 <br><br><b>Did you know?</b> fwd2drive can organize your entire drive. Just email &quot;organize my drive please&quot; to <a href="mailto:drive@fwd2drive.com">drive@fwd2drive.com</a>.
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
