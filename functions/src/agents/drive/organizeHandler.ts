@@ -3,6 +3,7 @@ import {logger} from "firebase-functions/v2";
 import {
   getUserFromEmail,
   getUserFromUID,
+  DRIVE_USERS_COLLECTION,
   saveOrganizeProposal,
   getOrganizeProposal,
   updateOrganizeProposalStatus,
@@ -434,7 +435,7 @@ async function handleOrganizeDrive(
 
   let userData;
   try {
-    userData = await getUserFromUID(uid);
+    userData = await getUserFromUID(uid, DRIVE_USERS_COLLECTION);
   } catch (err) {
     logger.debug("Drive organize: User lookup failed", {
       uid, error: err instanceof Error ? err.message : String(err),

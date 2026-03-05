@@ -5,6 +5,7 @@ import {
   addUserEmailAddress,
   updateUserTokens,
   getPendingEmailAddressByCode,
+  getCollectionForAgent,
 } from "../util/firestoreHandler";
 import {google, Auth} from "googleapis";
 import {getAgentCredentials, getRedirectUriIndex} from "./credentials";
@@ -27,10 +28,11 @@ async function refreshOAuthTokens(
     agentName: AgentName,
 ): Promise<void> {
   const oauth2Client = await getOauthClient(uid, agentName);
+  const collection = getCollectionForAgent(agentName);
   let tokens: OAuthTokens;
   try {
     tokens = await refreshAccessToken(oauth2Client);
-    await updateUserTokens(tokens, uid);
+    await updateUserTokens(tokens, uid, collection);
     logger.log(`uid ${uid} access token refreshed to ${tokens.expiry_date}`);
   } catch (error) {
     logger.warn("Failed to refresh access token:", uid, error);
@@ -58,7 +60,8 @@ async function getOauthClient(
     agentName: AgentName,
 ): Promise<Auth.OAuth2Client> {
   const credentials = getAgentCredentials(agentName);
-  const userData = await getUserFromUID(uid);
+  const collection = getCollectionForAgent(agentName);
+  const userData = await getUserFromUID(uid, collection);
   const redirectUriIndex = getRedirectUriIndex(ENVIRONMENT_NAME.value());
   const oauth2Client = new google.auth.OAuth2(
       credentials.web.client_id,
@@ -73,8 +76,9 @@ async function getOauthClient(
 }
 
 async function oauthCronJob(agentName: AgentName): Promise<void> {
+  const collection = getCollectionForAgent(agentName);
   try {
-    const users = await findUsersWithExpiringTokens();
+    const users = await findUsersWithExpiringTokens(collection);
     logger.log(
         "Refreshing tokens for Users with expiring tokens ",
         users.length,
@@ -171,7 +175,8 @@ async function signupCallbackHandler(
       }
     }
 
-    await storeUser(tokens as OAuthTokens, userRecord);
+    const collection = getCollectionForAgent(agentName);
+    await storeUser(tokens as OAuthTokens, userRecord, collection);
     await addUserEmailAddress(userRecord, [{email: userEmail, default: true}]);
 
     sendEvent(userRecord.uid, "sign_up");

@@ -18,6 +18,7 @@ import {getLastSentEmail, getMockResendClient, setMockData} from "../../util/res
 import {
   getUserFromEmail,
   getUserFromUID,
+  DRIVE_USERS_COLLECTION,
   getOrganizeProposal,
   updateOrganizeProposalStatus,
 } from "../../util/firestoreHandler";
@@ -259,7 +260,7 @@ export async function handleDriveConfirm(
   const uid = await getUserFromEmail(sender);
   if (uid) {
     try {
-      const userData = await getUserFromUID(uid);
+      const userData = await getUserFromUID(uid, DRIVE_USERS_COLLECTION);
       if (userData.access_token) {
         // User has OAuth — process upload directly
         await processUpload(emailId, uid, resend, transformedEmail);

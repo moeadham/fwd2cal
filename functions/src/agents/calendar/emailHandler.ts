@@ -1,5 +1,5 @@
 import {logger} from "firebase-functions/v2";
-import {getUserFromEmail} from "../../util/firestoreHandler";
+import {getUserFromEmail, getUserFromUID, USERS_COLLECTION} from "../../util/firestoreHandler";
 import {selectSkill} from "./llm";
 import {getSkills, getSkillsContext} from "./skills";
 import {fastMatchSkill} from "../../util/skills/matcher";
@@ -79,7 +79,16 @@ async function handleEmail(
   }
 
   const uid = await getUserFromEmail(sender);
-  if (!uid) {
+  let isCalendarUser = false;
+  if (uid) {
+    try {
+      await getUserFromUID(uid, USERS_COLLECTION);
+      isCalendarUser = true;
+    } catch {
+      // User exists in EmailAddress (e.g. drive-only) but not in Users
+    }
+  }
+  if (!uid || !isCalendarUser) {
     logger.warn(`No User found with ${sender}`);
     const response: EmailResponseTemplate = {
       ...EMAIL_RESPONSES.noUserFound,

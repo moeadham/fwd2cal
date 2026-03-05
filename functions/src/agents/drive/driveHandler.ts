@@ -1,5 +1,5 @@
 import {logger} from "firebase-functions/v2";
-import {getUserFromEmail, getUserFromUID} from "../../util/firestoreHandler";
+import {getUserFromEmail, getUserFromUID, DRIVE_USERS_COLLECTION} from "../../util/firestoreHandler";
 import {sendEvent} from "../../util/analytics";
 import {MAX_DRIVE_UPLOAD_BYTES} from "./config";
 import {getSenderFromRawEmail, verifyEmail} from "../../util/emailUtils";
@@ -84,18 +84,17 @@ async function handleDriveEmail(
   }
 
   // Check if user already has OAuth — if so, organize immediately
-  const uid = await getUserFromEmail(sender);
+  let uid = await getUserFromEmail(sender);
   if (uid) {
     try {
-      const userData = await getUserFromUID(uid);
+      const userData = await getUserFromUID(uid, DRIVE_USERS_COLLECTION);
       if (userData.access_token) {
         logger.info("Drive: Returning user — organizing immediately", {sender, uid});
         return processUpload(emailId, uid, resend, email);
       }
-    } catch (err) {
-      logger.debug("Drive: No OAuth or user lookup failed, falling through to auth flow", {
-        uid, error: err instanceof Error ? err.message : String(err),
-      });
+    } catch {
+      // User exists in EmailAddress (e.g. calendar-only) but not in DriveUsers
+      uid = null;
     }
   }
 

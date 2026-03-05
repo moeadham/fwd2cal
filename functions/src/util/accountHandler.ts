@@ -4,6 +4,8 @@ import {
   getUserFromUID,
   removeEmailAddress,
   deleteUser,
+  USERS_COLLECTION,
+  DRIVE_USERS_COLLECTION,
 } from "./firestoreHandler";
 import {deleteAccount} from "../auth/authHandler";
 import {removeContactFromSegment} from "./resend";
@@ -35,10 +37,15 @@ export async function deleteUserAccount(
 ): Promise<DeleteAccountResult> {
   let primaryEmail = sender;
   try {
-    const user = await getUserFromUID(uid);
+    const user = await getUserFromUID(uid, USERS_COLLECTION);
     primaryEmail = user.email;
   } catch {
-    // User document may not exist — use sender as primary email
+    try {
+      const user = await getUserFromUID(uid, DRIVE_USERS_COLLECTION);
+      primaryEmail = user.email;
+    } catch {
+      // User document may not exist in either collection — use sender as primary email
+    }
   }
 
   await deleteUser(uid);

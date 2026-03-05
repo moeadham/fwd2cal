@@ -10,14 +10,26 @@ import {
   PendingEmailAddressDocument,
   UserWithExpiringTokens,
   EmailItem,
+  AgentName,
 } from "../auth/types";
 
 const USERS_COLLECTION = "Users";
+const DRIVE_USERS_COLLECTION = "DriveUsers";
+
+const AGENT_COLLECTIONS: Record<AgentName, string> = {
+  calendar: USERS_COLLECTION,
+  drive: DRIVE_USERS_COLLECTION,
+};
+
+function getCollectionForAgent(agentName: AgentName): string {
+  return AGENT_COLLECTIONS[agentName];
+}
 
 async function getUserFromUID(
     uid: string,
+    collection: string,
 ): Promise<UserDocument> {
-  const userDoc = await getFirestore().collection(USERS_COLLECTION).doc(uid).get();
+  const userDoc = await getFirestore().collection(collection).doc(uid).get();
   if (!userDoc.exists) {
     throw new Error("User document does not exist");
   }
@@ -33,12 +45,14 @@ async function getUserFromEmail(email: string): Promise<string | null> {
   return userObject?.uid || null;
 }
 
-async function findUsersWithExpiringTokens(): Promise<UserWithExpiringTokens[]> {
+async function findUsersWithExpiringTokens(
+    collection: string,
+): Promise<UserWithExpiringTokens[]> {
   const now = new Date();
   const twoHoursLater = new Date(now.getTime() + 2 * 60 * 60 * 1000);
   const users: UserWithExpiringTokens[] = [];
 
-  const usersRef = getFirestore().collection(USERS_COLLECTION);
+  const usersRef = getFirestore().collection(collection);
   let querySnapshot;
   if (ENVIRONMENT_NAME.value() === "production") {
     querySnapshot = await usersRef
@@ -63,9 +77,10 @@ async function findUsersWithExpiringTokens(): Promise<UserWithExpiringTokens[]> 
 async function storeUser(
     tokens: OAuthTokens,
     user: FirebaseUserRecord,
+    collection: string,
 ): Promise<void> {
   try {
-    await getFirestore().collection(USERS_COLLECTION).doc(user.uid).set({
+    await getFirestore().collection(collection).doc(user.uid).set({
       email: user.email,
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,
@@ -82,9 +97,10 @@ async function storeUser(
 async function updateUserTokens(
     tokens: OAuthTokens,
     uid: string,
+    collection: string,
 ): Promise<void> {
   try {
-    await getFirestore().collection(USERS_COLLECTION).doc(uid).update({
+    await getFirestore().collection(collection).doc(uid).update({
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,
       expiry_date: tokens.expiry_date,
@@ -203,8 +219,9 @@ async function deleteUser(uid: string): Promise<void> {
   });
 
   await batch.commit();
-  // Delete the user document.
+  // Delete the user document from both agent collections.
   await getFirestore().collection(USERS_COLLECTION).doc(uid).delete();
+  await getFirestore().collection(DRIVE_USERS_COLLECTION).doc(uid).delete();
 }
 
 // ============================================================================
@@ -324,6 +341,9 @@ async function cleanupExpiredDriveFileData(): Promise<number> {
 }
 
 export {
+  USERS_COLLECTION,
+  DRIVE_USERS_COLLECTION,
+  getCollectionForAgent,
   getUserFromUID,
   getUserFromEmail,
   findUsersWithExpiringTokens,
