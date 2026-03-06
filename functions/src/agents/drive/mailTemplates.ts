@@ -25,8 +25,7 @@ const driveMailTemplates: DriveMailTemplates = {
 <br><br>To get started, please grant access to your Google Drive:
 <br><br><a href="%SIGNUP_LINK%" style="display:inline-block; padding:10px 20px; margin:5px 0; background-color:#3498db; color:white; text-align:center; text-decoration:none; font-weight:bold; border-radius:5px; border:none; cursor:pointer;">Grant Drive Access</a>
 <br><br>Once authorized, your file will be organized automatically.
-
-<br><br><b>Did you know?</b> fwd2drive can organize your entire drive. Just email &quot;organize my drive please&quot; to <a href="mailto:drive@fwd2drive.com">drive@fwd2drive.com</a>.
+%ORGANIZE_PROMO%
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
   },
   multipleFileProposal: {
@@ -36,8 +35,7 @@ const driveMailTemplates: DriveMailTemplates = {
 <br><br>To get started, please grant access to your Google Drive:
 <br><br><a href="%SIGNUP_LINK%" style="display:inline-block; padding:10px 20px; margin:5px 0; background-color:#3498db; color:white; text-align:center; text-decoration:none; font-weight:bold; border-radius:5px; border:none; cursor:pointer;">Grant Drive Access</a>
 <br><br>Once authorized, your files will be organized automatically.
-
-<br><br><b>Did you know?</b> fwd2drive can organize your entire drive. Just email &quot;organize my drive please&quot; to <a href="mailto:drive@fwd2drive.com">drive@fwd2drive.com</a>.
+%ORGANIZE_PROMO%
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
   },
   fileUploaded: {
@@ -47,7 +45,7 @@ const driveMailTemplates: DriveMailTemplates = {
 <br><a href="%FILE_LINK%" style="display:inline-block; padding:10px 20px; margin:5px 0; background-color:#3498db; color:white; text-align:center; text-decoration:none; font-weight:bold; border-radius:5px; border:none; cursor:pointer;">View in Drive</a>
 <br><br>If you'd prefer it somewhere else, just reply to this email with instructions and we'll move it for you.
 %EMBEDDED_DATA%
-<br><br><b>Did you know?</b> fwd2drive can organize your entire drive. Just email &quot;organize my drive please&quot; to <a href="mailto:drive@fwd2drive.com">drive@fwd2drive.com</a>.
+%ORGANIZE_PROMO%
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
   },
   multipleFilesUploaded: {
@@ -55,7 +53,7 @@ const driveMailTemplates: DriveMailTemplates = {
 <br><br>%FILE_LIST%
 <br><br>If you'd prefer them somewhere else, just reply to this email with instructions and we'll move them for you.
 %EMBEDDED_DATA%
-<br><br><b>Did you know?</b> fwd2drive can organize your entire drive. Just email &quot;organize my drive please&quot; to <a href="mailto:drive@fwd2drive.com">drive@fwd2drive.com</a>.
+%ORGANIZE_PROMO%
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
   },
   fileMoved: {
@@ -64,7 +62,7 @@ const driveMailTemplates: DriveMailTemplates = {
 <br>New location: <b>%NEW_PATH%</b>
 <br><a href="%FILE_LINK%" style="display:inline-block; padding:10px 20px; margin:5px 0; background-color:#3498db; color:white; text-align:center; text-decoration:none; font-weight:bold; border-radius:5px; border:none; cursor:pointer;">View in Drive</a>
 %EMBEDDED_DATA%
-<br><br><b>Did you know?</b> fwd2drive can organize your entire drive. Just email &quot;organize my drive please&quot; to <a href="mailto:drive@fwd2drive.com">drive@fwd2drive.com</a>.
+%ORGANIZE_PROMO%
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
   },
   multipleFilesMoved: {
@@ -72,7 +70,7 @@ const driveMailTemplates: DriveMailTemplates = {
 <br><br>%FILE_LIST%
 <br><br>Want them somewhere else? Just reply again and we'll move them.
 %EMBEDDED_DATA%
-<br><br><b>Did you know?</b> fwd2drive can organize your entire drive. Just email &quot;organize my drive please&quot; to <a href="mailto:drive@fwd2drive.com">drive@fwd2drive.com</a>.
+%ORGANIZE_PROMO%
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
   },
   driveAuthFailed: {
@@ -80,14 +78,12 @@ const driveMailTemplates: DriveMailTemplates = {
 
 Make sure you complete the checkbox to allow fwd2drive to access your Google Drive.
 <img src="${AGENT_HOSTING_URL.value()}/fwd2drivePermissions.png" alt="Google Permissions" width="394" style="display: block;">
-
-<br><br><b>Did you know?</b> fwd2drive can organize your entire drive. Just email &quot;organize my drive please&quot; to <a href="mailto:drive@fwd2drive.com">drive@fwd2drive.com</a>.
+%ORGANIZE_PROMO%
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
   },
   noAttachments: {
     html: `Sorry - your email didn't have any attachments. Forward an email with files attached and they'll be saved to your Google Drive.
-
-<br><br><b>Did you know?</b> fwd2drive can organize your entire drive. Just email &quot;organize my drive please&quot; to <a href="mailto:drive@fwd2drive.com">drive@fwd2drive.com</a>.
+%ORGANIZE_PROMO%
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
   },
   noUserFound: {
@@ -95,19 +91,17 @@ Make sure you complete the checkbox to allow fwd2drive to access your Google Dri
 To get started, please grant access to your Google Drive:<br><br>
 <a href="${driveSignupUrl}" style="display:inline-block; padding:10px 20px; margin:5px 0; background-color:#3498db; color:white; text-align:center; text-decoration:none; font-weight:bold; border-radius:5px; border:none; cursor:pointer;">Sign Up with Google</a><br><br>
 Once authorized, you can forward emails with attachments to <a href="mailto:drive@fwd2drive.com">drive@fwd2drive.com</a> and they'll be organized in your Google Drive automatically.<br><br>
-<b>Did you know?</b> fwd2drive can organize your entire drive. Just email &quot;organize my drive please&quot; to <a href="mailto:drive@fwd2drive.com">drive@fwd2drive.com</a>.
+%ORGANIZE_PROMO%
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
   },
   uploadFailed: {
     html: `Sorry - there was an error uploading your file to Google Drive. Please try forwarding it again.
-
-<br><br><b>Did you know?</b> fwd2drive can organize your entire drive. Just email &quot;organize my drive please&quot; to <a href="mailto:drive@fwd2drive.com">drive@fwd2drive.com</a>.
+%ORGANIZE_PROMO%
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
   },
   moveFailed: {
     html: `Sorry - there was an error moving your file in Google Drive. Please try replying again with your move instructions.
-
-<br><br><b>Did you know?</b> fwd2drive can organize your entire drive. Just email &quot;organize my drive please&quot; to <a href="mailto:drive@fwd2drive.com">drive@fwd2drive.com</a>.
+%ORGANIZE_PROMO%
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
   },
   organizeAuthRequired: {

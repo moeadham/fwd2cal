@@ -4,7 +4,8 @@ import {
 } from "../../util/firestoreHandler";
 import {sendEmailResend} from "../../util/resend";
 import {getSupportEmail} from "../../util/config";
-import {AGENT_EMAIL_ADDRESS} from "./config";
+import {AGENT_EMAIL_ADDRESS, ORGANIZE_PROMO_HTML} from "./config";
+import {isOrganizeDriveEnabled} from "../../util/featureFlags";
 import {getEmailThreadHeaders, threadEmailHtml} from "../../util/emailUtils";
 import {TransformedEmail} from "../../util/types";
 import {
@@ -85,6 +86,7 @@ export function ensureDatePrefix(filename: string, emailDate?: string): string {
 export function applyTemplate(html: string, replacements: Record<string, string>): string {
   let result = html;
   result = result.replace(/%SUPPORT_EMAIL%/g, getSupportEmail(AGENT_EMAIL_ADDRESS.value()));
+  result = result.replace(/%ORGANIZE_PROMO%/g, isOrganizeDriveEnabled() ? ORGANIZE_PROMO_HTML : "");
   for (const [key, value] of Object.entries(replacements)) {
     result = result.replace(new RegExp(`%${key}%`, "g"), value);
   }

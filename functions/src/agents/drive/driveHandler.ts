@@ -11,6 +11,7 @@ import {collectImageUrls} from "../../util/imageUtils";
 import {fastMatchSkill} from "../../util/skills/matcher";
 import {getSkills} from "./skills";
 import {handleOrganizeDrive, handleOrganizeApproval} from "./organizeHandler";
+import {loadFeatureFlags, isOrganizeDriveEnabled} from "../../util/featureFlags";
 import {driveDeleteUserAccount, driveRemoveEmailFromUser} from "./accountHandler";
 import {
   parseEmbeddedDriveData, parseOrganizeEmbeddedData,
@@ -42,19 +43,24 @@ async function handleDriveEmail(
     return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: [], error: "Unverified email"};
   }
 
+  // Load feature flags (no-ops after first call)
+  await loadFeatureFlags();
+
   // Check if this is a REPLY to an organize-drive proposal (approval)
   // Must come before skill match — the quoted thread subject still matches "organize drive"
-  const organizeData = parseOrganizeEmbeddedData(email.html || "");
-  if (organizeData) {
-    logger.info("Drive: organize-drive approval detected", {sender, proposalId: organizeData.proposalId});
-    await handleOrganizeApproval(email, organizeData.proposalId);
-    return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: []};
+  if (isOrganizeDriveEnabled()) {
+    const organizeData = parseOrganizeEmbeddedData(email.html || "");
+    if (organizeData) {
+      logger.info("Drive: organize-drive approval detected", {sender, proposalId: organizeData.proposalId});
+      await handleOrganizeApproval(email, organizeData.proposalId);
+      return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: []};
+    }
   }
 
   // Check for skill match (organize-drive, delete-account, remove-email)
   const skills = getSkills();
   const skillMatch = fastMatchSkill(email.subject || "", email.text || "", skills);
-  if (skillMatch?.skillId === "organize-drive") {
+  if (skillMatch?.skillId === "organize-drive" && isOrganizeDriveEnabled()) {
     logger.info("Drive: organize-drive skill matched", {sender, matchedIn: skillMatch.matchedIn});
     await handleOrganizeDrive(email, emailId);
     return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: []};
