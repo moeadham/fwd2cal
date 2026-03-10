@@ -12,6 +12,7 @@ triggers:
   - sort drive
 fastPattern: "organiz(?:e|ing)\\s+(?:my\\s+)?drive|clean\\s+up\\s+(?:my\\s+)?drive|sort\\s+(?:my\\s+)?drive|reorganiz(?:e|ing)\\s+(?:my\\s+)?drive"
 subjectOnly: false
+checkBody: true
 ---
 
 # Organize Drive
