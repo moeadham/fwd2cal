@@ -14,6 +14,18 @@ import {
 } from "../util/types";
 import {getMockResendClient, setMockData} from "../util/resendMock";
 
+const BLOCKED_SENDER_PREFIXES = ["noreply@", "no-reply@", "mailer-daemon@"];
+const BLOCKED_SENDERS = new Set([
+  "calendar-notification@google.com",
+  "calendar-noreply@google.com",
+]);
+
+function isAutomatedSender(from: string): boolean {
+  const sender = from.toLowerCase();
+  if (BLOCKED_SENDERS.has(sender)) return true;
+  return BLOCKED_SENDER_PREFIXES.some((prefix) => sender.startsWith(prefix));
+}
+
 /**
  * Shared helper: verifies a Resend inbound webhook request (signature, event
  * type) and dispatches validated email.received events to the given Cloud Task.
@@ -102,6 +114,15 @@ export async function processInboundWebhook(
       );
       res.status(200).json({
         message: "Email not for this environment, skipping",
+      });
+      return;
+    }
+
+    const sender = webhookData.data.from;
+    if (isAutomatedSender(sender)) {
+      logger.log(`Ignoring automated sender: ${sender}`);
+      res.status(200).json({
+        message: "Automated sender, skipping",
       });
       return;
     }
