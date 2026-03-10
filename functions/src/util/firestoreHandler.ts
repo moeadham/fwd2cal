@@ -1,5 +1,6 @@
 import {logger} from "firebase-functions/v2";
 import {getFirestore} from "firebase-admin/firestore";
+import {getStorage} from "firebase-admin/storage";
 import {ENVIRONMENT_NAME} from "./config";
 import {v4 as uuidv4} from "uuid";
 import {sendEvent} from "./analytics";
@@ -225,16 +226,28 @@ async function deleteUser(uid: string): Promise<void> {
 }
 
 // ============================================================================
-// ORGANIZE PROPOSAL PERSISTENCE
+// ORGANIZE PROPOSAL PERSISTENCE (bulk data in GCS)
 // ============================================================================
+
+const getProposalPath = (id: string) => `organize-proposals/${id}.json`;
 
 async function saveOrganizeProposal(
     data: Record<string, unknown>,
 ): Promise<string> {
   try {
-    const docRef = await getFirestore()
-        .collection("OrganizeProposals")
-        .add(data);
+    const {proposal, cost, ...metadata} = data;
+    const docRef = getFirestore().collection("OrganizeProposals").doc();
+    const storagePath = getProposalPath(docRef.id);
+
+    // Upload bulk data to GCS
+    const bucket = getStorage().bucket();
+    const file = bucket.file(storagePath);
+    await file.save(JSON.stringify({proposal, cost}), {
+      contentType: "application/json",
+    });
+
+    // Save lightweight metadata to Firestore
+    await docRef.set({...metadata, storagePath});
     logger.info("Saved organize proposal", {proposalId: docRef.id});
     return docRef.id;
   } catch (error) {
@@ -252,7 +265,14 @@ async function getOrganizeProposal(
         .doc(proposalId)
         .get();
     if (!doc.exists) return null;
-    return {id: doc.id, ...doc.data()} as Record<string, unknown>;
+    const data = doc.data()!;
+
+    // Fetch bulk data from GCS
+    const bucket = getStorage().bucket();
+    const [contents] = await bucket.file(data.storagePath as string).download();
+    const bulkData = JSON.parse(contents.toString());
+
+    return {id: doc.id, ...data, ...bulkData} as Record<string, unknown>;
   } catch (error) {
     logger.error("Database error in getOrganizeProposal:", error);
     throw error;
@@ -265,10 +285,30 @@ async function updateOrganizeProposalStatus(
     extra?: Record<string, unknown>,
 ): Promise<void> {
   try {
+    const firestoreExtra = extra ? {...extra} : undefined;
+
+    // If snapshot provided, append to GCS object instead of Firestore
+    if (firestoreExtra?.snapshot) {
+      const doc = await getFirestore()
+          .collection("OrganizeProposals")
+          .doc(proposalId)
+          .get();
+      const storagePath = doc.data()?.storagePath as string;
+      const bucket = getStorage().bucket();
+      const file = bucket.file(storagePath);
+      const [contents] = await file.download();
+      const bulkData = JSON.parse(contents.toString());
+      bulkData.snapshot = firestoreExtra.snapshot;
+      await file.save(JSON.stringify(bulkData), {
+        contentType: "application/json",
+      });
+      delete firestoreExtra.snapshot;
+    }
+
     await getFirestore()
         .collection("OrganizeProposals")
         .doc(proposalId)
-        .update({status, ...extra});
+        .update({status, ...firestoreExtra});
   } catch (error) {
     logger.error("Database error in updateOrganizeProposalStatus:", error);
     throw error;

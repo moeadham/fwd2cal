@@ -169,7 +169,7 @@ export interface OrganizeCostBreakdown {
   totalCost: number;
 }
 
-// Organize proposal stored in Firestore
+// Organize proposal stored in Firestore (bulk data in GCS)
 export interface OrganizeProposalDoc {
   uid: string;
   senderEmail: string;
@@ -177,6 +177,7 @@ export interface OrganizeProposalDoc {
   status: "pending" | "approved" | "executing" | "completed" | "undone";
   createdAt: string;
   expiresAt: string;
+  storagePath: string;
   proposal: DriveOrganizeProposal;
   cost: OrganizeCostBreakdown;
   snapshot?: OrganizeSnapshotAction[];
