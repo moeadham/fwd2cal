@@ -1,21 +1,12 @@
 /* eslint-disable max-len */
 import {MailTemplates} from "./types";
-
-// Get base URL based on project ID
-const isDevProject = process.env.GCLOUD_PROJECT?.includes("-dev") ?? false;
-const devFunctionsBase = `https://us-central1-${process.env.GCLOUD_PROJECT}.cloudfunctions.net`;
-const signupUrl = isDevProject ?
-  `${devFunctionsBase}/v2signup` :
-  "https://www.fwd2cal.com/signup-consent";
-const appBaseUrl = isDevProject ?
-  devFunctionsBase :
-  "https://app.fwd2cal.com";
+import {AGENT_HOSTING_URL} from "./config";
 
 const mailTemplates: MailTemplates = {
   noUserFound: {
     html: `Welcome!<br><br>
 To sign up for fwd2cal, please click the link below.<br><br>
-<a href="${signupUrl}"><img src="https://app.fwd2cal.com/signup-with-google.png" alt="Sign Up with Google" width="182" height="42" style="display: block;"></a><br><br>
+<a href="${AGENT_HOSTING_URL.value()}/signup"><img src="${AGENT_HOSTING_URL.value()}/signup-with-google.png" alt="Sign Up with Google" width="182" height="42" style="display: block;"></a><br><br>
 If you forwarded an email to have it added to your calendar - you will need to do that again after signing up.<br><br>
 
 Note: If you've already signed up for fwd2cal, and want to fwd events from this email address, send an email from your main Gmail account to <a href="mailto:%MAIN_EMAIL%?subject=add %FROM_EMAIL%">%MAIN_EMAIL%</a> with the subject "add %FROM_EMAIL%".<br>
@@ -28,10 +19,10 @@ Note: If you've already signed up for fwd2cal, and want to fwd events from this 
 `,
   },
   oauthFailed: {
-    html: `Sorry - there was an issue authenticating with Google. Please click <a href="${signupUrl}">to authorize Google again</a>, and then forward your thread another time.
+    html: `Sorry - there was an issue authenticating with Google. Please click <a href="${AGENT_HOSTING_URL.value()}/signup">to authorize Google again</a>, and then forward your thread another time.
 
 Make sure you complete the checkbox to allow fwd2cal to access your calendar.
-<img src="https://app.fwd2cal.com/fwd2calPermissions.png" alt="Google Permissions" width="394" height="170" style="display: block;">
+<img src="${AGENT_HOSTING_URL.value()}/fwd2calPermissions.png" alt="Google Permissions" width="394" height="170" style="display: block;">
 
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
   },
@@ -77,7 +68,7 @@ Forward the thread again and include some instructions to help AI figure it out.
   },
   addAdditionalEmailAddress: {
     subject: `%ORIGINATOR_EMAIL% would like you to add events to their calendar`,
-    html: `To join %ORIGINATOR_EMAIL%'s fwd2cal account, please click <a href="${appBaseUrl}/v2verifyAdditionalEmail?uuid=%VERIFICATION_CODE%">here</a><br><br>
+    html: `To join %ORIGINATOR_EMAIL%'s fwd2cal account, please click <a href="${AGENT_HOSTING_URL.value()}/v2/verifyAdditionalEmail?uuid=%VERIFICATION_CODE%">here</a><br><br>
 
 After you approve, you can forward any email to %MAIN_EMAIL%, and it will automatically be turned into an event in %ORIGINATOR_EMAIL%'s calendar using AI.<br><br>
 

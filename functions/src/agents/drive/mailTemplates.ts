@@ -2,20 +2,9 @@
 import {DriveMailTemplates} from "./types";
 import {AGENT_HOSTING_URL} from "./config";
 
-const isDevProject = process.env.GCLOUD_PROJECT?.includes("-dev") ?? false;
-const devFunctionsBase = `https://us-central1-${process.env.GCLOUD_PROJECT}.cloudfunctions.net`;
-
-export const driveFullScopeSignupUrl = isDevProject ?
-  `${devFunctionsBase}/v2driveFullScopeSignup` :
-  "https://www.fwd2drive.com/full-scope-consent";
-
-export const driveSignupUrl = isDevProject ?
-  `${devFunctionsBase}/v2driveSignup` :
-  "https://www.fwd2drive.com/signup-consent";
-
-export const driveOrganizeActionUrl = isDevProject ?
-  `${devFunctionsBase}/v2driveOrganizeAction` :
-  "https://www.fwd2drive.com/organize-action";
+export const driveFullScopeSignupUrl = `${AGENT_HOSTING_URL.value()}/drive/v2/fullScopeSignup`;
+export const driveSignupUrl = `${AGENT_HOSTING_URL.value()}/drive/v2/signup`;
+export const driveOrganizeActionUrl = `${AGENT_HOSTING_URL.value()}/drive/v2/organizeAction`;
 
 const driveMailTemplates: DriveMailTemplates = {
   fileProposal: {
