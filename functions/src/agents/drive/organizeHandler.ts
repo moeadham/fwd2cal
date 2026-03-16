@@ -91,7 +91,7 @@ async function sendOrganizeEmailResponse(
 
 /**
  * Check if the user's stored OAuth scope includes full `drive` access
- * (as opposed to just `drive.file` + `drive.metadata`).
+ * (as opposed to just `drive.file`).
  */
 function hasFullDriveScope(tokenScope: string): boolean {
   if (!tokenScope) return false;

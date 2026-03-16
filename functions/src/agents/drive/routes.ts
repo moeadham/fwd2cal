@@ -52,7 +52,6 @@ export const v2driveSignup = onRequest(
         "https://www.googleapis.com/auth/userinfo.email",
         "https://www.googleapis.com/auth/userinfo.profile",
         "openid",
-        "https://www.googleapis.com/auth/drive.metadata",
         "https://www.googleapis.com/auth/drive.file",
       ].join("+");
       // Pass state (resendEmailId) through OAuth so callback can trigger upload
@@ -132,7 +131,6 @@ export const v2driveOauthCallback = onRequest(
         ["https://www.googleapis.com/auth/drive"] :
         [
           "https://www.googleapis.com/auth/drive.file",
-          "https://www.googleapis.com/auth/drive.metadata",
         ];
 
       if (!hasRequiredScopes(grantedScope, requiredScopes)) {
