@@ -14,16 +14,31 @@ import {
 } from "../util/types";
 import {getMockResendClient, setMockData} from "../util/resendMock";
 
-const BLOCKED_SENDER_PREFIXES = ["noreply@", "no-reply@", "mailer-daemon@"];
+const BLOCKED_SENDER_PREFIXES = ["noreply@", "no-reply@", "mailer-daemon@", "info@"];
 const BLOCKED_SENDERS = new Set([
   "calendar-notification@google.com",
   "calendar-noreply@google.com",
 ]);
+const BLOCKED_SUBJECT_PATTERNS = [
+  /^out of office/i,
+  /^automatic reply/i,
+  /^auto[- ]?reply/i,
+  /^away from (the )?office/i,
+  /\bauto[- ]?response\b/i,
+  /^undeliverable:/i,
+  /^mail delivery failed/i,
+  /^delivery status notification/i,
+  /^returned mail/i,
+];
 
 function isAutomatedSender(from: string): boolean {
   const sender = from.toLowerCase();
   if (BLOCKED_SENDERS.has(sender)) return true;
   return BLOCKED_SENDER_PREFIXES.some((prefix) => sender.startsWith(prefix));
+}
+
+function isAutomatedSubject(subject: string): boolean {
+  return BLOCKED_SUBJECT_PATTERNS.some((pattern) => pattern.test(subject));
 }
 
 /**
@@ -123,6 +138,15 @@ export async function processInboundWebhook(
       logger.log(`Ignoring automated sender: ${sender}`);
       res.status(200).json({
         message: "Automated sender, skipping",
+      });
+      return;
+    }
+
+    const subject = webhookData.data.subject || "";
+    if (isAutomatedSubject(subject)) {
+      logger.log(`Ignoring automated subject: ${subject}`);
+      res.status(200).json({
+        message: "Automated reply, skipping",
       });
       return;
     }

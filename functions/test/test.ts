@@ -29,6 +29,7 @@ import {
   familyEvent,
   workEventVisibl,
   allDayEvent,
+  automatedReplyCalendarEmail,
 } from "./bindings/resendBindings";
 
 // Using Resend for email service
@@ -144,6 +145,29 @@ async function sendResendWebhook(testData: ResendTestData, attachmentsList: Atta
     .send({ data: webhookData });
   return response as unknown as DispatchResponse;
 }
+
+describe("Webhook filtering (calendar)", function() {
+  it("UT00b reject emails with automated reply subjects", async function() {
+    const webhookWithMock = {
+      ...automatedReplyCalendarEmail.webhook,
+      mockData: {
+        emailContent: automatedReplyCalendarEmail.emailContent,
+        attachmentsList: [] as AttachmentWithUrl[],
+      },
+    };
+
+    const res = await chaiWithHttp.request(apiURL)
+      .post(CALLBACK_ENDPOINT)
+      .set("Content-Type", "application/json")
+      .set("svix-id", "msg_test_" + Date.now())
+      .set("svix-timestamp", Math.floor(Date.now() / 1000).toString())
+      .set("svix-signature", "v1,dummy_signature_for_testing")
+      .send(webhookWithMock);
+
+    expect(res).to.have.status(200);
+    expect(res.body.message).to.equal("Automated reply, skipping");
+  });
+});
 
 describe(`fwd2cal (${EMAIL_SERVICE.toUpperCase()})`, function() {
   before("UT00 get login URL and wait for tester to create account", function(done) {

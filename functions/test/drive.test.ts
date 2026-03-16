@@ -16,6 +16,7 @@ import {
   driveEmailWithPDF,
   driveDeleteAccount,
   driveSignup,
+  automatedReplyEmail,
 } from "./bindings/resendBindings";
 import {extractDocumentImages} from "../src/util/documentParser";
 
@@ -139,6 +140,29 @@ describe("extractDocumentImages", function() {
   });
 });
 
+describe("Webhook filtering", function() {
+  it("DT00b reject emails with automated reply subjects", async function() {
+    const webhookWithMock = {
+      ...automatedReplyEmail.webhook,
+      mockData: {
+        emailContent: automatedReplyEmail.emailContent,
+        attachmentsList: [] as AttachmentWithUrl[],
+      },
+    };
+
+    const res = await chaiWithHttp.request(apiURL)
+      .post(DRIVE_CALLBACK_ENDPOINT)
+      .set("Content-Type", "application/json")
+      .set("svix-id", "msg_test_" + Date.now())
+      .set("svix-timestamp", Math.floor(Date.now() / 1000).toString())
+      .set("svix-signature", "v1,dummy_signature_for_testing")
+      .send(webhookWithMock);
+
+    expect(res).to.have.status(200);
+    expect(res.body.message).to.equal("Automated reply, skipping");
+  });
+});
+
 describe("fwd2cal Drive Agent", function() {
   it("DT01 propose folder and filename for a single PDF attachment", async function() {
     const testMessage = driveEmailWithPDF;
@@ -162,7 +186,7 @@ describe("fwd2cal Drive Agent", function() {
 
     // Verify auth signup link is present
     expect(res.body.sentEmail.html).to.include("Grant Drive Access");
-    expect(res.body.sentEmail.html).to.include("driveSignup");
+    expect(res.body.sentEmail.html).to.include("/drive/v2/signup");
 
     // Verify threading headers
     expect(res.body.sentEmail.headers).to.be.an("object");
@@ -360,7 +384,7 @@ describe("fwd2cal Drive Agent", function() {
     expect(res.body.sentEmail.html).to.be.a("string");
     expect(res.body.sentEmail.html).to.include("Welcome to fwd2drive");
     expect(res.body.sentEmail.html).to.include("Sign Up with Google");
-    expect(res.body.sentEmail.html).to.include("driveSignup");
+    expect(res.body.sentEmail.html).to.include("/drive/v2/signup");
 
     // Verify it does NOT contain the old "no attachments" error
     expect(res.body.sentEmail.html).to.not.include("didn't have any attachments");

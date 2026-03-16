@@ -1094,6 +1094,47 @@ driveEmailMultipleAttachments.attachmentsList = [
   },
 ];
 
+// Test: Automated reply subject (should be blocked by webhook filter)
+function createAutomatedReplyEmail(recipient: string): ResendTestData {
+  return createResendTestData(
+    {
+      type: "email.received",
+      created_at: new Date().toISOString(),
+      data: {
+        email_id: `test-auto-reply-${recipient.split("@")[0]}`,
+        message_id: `<test-auto-reply-${recipient.split("@")[0]}-${Date.now()}@company.com>`,
+        from: TESTER_PRIMARY_GOOGLE_ACCT,
+        to: [recipient],
+        cc: [],
+        bcc: [],
+        subject: "Automatic reply: Automatic reply: Out of office",
+        created_at: new Date().toISOString(),
+        attachments: [],
+      },
+    },
+    {
+      id: `test-auto-reply-${recipient.split("@")[0]}`,
+      subject: "Automatic reply: Automatic reply: Out of office",
+      from: TESTER_PRIMARY_GOOGLE_ACCT,
+      to: [recipient],
+      html: "<p>I am currently out of the office.</p>",
+      text: "I am currently out of the office.",
+      headers: {
+        "authentication-results": generateAuthHeader(TESTER_PRIMARY_GOOGLE_ACCT),
+        "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
+        "to": recipient,
+        "subject": "Automatic reply: Automatic reply: Out of office",
+        "date": "Mon, 1 Jul 2025 08:00:00 +0000",
+        "message-id": `<test-auto-reply-${recipient.split("@")[0]}-${Date.now()}@mail.gmail.com>`,
+        "in-reply-to": "<original-message-auto-reply>",
+        "references": "<original-message-auto-reply>",
+      },
+    },
+  );
+}
+const automatedReplyEmail = createAutomatedReplyEmail(DRIVE_EMAIL_ADDRESS);
+const automatedReplyCalendarEmail = createAutomatedReplyEmail(MAIN_EMAIL_ADDRESS);
+
 export {
   ResendTestData,
   AttachmentWithUrl,
@@ -1117,4 +1158,6 @@ export {
   driveEmailWithPDF,
   driveEmailNoAttachments,
   driveEmailMultipleAttachments,
+  automatedReplyEmail,
+  automatedReplyCalendarEmail,
 };
