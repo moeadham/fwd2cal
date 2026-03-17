@@ -35,7 +35,7 @@ const driveDispatchConfig: TaskQueueOptions = {
     maxAttempts: 1,
     minBackoffSeconds: 1,
   },
-  memory: "1GiB",
+  memory: "2GiB",
   timeoutSeconds: 1800,
 };
 

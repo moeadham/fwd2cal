@@ -20,6 +20,7 @@ import {
   ORGANIZE_DRIVE_TEXT_MAX_TOKENS,
   ORGANIZE_DRIVE_IMAGE_MAX_TOKENS,
   ORGANIZE_DRIVE_COST_PER_M_INPUT_TOKENS,
+  MAX_DRIVE_UPLOAD_BYTES,
 } from "./config";
 import {
   getSenderFromRawEmail,
@@ -38,6 +39,7 @@ import {
   OrganizeEmbeddedData,
   OrganizeProposalDoc,
   OrganizeSnapshotAction,
+  FileInfo,
 } from "./types";
 import {Auth} from "googleapis";
 import {driveMailTemplates, driveFullScopeSignupUrl, driveOrganizeActionUrl} from "./mailTemplates";
@@ -53,8 +55,11 @@ import {
   findAgentManagedFolders,
   getFolderFileCount,
   deleteFolder,
+  readDriveFileContent,
 } from "./driveHelper";
-import {proposeOrganization} from "./llm";
+import {proposeOrganization, proposeFilePlacement} from "./llm";
+import {extractContentSummary} from "./fileProcessor";
+import {getNextFolderPrefix} from "./driveUtils";
 
 // ============================================================================
 // HELPERS
@@ -794,7 +799,7 @@ async function handleOrganizeApproval(
   const proposal = proposalDoc.proposal;
   let execResult;
   try {
-    execResult = await executeOrganizeProposal(oauth2Client, proposal);
+    execResult = await executeOrganizeProposal(oauth2Client, proposal, uid);
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     logger.error("Drive organize approval: Execution failed", {
@@ -811,7 +816,7 @@ async function handleOrganizeApproval(
 
   // Integrity check — undo everything if mismatches found
   const mismatches = await verifyOrganizeResults(
-      oauth2Client, proposal, execResult.folderMap,
+      oauth2Client, proposal, execResult.folderMap, execResult.snapshot,
   );
 
   if (mismatches.length > 0) {
@@ -896,6 +901,7 @@ async function handleOrganizeApproval(
 async function executeOrganizeProposal(
     oauth2Client: Auth.OAuth2Client,
     proposal: DriveOrganizeProposal,
+    uid: string | null = null,
 ): Promise<{
   folderMap: Map<string, string>;
   snapshot: OrganizeSnapshotAction[];
@@ -980,18 +986,25 @@ async function executeOrganizeProposal(
       .filter((a) => a.action !== "keep")
       .map((a) => a.file_id);
 
-  const fileParents = new Map<string, string>(); // file_id → current parent_id
+  // file_id → {parentId, mimeType, size}
+  const fileMeta = new Map<string, {parentId: string; mimeType: string; size: number}>();
   for (let i = 0; i < fileIds.length; i += 100) {
     const batch = fileIds.slice(i, i + 100);
     const fetches = batch.map(async (fileId) => {
       try {
         const resp = await drive.files.get({
-          fileId, fields: "id, parents",
+          fileId, fields: "id, parents, mimeType, size",
         });
         const parentId = resp.data.parents?.[0];
-        if (parentId) fileParents.set(fileId, parentId);
+        if (parentId) {
+          fileMeta.set(fileId, {
+            parentId,
+            mimeType: resp.data.mimeType || "",
+            size: parseInt(resp.data.size || "0", 10),
+          });
+        }
       } catch {
-        logger.warn("Drive organize: Could not fetch file parent", {fileId});
+        logger.warn("Drive organize: Could not fetch file metadata", {fileId});
       }
     });
     await Promise.all(fetches);
@@ -1003,14 +1016,15 @@ async function executeOrganizeProposal(
       continue;
     }
 
-    const currentParentId = fileParents.get(action.file_id);
-    if (!currentParentId) {
-      logger.warn("Drive organize: No parent found for file, skipping", {
+    const meta = fileMeta.get(action.file_id);
+    if (!meta) {
+      logger.warn("Drive organize: No metadata found for file, skipping", {
         fileId: action.file_id, name: action.current_name,
       });
       stats.failed++;
       continue;
     }
+    const currentParentId = meta.parentId;
 
     // Record snapshot entry for undo
     const snapshotEntry: OrganizeSnapshotAction = {
@@ -1044,10 +1058,50 @@ async function executeOrganizeProposal(
           proposal.proposed_folders.some((f) => f.folder_name === action.new_name);
         if (isFolder) {
           await renameFolder(oauth2Client, action.file_id, action.new_name);
+          snapshotEntry.newName = action.new_name;
         } else {
-          await renameFile(oauth2Client, action.file_id, action.new_name);
+          // Content-aware naming: read file, extract content, get LLM-suggested name
+          // Skip files exceeding the upload size limit (same as file proposal flow)
+          let finalName = action.new_name;
+          try {
+            const fileContent = meta.size <= MAX_DRIVE_UPLOAD_BYTES.value() ?
+              await readDriveFileContent(oauth2Client, action.file_id, meta.mimeType) :
+              null;
+            if (fileContent) {
+              const contentSummary = await extractContentSummary(
+                  fileContent.buffer, fileContent.parserMimeType,
+              );
+              if (contentSummary) {
+                const fileInfo: FileInfo = {
+                  fileName: action.current_name,
+                  mimeType: meta.mimeType,
+                  fileSize: meta.size,
+                  contentSummary,
+                };
+                const agentFolderNames = [...folderMap.keys()];
+                const nextPrefix = getNextFolderPrefix(agentFolderNames);
+                const placement = await proposeFilePlacement(
+                    [fileInfo], "", "", agentFolderNames, nextPrefix, uid,
+                );
+                if (placement.proposals[0]?.suggested_name) {
+                  finalName = placement.proposals[0].suggested_name;
+                  logger.info("Drive organize: Content-aware rename", {
+                    fileId: action.file_id,
+                    metadataName: action.new_name,
+                    contentName: finalName,
+                  });
+                }
+              }
+            }
+          } catch (contentErr) {
+            const msg = contentErr instanceof Error ? contentErr.message : String(contentErr);
+            logger.warn("Drive organize: Content-aware naming failed, using metadata name", {
+              fileId: action.file_id, error: msg,
+            });
+          }
+          await renameFile(oauth2Client, action.file_id, finalName);
+          snapshotEntry.newName = finalName;
         }
-        snapshotEntry.newName = action.new_name;
         stats.renamed++;
       }
 
@@ -1094,9 +1148,14 @@ async function verifyOrganizeResults(
     oauth2Client: Auth.OAuth2Client,
     proposal: DriveOrganizeProposal,
     folderMap: Map<string, string>,
+    snapshot: OrganizeSnapshotAction[],
 ): Promise<Array<{fileId: string; expected: string; actual: string}>> {
   const drive = getDriveClient(oauth2Client);
   const mismatches: Array<{fileId: string; expected: string; actual: string}> = [];
+
+  // Build a map of actual names used (from snapshot) — these may differ from
+  // proposal names due to content-aware renaming.
+  const snapshotByFileId = new Map(snapshot.map((s) => [s.fileId, s]));
 
   const actionsToVerify = proposal.file_actions.filter(
       (a) => a.action !== "keep",
@@ -1114,13 +1173,16 @@ async function verifyOrganizeResults(
 
         const actualName = resp.data.name || "";
         const actualParentId = resp.data.parents?.[0] || "";
+        const snap = snapshotByFileId.get(action.file_id);
 
-        // Check name
+        // Check name — use snapshot's newName (content-aware) if available,
+        // otherwise fall back to proposal's new_name
         if (action.action === "rename" || action.action === "move_and_rename") {
-          if (actualName !== action.new_name) {
+          const expectedName = snap?.newName || action.new_name;
+          if (actualName !== expectedName) {
             mismatches.push({
               fileId: action.file_id,
-              expected: `name="${action.new_name}"`,
+              expected: `name="${expectedName}"`,
               actual: `name="${actualName}"`,
             });
           }

@@ -418,6 +418,55 @@ async function deleteFolder(
   logger.info("Drive: Folder trashed", {folderId});
 }
 
+/**
+ * MIME type mapping for exporting Google Workspace files to downloadable formats.
+ */
+const GOOGLE_WORKSPACE_EXPORT_MAP: Record<string, string> = {
+  "application/vnd.google-apps.document": "application/pdf",
+  "application/vnd.google-apps.spreadsheet": "text/csv",
+  "application/vnd.google-apps.presentation": "application/pdf",
+};
+
+/**
+ * Read a Drive file's content into a Buffer.
+ * Google Workspace files are exported to a standard format first.
+ * Returns null on failure (logs a warning instead of throwing).
+ */
+async function readDriveFileContent(
+    oauth2Client: Auth.OAuth2Client,
+    fileId: string,
+    mimeType: string,
+): Promise<{buffer: Buffer; parserMimeType: string} | null> {
+  const drive = getDriveClient(oauth2Client);
+  const exportMime = GOOGLE_WORKSPACE_EXPORT_MAP[mimeType];
+
+  try {
+    if (exportMime) {
+      const resp = await drive.files.export(
+          {fileId, mimeType: exportMime},
+          {responseType: "arraybuffer"},
+      );
+      return {
+        buffer: Buffer.from(resp.data as ArrayBuffer),
+        parserMimeType: exportMime,
+      };
+    } else {
+      const resp = await drive.files.get(
+          {fileId, alt: "media"},
+          {responseType: "arraybuffer"},
+      );
+      return {
+        buffer: Buffer.from(resp.data as ArrayBuffer),
+        parserMimeType: mimeType,
+      };
+    }
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    logger.warn("Drive: Failed to read file content", {fileId, mimeType, error: errMsg});
+    return null;
+  }
+}
+
 export {
   getDriveClient,
   getDriveFolderTree,
@@ -434,4 +483,5 @@ export {
   listAllDriveFiles,
   renameFile,
   deleteFolder,
+  readDriveFileContent,
 };
