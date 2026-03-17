@@ -1146,62 +1146,51 @@ async function findSubfolder(
  */
 async function verifyOrganizeResults(
     oauth2Client: Auth.OAuth2Client,
-    proposal: DriveOrganizeProposal,
-    folderMap: Map<string, string>,
+    _proposal: DriveOrganizeProposal,
+    _folderMap: Map<string, string>,
     snapshot: OrganizeSnapshotAction[],
 ): Promise<Array<{fileId: string; expected: string; actual: string}>> {
   const drive = getDriveClient(oauth2Client);
   const mismatches: Array<{fileId: string; expected: string; actual: string}> = [];
 
-  // Build a map of actual names used (from snapshot) — these may differ from
-  // proposal names due to content-aware renaming.
-  const snapshotByFileId = new Map(snapshot.map((s) => [s.fileId, s]));
-
-  const actionsToVerify = proposal.file_actions.filter(
-      (a) => a.action !== "keep",
-  );
+  // Only verify actions that actually succeeded (present in snapshot).
+  // Failed actions are already counted in stats.failed and should not trigger
+  // a full rollback of successful actions.
+  const actionsToVerify = snapshot.filter((s) => s.newParentId || s.newName);
 
   // Verify in batches of 50
   for (let i = 0; i < actionsToVerify.length; i += 50) {
     const batch = actionsToVerify.slice(i, i + 50);
-    const checks = batch.map(async (action) => {
+    const checks = batch.map(async (entry) => {
       try {
         const resp = await drive.files.get({
-          fileId: action.file_id,
+          fileId: entry.fileId,
           fields: "id, name, parents",
         });
 
         const actualName = resp.data.name || "";
         const actualParentId = resp.data.parents?.[0] || "";
-        const snap = snapshotByFileId.get(action.file_id);
 
-        // Check name — use snapshot's newName (content-aware) if available,
-        // otherwise fall back to proposal's new_name
-        if (action.action === "rename" || action.action === "move_and_rename") {
-          const expectedName = snap?.newName || action.new_name;
-          if (actualName !== expectedName) {
-            mismatches.push({
-              fileId: action.file_id,
-              expected: `name="${expectedName}"`,
-              actual: `name="${actualName}"`,
-            });
-          }
+        // Check name
+        if (entry.newName && actualName !== entry.newName) {
+          mismatches.push({
+            fileId: entry.fileId,
+            expected: `name="${entry.newName}"`,
+            actual: `name="${actualName}"`,
+          });
         }
 
         // Check parent
-        if (action.action === "move" || action.action === "move_and_rename") {
-          const expectedParentId = folderMap.get(action.new_folder);
-          if (expectedParentId && actualParentId !== expectedParentId) {
-            mismatches.push({
-              fileId: action.file_id,
-              expected: `parent="${action.new_folder}"`,
-              actual: `parent="${actualParentId}"`,
-            });
-          }
+        if (entry.newParentId && actualParentId !== entry.newParentId) {
+          mismatches.push({
+            fileId: entry.fileId,
+            expected: `parent="${entry.newParentId}"`,
+            actual: `parent="${actualParentId}"`,
+          });
         }
       } catch {
         mismatches.push({
-          fileId: action.file_id,
+          fileId: entry.fileId,
           expected: "accessible",
           actual: "not found or inaccessible",
         });
