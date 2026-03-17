@@ -105,7 +105,7 @@ export interface DriveFileEntry {
 // Proposed folder in the new structure
 export const OrganizeFolderSchema = z.object({
   folder_name: z.string().describe(
-      "Folder name with NN - Category format (e.g., '01 - Personal', '02 - Work')",
+      "Folder name with NN-Category format (e.g., '01-Personal', '02-Work')",
   ),
   description: z.string().describe("Brief description of what this folder contains"),
   subfolders: z.array(z.object({
@@ -123,7 +123,7 @@ export const OrganizeFileActionSchema = z.object({
       "Proposed new filename in YYYY.MM.DD - description.ext format",
   ),
   new_folder: z.string().describe(
-      "Target folder name (NN - Category or NN - Category/Subfolder)",
+      "Target folder name (NN-Category or NN-Category/Subfolder)",
   ),
   action: z.enum(["move", "rename", "move_and_rename", "keep"]).describe(
       "What action to take on this file",

@@ -75,11 +75,11 @@ You will receive:
 3. A batch of files with: ID, name, type, folder path, creation date, and size
 
 ## Folder naming rules:
-- Top-level folders use "NN - CategoryName" format (e.g., "01 - Personal", "02 - Work", "03 - Finance")
+- Top-level folders use "NN-CategoryName" format (e.g., "01-Personal", "02-Work", "03-Finance")
 - Use broad, intuitive categories: Personal, Work, Finance, Medical, Legal, Education, Photos, Projects, Archive
-- Subfolders are allowed ONE level deep (e.g., "02 - Work/Clients", "03 - Finance/Tax Returns")
+- Subfolders are allowed ONE level deep (e.g., "02-Work/Clients", "03-Finance/Tax Returns")
 - REUSE existing proposed folders when possible. Only add new folders if no existing category fits.
-- NEVER create a folder whose category overlaps with an existing proposed folder. For example, if "03 - Invoices" exists, do NOT create "07 - Invoices" or "07 - Bills". Use the exact existing folder name.
+- NEVER create a folder whose category overlaps with an existing proposed folder. For example, if "03-Invoices" exists, do NOT create "07-Invoices" or "07-Bills". Use the exact existing folder name.
 - If adding a new folder, use the next available NN prefix number.
 
 ## Filename rules:

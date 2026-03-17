@@ -366,7 +366,7 @@ function seedFoldersFromDrive(
 
     const prefix = String(nextPrefix).padStart(2, "0");
     nextPrefix++;
-    const newName = `${prefix} - ${baseName}`;
+    const newName = `${prefix}-${baseName}`;
 
     seenNames.set(normalizedName, newName);
 
