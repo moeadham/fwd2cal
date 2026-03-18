@@ -6,6 +6,8 @@ import {Request, Response} from "express";
 import {
   ENVIRONMENT_NAME,
   RESEND_API_KEY,
+  getSupportEmail,
+  getAdminEmail,
 } from "../util/config";
 import {
   ResendWebhookData,
@@ -116,10 +118,15 @@ export async function processInboundWebhook(
       return;
     }
 
-    // Verify the email is addressed to the expected recipient
+    // Verify the email is addressed to the expected recipient (or support/admin)
     const recipients = webhookData.data.to || [];
+    const validRecipients = new Set([
+      expectedRecipient.toLowerCase(),
+      getSupportEmail(expectedRecipient).toLowerCase(),
+      getAdminEmail(expectedRecipient).toLowerCase(),
+    ]);
     const isForUs = recipients.some(
-        (addr) => addr.toLowerCase() === expectedRecipient.toLowerCase(),
+        (addr) => validRecipients.has(addr.toLowerCase()),
     );
     if (!isForUs) {
       logger.log(
