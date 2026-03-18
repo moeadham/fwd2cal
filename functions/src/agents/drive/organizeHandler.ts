@@ -995,14 +995,11 @@ async function executeOrganizeProposal(
         const resp = await drive.files.get({
           fileId, fields: "id, parents, mimeType, size",
         });
-        const parentId = resp.data.parents?.[0];
-        if (parentId) {
-          fileMeta.set(fileId, {
-            parentId,
-            mimeType: resp.data.mimeType || "",
-            size: parseInt(resp.data.size || "0", 10),
-          });
-        }
+        fileMeta.set(fileId, {
+          parentId: resp.data.parents?.[0] || "",
+          mimeType: resp.data.mimeType || "",
+          size: parseInt(resp.data.size || "0", 10),
+        });
       } catch {
         logger.warn("Drive organize: Could not fetch file metadata", {fileId});
       }
@@ -1319,7 +1316,8 @@ async function undoOrganizeActions(
       }
 
       // Undo move (restore original parent)
-      if (entry.newParentId && entry.newParentId !== entry.originalParentId) {
+      if (entry.newParentId && entry.originalParentId &&
+          entry.newParentId !== entry.originalParentId) {
         await moveFile(
             oauth2Client, entry.fileId,
             entry.originalParentId, entry.newParentId,

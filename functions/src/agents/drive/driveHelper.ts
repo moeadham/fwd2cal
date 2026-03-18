@@ -183,7 +183,7 @@ async function moveFile(
   const response = await drive.files.update({
     fileId,
     addParents: newParentId,
-    removeParents: oldParentId,
+    removeParents: oldParentId || undefined,
     fields: "id, webViewLink, parents",
   });
 
