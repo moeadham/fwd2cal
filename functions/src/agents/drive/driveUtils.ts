@@ -81,6 +81,24 @@ export function ensureDatePrefix(filename: string, emailDate?: string): string {
 }
 
 /**
+ * Check if a file is already organized:
+ * - Name starts with a YYYY.MM.DD or YYYY-MM-DD date prefix
+ * - Immediate parent folder matches NN(N)-Category pattern
+ */
+export function isFileOrganized(
+    fileName: string, parentPath: string,
+): boolean {
+  const hasDatePrefix =
+    /^\d{4}\.\d{2}\.\d{2}\s/.test(fileName) ||
+    /^\d{4}-\d{2}-\d{2}\s/.test(fileName);
+  if (!hasDatePrefix) return false;
+
+  const segments = parentPath.split("/");
+  const immediateParent = segments[segments.length - 1];
+  return /^\d{2,3}-/.test(immediateParent);
+}
+
+/**
  * Replace template placeholders in an HTML string
  */
 export function applyTemplate(html: string, replacements: Record<string, string>): string {

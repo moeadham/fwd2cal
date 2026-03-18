@@ -30,7 +30,7 @@ import {
 } from "../../util/emailUtils";
 import {sendEmailResend} from "../../util/resend";
 import {TransformedEmail} from "../../util/types";
-import {applyTemplate, isDriveAuthError} from "./driveUtils";
+import {applyTemplate, isDriveAuthError, isFileOrganized} from "./driveUtils";
 import {
   DriveFileEntry,
   DriveOrganizeProposal,
@@ -591,28 +591,62 @@ async function scanAndPropose(
     folderRenames: folderRenameActions.filter((a) => a.action === "rename").length,
   });
 
+  // Deterministic skip: files already matching naming conventions
+  const alreadyOrganized: typeof nonFolderFiles = [];
+  const needsLlm: typeof nonFolderFiles = [];
+  for (const f of nonFolderFiles) {
+    if (isFileOrganized(f.name, f.parentPath)) {
+      alreadyOrganized.push(f);
+    } else {
+      needsLlm.push(f);
+    }
+  }
+  const preSkipActions: DriveOrganizeProposal["file_actions"] = alreadyOrganized
+      .map((f) => ({
+        file_id: f.id,
+        current_name: f.name,
+        current_path: f.parentPath,
+        new_name: f.name,
+        new_folder: f.parentPath,
+        action: "keep" as const,
+        reason: "Already organized",
+      }));
+
   // Call LLM for reorganization proposal (chunked)
   logger.info("Drive organize: Calling LLM", {
     uid, fileCount: nonFolderFiles.length,
+    alreadyOrganized: alreadyOrganized.length,
+    needsLlm: needsLlm.length,
   });
+
   let proposal: DriveOrganizeProposal;
-  try {
-    const chunkSize = ORGANIZE_DRIVE_CHUNK_SIZE.value();
-    proposal = await proposeOrganization(
-        treeSummary, fileEntries, chunkSize, uid, seedFolders,
-    );
-  } catch (error) {
-    const errMsg = error instanceof Error ? error.message : String(error);
-    logger.error("Drive organize: LLM proposal failed", {
-      uid, error: errMsg,
-    });
-    const html = applyTemplate(driveMailTemplates.organizeError.html, {});
-    await sendOrganizeEmailResponse(sender, email, html);
-    return emptyResult("LLM failed", nonFolderFiles.length);
+  if (needsLlm.length === 0) {
+    proposal = {
+      proposed_folders: seedFolders,
+      file_actions: [],
+      summary: "All files are already well-organized.",
+    };
+  } else {
+    try {
+      const chunkSize = ORGANIZE_DRIVE_CHUNK_SIZE.value();
+      const llmFileEntries = [...folderFiles, ...needsLlm];
+      proposal = await proposeOrganization(
+          treeSummary, llmFileEntries, chunkSize, uid, seedFolders,
+      );
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      logger.error("Drive organize: LLM proposal failed", {
+        uid, error: errMsg,
+      });
+      const html = applyTemplate(driveMailTemplates.organizeError.html, {});
+      await sendOrganizeEmailResponse(sender, email, html);
+      return emptyResult("LLM failed", nonFolderFiles.length);
+    }
   }
 
-  // Merge folder rename actions into the proposal
+  // Merge folder rename actions and pre-skip keeps into the proposal
   proposal.file_actions.push(...folderRenameActions);
+  proposal.file_actions.push(...preSkipActions);
 
   // Calculate cost
   const cost = calculateOrganizeCost(proposal, nonFolderFiles);
