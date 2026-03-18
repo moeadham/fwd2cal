@@ -425,6 +425,10 @@ const GOOGLE_WORKSPACE_EXPORT_MAP: Record<string, string> = {
   "application/vnd.google-apps.document": "application/pdf",
   "application/vnd.google-apps.spreadsheet": "text/csv",
   "application/vnd.google-apps.presentation": "application/pdf",
+  "application/vnd.google-apps.drawing": "application/pdf",
+  "application/vnd.google-apps.form": "application/pdf",
+  "application/vnd.google-apps.site": "application/pdf",
+  "application/vnd.google-apps.jam": "application/pdf",
 };
 
 /**
