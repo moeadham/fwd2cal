@@ -63,9 +63,10 @@ const driveMailTemplates: DriveMailTemplates = {
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
   },
   driveAuthFailed: {
-    html: `Sorry - there was an issue authenticating with Google Drive. Please click <a href="${driveSignupUrl}">to authorize Google Drive again</a>, and then forward your file another time.
+    html: `Sorry - there was an issue authenticating with Google Drive. Please click to authorize Google Drive again, and then forward your file another time.
+<br><br><a href="${driveSignupUrl}"><img src="${AGENT_HOSTING_URL.value()}/signup-with-google.png" alt="Sign Up with Google" width="182" height="42" style="display: block;"></a>
 
-Make sure you complete the checkbox to allow fwd2drive to access your Google Drive.
+<br>Make sure you complete the checkbox to allow fwd2drive to access your Google Drive.
 <img src="${AGENT_HOSTING_URL.value()}/fwd2drivePermissions.png" alt="Google Permissions" width="394" style="display: block;">
 %ORGANIZE_PROMO%
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,

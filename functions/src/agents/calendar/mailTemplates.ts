@@ -19,7 +19,8 @@ Note: If you've already signed up for fwd2cal, and want to fwd events from this 
 `,
   },
   oauthFailed: {
-    html: `Sorry - there was an issue authenticating with Google. Please click <a href="${AGENT_HOSTING_URL.value()}/signup">to authorize Google again</a>, and then forward your thread another time.
+    html: `Sorry - there was an issue authenticating with Google. Please click to authorize Google again, and then forward your thread another time.
+<br><br><a href="${AGENT_HOSTING_URL.value()}/signup"><img src="${AGENT_HOSTING_URL.value()}/signup-with-google.png" alt="Sign Up with Google" width="182" height="42" style="display: block;"></a>
 
 Make sure you complete the checkbox to allow fwd2cal to access your calendar.
 <img src="${AGENT_HOSTING_URL.value()}/fwd2calPermissions.png" alt="Google Permissions" width="394" height="170" style="display: block;">
