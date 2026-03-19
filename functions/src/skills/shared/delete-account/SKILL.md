@@ -3,9 +3,11 @@ name: delete-account
 description: Permanently delete the user's fwd2cal account and all associated data.
 triggers:
   - delete account
+  - delete my account
+  - delete this account
   - remove account
   - close account
-fastPattern: "delete\\s*account"
+fastPattern: "delete\\s+(?:\\w+\\s+)?account"
 checkBody: true
 ---
 
