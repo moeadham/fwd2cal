@@ -56,10 +56,11 @@ import {
   getFolderFileCount,
   deleteFolder,
   readDriveFileContent,
+  findSubfolderByName,
 } from "./driveHelper";
 import {proposeOrganization, proposeFilePlacement} from "./llm";
 import {extractContentSummary} from "./fileProcessor";
-import {getNextFolderPrefix} from "./driveUtils";
+import {getNextFolderPrefix, toTitleCase} from "./driveUtils";
 
 // ============================================================================
 // HELPERS
@@ -1067,7 +1068,41 @@ async function executeOrganizeProposal(
 
     try {
       if (action.action === "move" || action.action === "move_and_rename") {
-        const targetFolderId = folderMap.get(action.new_folder);
+        let targetFolderId = folderMap.get(action.new_folder);
+
+        // If the full path isn't in the map, resolve by walking/creating
+        // subdirectories (e.g. "02-Mld/Invoices/2026")
+        if (!targetFolderId && action.new_folder.includes("/")) {
+          const segments = action.new_folder.split("/");
+          // First segment should already be in folderMap (root agent folder)
+          let parentId = folderMap.get(segments[0]);
+          if (parentId) {
+            let resolvedPath = segments[0];
+            for (let si = 1; si < segments.length; si++) {
+              const subName = toTitleCase(segments[si]);
+              const cachedId = folderMap.get(`${resolvedPath}/${subName}`);
+              if (cachedId) {
+                parentId = cachedId;
+                resolvedPath = `${resolvedPath}/${subName}`;
+                continue;
+              }
+              const existingId = await findSubfolderByName(
+                  oauth2Client, parentId, subName,
+              );
+              if (existingId) {
+                parentId = existingId;
+              } else {
+                parentId = await createFolder(oauth2Client, subName, parentId);
+              }
+              resolvedPath = `${resolvedPath}/${subName}`;
+              folderMap.set(resolvedPath, parentId);
+            }
+            targetFolderId = parentId;
+            folderMap.set(action.new_folder, targetFolderId);
+            await placeMarkerFile(oauth2Client, folderMap.get(segments[0])!);
+          }
+        }
+
         if (!targetFolderId) {
           logger.warn("Drive organize: Target folder not found", {
             folder: action.new_folder, fileId: action.file_id,

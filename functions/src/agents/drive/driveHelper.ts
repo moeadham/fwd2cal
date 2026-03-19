@@ -471,6 +471,24 @@ async function readDriveFileContent(
   }
 }
 
+/**
+ * Find a subfolder by name within a parent folder.
+ */
+async function findSubfolderByName(
+    oauth2Client: Auth.OAuth2Client,
+    parentId: string,
+    name: string,
+): Promise<string | null> {
+  const drive = getDriveClient(oauth2Client);
+  const resp = await drive.files.list({
+    q: `mimeType = 'application/vnd.google-apps.folder' and '${parentId}' in parents ` +
+      `and name = '${name.replace(/'/g, "\\'")}' and trashed = false`,
+    fields: "files(id)",
+    pageSize: 1,
+  });
+  return resp.data.files?.[0]?.id || null;
+}
+
 export {
   getDriveClient,
   getDriveFolderTree,
@@ -488,4 +506,5 @@ export {
   renameFile,
   deleteFolder,
   readDriveFileContent,
+  findSubfolderByName,
 };

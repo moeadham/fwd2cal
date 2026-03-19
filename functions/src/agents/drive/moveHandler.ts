@@ -15,6 +15,7 @@ import {
   getDriveFolderTree, findFolderInTree, getRootFolderId,
   moveFile, createFolder, placeMarkerFile,
   findAgentManagedFolders, renameFolder, getFolderFileCount,
+  findSubfolderByName,
 } from "./driveHelper";
 import {interpretMoveInstructions} from "./llm";
 import {
@@ -136,23 +137,30 @@ export async function handleMoveReply(
     let newFolderPath: string;
     let skipMove = false;
 
-    // Normalize target category for dedup
-    const rawCategory = toTitleCase(move.folder_path || move.folder_id);
-    const categoryKey = rawCategory.replace(/^\d{2,3}-/, "").toLowerCase();
+    // Split path into root folder and subdirectories
+    const rawPath = move.folder_path || move.folder_id;
+    const pathSegments = rawPath.split("/").filter((s) => s.trim());
+    const rootSegment = pathSegments[0] || rawPath;
+    const subSegments = pathSegments.slice(1).map((s) => toTitleCase(s));
 
-    // Check if we already resolved this category in a previous iteration
-    const alreadyResolved = resolvedCategories.get(categoryKey);
+    // Normalize target category for dedup (use full path for uniqueness)
+    const rawCategory = toTitleCase(rootSegment);
+    const fullPathKey = [rawCategory, ...subSegments].join("/")
+        .replace(/^\d{2,3}-/, "").toLowerCase();
+
+    // Check if we already resolved this full path in a previous iteration
+    const alreadyResolved = resolvedCategories.get(fullPathKey);
     if (alreadyResolved) {
       newFolderId = alreadyResolved.folderId;
       newFolderPath = alreadyResolved.folderPath;
       // Skip move if the file is already in this folder (e.g., folder was renamed)
       skipMove = file.folderId === newFolderId;
     } else {
-      // Resolve target folder
+      // Resolve target root folder
       const needsNewFolder =
         (move.folder_id === "root" && move.folder_path) ||
         (!findFolderInTree(folderTree, move.folder_id) &&
-         !findFolderByName(folderTree, move.folder_path || move.folder_id));
+         !findFolderByName(folderTree, rootSegment));
 
       if (needsNewFolder) {
         const targetCategory = rawCategory;
@@ -166,7 +174,9 @@ export async function handleMoveReply(
         );
 
         // If source is agent-managed and will be empty, rename instead
-        if (sourceAgent && !renamedFolders.has(file.folderId)) {
+        // (only when no subdirectories — rename doesn't make sense with subdirs)
+        if (sourceAgent && !renamedFolders.has(file.folderId) &&
+            subSegments.length === 0) {
           const fileCount = await getFolderFileCount(
               oauth2Client, file.folderId,
           );
@@ -191,7 +201,8 @@ export async function handleMoveReply(
             newFolderPath = targetName;
             await placeMarkerFile(oauth2Client, newFolderId);
           }
-        } else if (renamedFolders.has(file.folderId)) {
+        } else if (renamedFolders.has(file.folderId) &&
+            subSegments.length === 0) {
           // Folder already renamed for a previous file in this batch
           newFolderId = file.folderId;
           newFolderPath = renamedFolders.get(file.folderId)!;
@@ -216,7 +227,7 @@ export async function handleMoveReply(
           newFolderPath = agentFolder.name;
         } else {
           // LLM picked a non-agent folder — create agent-managed one
-          const targetName = toTitleCase(move.folder_path || move.folder_id);
+          const targetName = toTitleCase(rootSegment);
           const nextPfx = getNextFolderPrefix(
               agentFolders.map((f) => f.name),
           );
@@ -229,8 +240,27 @@ export async function handleMoveReply(
         }
       }
 
-      // Cache the resolved category for subsequent files
-      resolvedCategories.set(categoryKey, {folderId: newFolderId, folderPath: newFolderPath});
+      // Resolve subdirectories within the root folder
+      const rootFolderIdForMarker = newFolderId;
+      for (const subName of subSegments) {
+        const existingSubId = await findSubfolderByName(
+            oauth2Client, newFolderId, subName,
+        );
+        if (existingSubId) {
+          newFolderId = existingSubId;
+        } else {
+          newFolderId = await createFolder(oauth2Client, subName, newFolderId);
+        }
+        newFolderPath = `${newFolderPath}/${subName}`;
+      }
+
+      // Place marker in root agent folder (if subdirs were created)
+      if (subSegments.length > 0) {
+        await placeMarkerFile(oauth2Client, rootFolderIdForMarker);
+      }
+
+      // Cache the resolved path for subsequent files
+      resolvedCategories.set(fullPathKey, {folderId: newFolderId, folderPath: newFolderPath});
     }
 
     // Safety net: ensure folder name has NNN- prefix — only rename managed folders
