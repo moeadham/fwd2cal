@@ -208,11 +208,23 @@ export async function handleMoveReply(
           newFolderPath = renamedFolders.get(file.folderId)!;
           skipMove = true;
         } else {
-          newFolderId = await createFolder(
-              oauth2Client, targetName, rootFolderId,
-          );
-          newFolderPath = targetName;
-          await placeMarkerFile(oauth2Client, newFolderId);
+          // Check if the target root folder already exists as an agent-managed folder
+          // (e.g. moving to "03-Finance/Invoices" when "03-Finance" already exists)
+          const existingAgent = agentFolders.find((f) => {
+            const fBase = f.name.replace(/^\d{2,3}-\s*/, "").toLowerCase();
+            const tBase = targetCategory.replace(/^\d{2,3}-\s*/, "").toLowerCase();
+            return f.name === targetName || fBase === tBase;
+          });
+          if (existingAgent) {
+            newFolderId = existingAgent.id;
+            newFolderPath = existingAgent.name;
+          } else {
+            newFolderId = await createFolder(
+                oauth2Client, targetName, rootFolderId,
+            );
+            newFolderPath = targetName;
+            await placeMarkerFile(oauth2Client, newFolderId);
+          }
         }
       } else {
         // Target folder exists — only use it if it's agent-managed
