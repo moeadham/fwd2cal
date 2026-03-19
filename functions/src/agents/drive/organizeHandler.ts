@@ -1202,13 +1202,19 @@ async function verifyOrganizeResults(
         const actualName = resp.data.name || "";
         const actualParentId = resp.data.parents?.[0] || "";
 
-        // Check name
+        // Check name — compare base names without extension because
+        // Google Drive auto-corrects extensions on Workspace files
+        // (e.g. renaming a Google Doc to .doc will become .docx)
         if (entry.newName && actualName !== entry.newName) {
-          mismatches.push({
-            fileId: entry.fileId,
-            expected: `name="${entry.newName}"`,
-            actual: `name="${actualName}"`,
-          });
+          const expectedBase = entry.newName.replace(/\.[^.]+$/, "");
+          const actualBase = actualName.replace(/\.[^.]+$/, "");
+          if (expectedBase !== actualBase) {
+            mismatches.push({
+              fileId: entry.fileId,
+              expected: `name="${entry.newName}"`,
+              actual: `name="${actualName}"`,
+            });
+          }
         }
 
         // Check parent

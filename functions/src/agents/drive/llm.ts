@@ -13,6 +13,7 @@ import {
   DriveFileEntry,
   FileInfo,
 } from "./types";
+import {isInManagedFolder} from "./driveUtils";
 import {ChatMessage, TextContent, ImageURLContent} from "../../util/types";
 
 /**
@@ -262,28 +263,86 @@ async function proposeOrganization(
     }
   }
 
-  // Back-fill files not addressed by any chunk as "keep"
+  // Back-fill files not addressed by any chunk
   const coveredIds = new Set(allFileActions.map((a) => a.file_id));
-  let backfilled = 0;
+  const uncoveredManaged: DriveFileEntry[] = [];
+  const uncoveredUnmanaged: DriveFileEntry[] = [];
   for (const file of nonFolders) {
     if (!coveredIds.has(file.id)) {
-      allFileActions.push({
-        file_id: file.id,
-        current_name: file.name,
-        current_path: file.parentPath,
-        new_name: file.name,
-        new_folder: file.parentPath,
-        action: "keep",
-        reason: "Kept in place",
-      });
-      backfilled++;
+      if (isInManagedFolder(file.parentPath)) {
+        uncoveredManaged.push(file);
+      } else {
+        uncoveredUnmanaged.push(file);
+      }
     }
   }
 
+  // Files in managed folders can be kept as-is
+  for (const file of uncoveredManaged) {
+    allFileActions.push({
+      file_id: file.id,
+      current_name: file.name,
+      current_path: file.parentPath,
+      new_name: file.name,
+      new_folder: file.parentPath,
+      action: "keep",
+      reason: "Kept in place",
+    });
+  }
+
+  // Files NOT in managed folders need proposals — retry with LLM
+  if (uncoveredUnmanaged.length > 0) {
+    logger.info("LLM organize: retrying omitted unmanaged files", {
+      count: uncoveredUnmanaged.length,
+    });
+    try {
+      const retryText = buildChunkUserText(
+          driveStructureSummary, accumulatedFolders,
+          uncoveredUnmanaged, 0, 1, uncoveredUnmanaged.length,
+      );
+      const retryMessages: ChatMessage[] = [
+        {role: "system", content: prompts.proposeOrganization.prompt},
+        {role: "user", content: retryText},
+      ];
+      const retryResult = await defaultCompletion<DriveOrganizeProposal>(
+          retryMessages,
+          prompts.proposeOrganization.model,
+          DEFAULT_TEMP,
+          DriveOrganizeProposalSchema,
+          uid,
+      );
+      const retryProposal = retryResult as DriveOrganizeProposal;
+      accumulatedFolders = retryProposal.proposed_folders;
+      allFileActions.push(...retryProposal.file_actions);
+      if (retryProposal.summary) {
+        summaries.push(retryProposal.summary);
+      }
+    } catch (err) {
+      logger.warn("LLM organize: retry for omitted files failed", err);
+    }
+
+    // Any still-uncovered files after retry get kept as final fallback
+    const retryCoveredIds = new Set(allFileActions.map((a) => a.file_id));
+    for (const file of uncoveredUnmanaged) {
+      if (!retryCoveredIds.has(file.id)) {
+        allFileActions.push({
+          file_id: file.id,
+          current_name: file.name,
+          current_path: file.parentPath,
+          new_name: file.name,
+          new_folder: file.parentPath,
+          action: "keep",
+          reason: "Kept in place",
+        });
+      }
+    }
+  }
+
+  const keptCount = allFileActions.filter((a) => a.action === "keep").length;
   logger.info("LLM organize: chunked processing complete", {
     totalFiles,
-    filesWithChanges: allFileActions.length - backfilled,
-    filesKept: backfilled,
+    filesWithChanges: allFileActions.length - keptCount,
+    filesKept: keptCount,
     finalFolders: accumulatedFolders.length,
   });
 

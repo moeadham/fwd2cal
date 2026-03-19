@@ -81,6 +81,15 @@ export function ensureDatePrefix(filename: string, emailDate?: string): string {
 }
 
 /**
+ * Check if a file's immediate parent is an agent-managed folder (NNN-Category).
+ */
+export function isInManagedFolder(parentPath: string): boolean {
+  const segments = parentPath.split("/");
+  const immediateParent = segments[segments.length - 1];
+  return /^\d{2,3}-/.test(immediateParent);
+}
+
+/**
  * Check if a file is already organized:
  * - Name starts with a YYYY.MM.DD or YYYY-MM-DD date prefix
  * - Immediate parent folder matches NN(N)-Category pattern
@@ -93,9 +102,7 @@ export function isFileOrganized(
     /^\d{4}-\d{2}-\d{2}\s/.test(fileName);
   if (!hasDatePrefix) return false;
 
-  const segments = parentPath.split("/");
-  const immediateParent = segments[segments.length - 1];
-  return /^\d{2,3}-/.test(immediateParent);
+  return isInManagedFolder(parentPath);
 }
 
 /**
