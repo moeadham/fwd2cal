@@ -57,6 +57,16 @@ async function handleDriveEmail(
     }
   }
 
+  // Check if this is a REPLY to an existing upload (move request).
+  // Must come before skill match — quoted thread body contains promo text
+  // that would otherwise match organize-drive.
+  const parsedDriveData = await parseEmbeddedDriveData(email.html || "");
+  if (parsedDriveData) {
+    return handleMoveReply(
+        email, sender, parsedDriveData.files, parsedDriveData.fileDataId,
+    );
+  }
+
   // Check for skill match (organize-drive, delete-account, remove-email)
   const skills = getSkills();
   const skillMatch = fastMatchSkill(email.subject || "", email.text || "", skills);
@@ -79,14 +89,6 @@ async function handleDriveEmail(
       return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: []};
     }
     // Unknown user — fall through to auth flow below
-  }
-
-  // Check if this is a REPLY to an existing upload (move request)
-  const parsedDriveData = await parseEmbeddedDriveData(email.html || "");
-  if (parsedDriveData) {
-    return handleMoveReply(
-        email, sender, parsedDriveData.files, parsedDriveData.fileDataId,
-    );
   }
 
   // Check if user already has OAuth — if so, organize immediately
