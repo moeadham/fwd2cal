@@ -12,7 +12,7 @@ const driveMailTemplates: DriveMailTemplates = {
 <br><br>File: <b>%PROPOSED_NAME%</b>
 <br>Folder: <b>%PROPOSED_FOLDER%</b>
 <br><br>To get started, please grant access to your Google Drive:
-<br><br><a href="%SIGNUP_LINK%" style="display:inline-block; padding:10px 20px; margin:5px 0; background-color:#3498db; color:white; text-align:center; text-decoration:none; font-weight:bold; border-radius:5px; border:none; cursor:pointer;">Grant Drive Access</a>
+<br><br><a href="%SIGNUP_LINK%"><img src="${AGENT_HOSTING_URL.value()}/signup-with-google.png" alt="Sign Up with Google" width="182" height="42" style="display: block;"></a>
 <br><br>Once authorized, your file will be organized automatically.
 %ORGANIZE_PROMO%
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
@@ -22,7 +22,7 @@ const driveMailTemplates: DriveMailTemplates = {
 <br><br>Folder: <b>%PROPOSED_FOLDER%</b>
 <br><br>%FILE_LIST%
 <br><br>To get started, please grant access to your Google Drive:
-<br><br><a href="%SIGNUP_LINK%" style="display:inline-block; padding:10px 20px; margin:5px 0; background-color:#3498db; color:white; text-align:center; text-decoration:none; font-weight:bold; border-radius:5px; border:none; cursor:pointer;">Grant Drive Access</a>
+<br><br><a href="%SIGNUP_LINK%"><img src="${AGENT_HOSTING_URL.value()}/signup-with-google.png" alt="Sign Up with Google" width="182" height="42" style="display: block;"></a>
 <br><br>Once authorized, your files will be organized automatically.
 %ORGANIZE_PROMO%
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
@@ -96,7 +96,7 @@ Once authorized, you can forward emails with attachments to <a href="mailto:driv
   organizeAuthRequired: {
     html: `We'd love to help organize your entire Google Drive!
 <br><br>To do this, we need expanded access to view and move all your files (not just the ones we've uploaded).
-<br><br><a href="%FULL_SCOPE_SIGNUP_LINK%" style="display:inline-block; padding:10px 20px; margin:5px 0; background-color:#3498db; color:white; text-align:center; text-decoration:none; font-weight:bold; border-radius:5px; border:none; cursor:pointer;">Grant Full Drive Access</a>
+<br><br><a href="%FULL_SCOPE_SIGNUP_LINK%"><img src="${AGENT_HOSTING_URL.value()}/signup-with-google.png" alt="Sign Up with Google" width="182" height="42" style="display: block;"></a>
 <br><br>We take your privacy seriously. We will only propose changes &mdash; nothing moves until you approve.
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
   },
