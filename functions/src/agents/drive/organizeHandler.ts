@@ -54,6 +54,7 @@ import {
   getDriveClient,
   findAgentManagedFolders,
   getFolderFileCount,
+  getFolderChildren,
   deleteFolder,
   readDriveFileContent,
   findSubfolderByName,
@@ -1352,12 +1353,34 @@ async function handleOrganizeUndo(
 async function cleanupEmptyManagedFolders(
     oauth2Client: Auth.OAuth2Client,
 ): Promise<void> {
+  const FOLDER_MIME = "application/vnd.google-apps.folder";
   try {
     const managedFolders = await findAgentManagedFolders(oauth2Client);
     let deleted = 0;
     for (const folder of managedFolders) {
-      const fileCount = await getFolderFileCount(oauth2Client, folder.id);
-      if (fileCount === 0) {
+      const children = await getFolderChildren(oauth2Client, folder.id);
+      if (children.length === 0) {
+        await deleteFolder(oauth2Client, folder.id);
+        deleted++;
+        continue;
+      }
+
+      // Check if all children are empty folders — if so, delete them all
+      const allEmptyFolders = children.every((c) => c.mimeType === FOLDER_MIME);
+      if (!allEmptyFolders) continue;
+
+      let allEmpty = true;
+      for (const child of children) {
+        const count = await getFolderFileCount(oauth2Client, child.id);
+        if (count > 0) {
+          allEmpty = false;
+          break;
+        }
+      }
+      if (allEmpty) {
+        for (const child of children) {
+          await deleteFolder(oauth2Client, child.id);
+        }
         await deleteFolder(oauth2Client, folder.id);
         deleted++;
       }

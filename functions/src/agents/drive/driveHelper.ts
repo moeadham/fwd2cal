@@ -489,6 +489,37 @@ async function findSubfolderByName(
   return resp.data.files?.[0]?.id || null;
 }
 
+/**
+ * List direct children of a folder with id, name, and mimeType.
+ * Excludes the marker file.
+ */
+async function getFolderChildren(
+    oauth2Client: Auth.OAuth2Client,
+    folderId: string,
+): Promise<Array<{id: string; name: string; mimeType: string}>> {
+  const drive = getDriveClient(oauth2Client);
+  const children: Array<{id: string; name: string; mimeType: string}> = [];
+  let pageToken: string | undefined;
+  do {
+    const response = await drive.files.list({
+      q: `'${folderId}' in parents and trashed = false` +
+        ` and name != '.sorted.by.fwd2drive.com'`,
+      fields: "nextPageToken, files(id, name, mimeType)",
+      pageSize: 100,
+      pageToken,
+    });
+    for (const file of response.data.files || []) {
+      if (file.id && file.name && file.mimeType) {
+        children.push({
+          id: file.id, name: file.name, mimeType: file.mimeType,
+        });
+      }
+    }
+    pageToken = response.data.nextPageToken || undefined;
+  } while (pageToken);
+  return children;
+}
+
 export {
   getDriveClient,
   getDriveFolderTree,
@@ -501,6 +532,7 @@ export {
   findAgentManagedFolders,
   renameFolder,
   getFolderFileCount,
+  getFolderChildren,
   getDriveFolderParent,
   listAllDriveFiles,
   renameFile,
