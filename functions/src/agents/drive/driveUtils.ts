@@ -4,7 +4,7 @@ import {
 } from "../../util/firestoreHandler";
 import {sendEmailResend} from "../../util/resend";
 import {getSupportEmail} from "../../util/config";
-import {AGENT_EMAIL_ADDRESS, ORGANIZE_PROMO_HTML} from "./config";
+import {AGENT_EMAIL_ADDRESS, AGENT_HOSTING_URL, ORGANIZE_PROMO_HTML} from "./config";
 import {isOrganizeDriveEnabled} from "../../util/featureFlags";
 import {getEmailThreadHeaders, threadEmailHtml} from "../../util/emailUtils";
 import {TransformedEmail} from "../../util/types";
@@ -110,6 +110,7 @@ export function isFileOrganized(
  */
 export function applyTemplate(html: string, replacements: Record<string, string>): string {
   let result = html;
+  result = result.replace(/%HOSTING_URL%/g, AGENT_HOSTING_URL.value());
   result = result.replace(/%SUPPORT_EMAIL%/g, getSupportEmail(AGENT_EMAIL_ADDRESS.value()));
   result = result.replace(/%ORGANIZE_PROMO%/g, isOrganizeDriveEnabled() ? ORGANIZE_PROMO_HTML : "");
   for (const [key, value] of Object.entries(replacements)) {

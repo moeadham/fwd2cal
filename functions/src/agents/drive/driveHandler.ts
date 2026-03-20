@@ -159,7 +159,7 @@ async function handleDriveEmail(
     },
   });
   const encodedState = Buffer.from(statePayload).toString("base64url");
-  const signupLink = `${driveSignupUrl}?state=${encodeURIComponent(encodedState)}`;
+  const signupLink = `${driveSignupUrl()}?state=${encodeURIComponent(encodedState)}`;
 
   // Send auth-required email showing what we'll organize
   const emailDate = email.headers?.date;

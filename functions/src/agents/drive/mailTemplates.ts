@@ -2,9 +2,9 @@
 import {DriveMailTemplates} from "./types";
 import {AGENT_HOSTING_URL} from "./config";
 
-export const driveFullScopeSignupUrl = `${AGENT_HOSTING_URL.value()}/drive/v2/fullScopeSignup`;
-export const driveSignupUrl = `${AGENT_HOSTING_URL.value()}/drive/v2/signup`;
-export const driveOrganizeActionUrl = `${AGENT_HOSTING_URL.value()}/drive/v2/organizeAction`;
+export const driveFullScopeSignupUrl = () => `${AGENT_HOSTING_URL.value()}/drive/v2/fullScopeSignup`;
+export const driveSignupUrl = () => `${AGENT_HOSTING_URL.value()}/drive/v2/signup`;
+export const driveOrganizeActionUrl = () => `${AGENT_HOSTING_URL.value()}/drive/v2/organizeAction`;
 
 const driveMailTemplates: DriveMailTemplates = {
   fileProposal: {
@@ -12,7 +12,7 @@ const driveMailTemplates: DriveMailTemplates = {
 <br><br>File: <b>%PROPOSED_NAME%</b>
 <br>Folder: <b>%PROPOSED_FOLDER%</b>
 <br><br>To get started, please grant access to your Google Drive:
-<br><br><a href="%SIGNUP_LINK%"><img src="${AGENT_HOSTING_URL.value()}/signup-with-google.png" alt="Sign Up with Google" width="182" height="42" style="display: block;"></a>
+<br><br><a href="%SIGNUP_LINK%"><img src="%HOSTING_URL%/signup-with-google.png" alt="Sign Up with Google" width="182" height="42" style="display: block;"></a>
 <br><br>Once authorized, your file will be organized automatically.
 %ORGANIZE_PROMO%
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
@@ -22,7 +22,7 @@ const driveMailTemplates: DriveMailTemplates = {
 <br><br>Folder: <b>%PROPOSED_FOLDER%</b>
 <br><br>%FILE_LIST%
 <br><br>To get started, please grant access to your Google Drive:
-<br><br><a href="%SIGNUP_LINK%"><img src="${AGENT_HOSTING_URL.value()}/signup-with-google.png" alt="Sign Up with Google" width="182" height="42" style="display: block;"></a>
+<br><br><a href="%SIGNUP_LINK%"><img src="%HOSTING_URL%/signup-with-google.png" alt="Sign Up with Google" width="182" height="42" style="display: block;"></a>
 <br><br>Once authorized, your files will be organized automatically.
 %ORGANIZE_PROMO%
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
@@ -64,10 +64,10 @@ const driveMailTemplates: DriveMailTemplates = {
   },
   driveAuthFailed: {
     html: `Sorry - there was an issue authenticating with Google Drive. Please click to authorize Google Drive again, and then forward your file another time.
-<br><br><a href="${driveSignupUrl}"><img src="${AGENT_HOSTING_URL.value()}/signup-with-google.png" alt="Sign Up with Google" width="182" height="42" style="display: block;"></a>
+<br><br><a href="%HOSTING_URL%/drive/v2/signup"><img src="%HOSTING_URL%/signup-with-google.png" alt="Sign Up with Google" width="182" height="42" style="display: block;"></a>
 
 <br>Make sure you complete the checkbox to allow fwd2drive to access your Google Drive.
-<img src="${AGENT_HOSTING_URL.value()}/fwd2drivePermissions.png" alt="Google Permissions" width="394" style="display: block;">
+<img src="%HOSTING_URL%/fwd2drivePermissions.png" alt="Google Permissions" width="394" style="display: block;">
 %ORGANIZE_PROMO%
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
   },
@@ -79,7 +79,7 @@ const driveMailTemplates: DriveMailTemplates = {
   noUserFound: {
     html: `Welcome to fwd2drive!<br><br>
 To get started, please grant access to your Google Drive:<br><br>
-<a href="${driveSignupUrl}"><img src="${AGENT_HOSTING_URL.value()}/signup-with-google.png" alt="Sign Up with Google" width="182" height="42" style="display: block;"></a><br><br>
+<a href="%HOSTING_URL%/drive/v2/signup"><img src="%HOSTING_URL%/signup-with-google.png" alt="Sign Up with Google" width="182" height="42" style="display: block;"></a><br><br>
 Once authorized, you can forward emails with attachments to <a href="mailto:drive@fwd2drive.com">drive@fwd2drive.com</a> and they'll be organized in your Google Drive automatically.<br><br>
 %ORGANIZE_PROMO%
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
@@ -97,7 +97,7 @@ Once authorized, you can forward emails with attachments to <a href="mailto:driv
   organizeAuthRequired: {
     html: `We'd love to help organize your entire Google Drive!
 <br><br>To do this, we need expanded access to view and move all your files (not just the ones we've uploaded).
-<br><br><a href="%FULL_SCOPE_SIGNUP_LINK%"><img src="${AGENT_HOSTING_URL.value()}/signup-with-google.png" alt="Sign Up with Google" width="182" height="42" style="display: block;"></a>
+<br><br><a href="%FULL_SCOPE_SIGNUP_LINK%"><img src="%HOSTING_URL%/signup-with-google.png" alt="Sign Up with Google" width="182" height="42" style="display: block;"></a>
 <br><br>We take your privacy seriously. We will only propose changes &mdash; nothing moves until you approve.
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
   },

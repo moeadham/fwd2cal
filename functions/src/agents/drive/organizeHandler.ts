@@ -473,7 +473,7 @@ async function sendOrganizeAuthRequiredEmail(
 ): Promise<OrganizeProcessingResult> {
   const statePayload = JSON.stringify({emailId, organize: true});
   const encodedState = Buffer.from(statePayload).toString("base64url");
-  const signupLink = `${driveFullScopeSignupUrl}?state=${encodeURIComponent(encodedState)}`;
+  const signupLink = `${driveFullScopeSignupUrl()}?state=${encodeURIComponent(encodedState)}`;
 
   const html = applyTemplate(driveMailTemplates.organizeAuthRequired.html, {
     FULL_SCOPE_SIGNUP_LINK: signupLink,
@@ -494,7 +494,7 @@ async function sendOrganizeScopeUpgradeEmail(
 ): Promise<OrganizeProcessingResult> {
   const statePayload = JSON.stringify({emailId, organize: true});
   const encodedState = Buffer.from(statePayload).toString("base64url");
-  const signupLink = `${driveFullScopeSignupUrl}?state=${encodeURIComponent(encodedState)}`;
+  const signupLink = `${driveFullScopeSignupUrl()}?state=${encodeURIComponent(encodedState)}`;
 
   const html = applyTemplate(driveMailTemplates.organizeAuthRequired.html, {
     FULL_SCOPE_SIGNUP_LINK: signupLink,
@@ -686,7 +686,7 @@ async function scanAndPropose(
   const folderTreeHtml = renderFolderTree(proposal);
 
   const approveToken = signActionToken(proposalId, "approve");
-  const approveLink = `${driveOrganizeActionUrl}?proposalId=${proposalId}&action=approve&token=${approveToken}`;
+  const approveLink = `${driveOrganizeActionUrl()}?proposalId=${proposalId}&action=approve&token=${approveToken}`;
 
   const html = applyTemplate(driveMailTemplates.organizeProposal.html, {
     SUMMARY: proposal.summary,
@@ -894,7 +894,7 @@ async function handleOrganizeApproval(
   const embeddedHtml = buildOrganizeEmbeddedData(embeddedData);
 
   const undoToken = signActionToken(proposalId, "undo");
-  const undoLink = `${driveOrganizeActionUrl}?proposalId=${proposalId}&action=undo&token=${undoToken}`;
+  const undoLink = `${driveOrganizeActionUrl()}?proposalId=${proposalId}&action=undo&token=${undoToken}`;
 
   const html = applyTemplate(driveMailTemplates.organizeComplete.html, {
     SUMMARY: proposal.summary,

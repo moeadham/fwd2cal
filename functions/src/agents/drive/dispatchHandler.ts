@@ -277,7 +277,7 @@ export async function handleDriveConfirm(
 
   // No OAuth — redirect to signup with emailId as state
   const encodedState = Buffer.from(JSON.stringify({emailId})).toString("base64url");
-  res.redirect(302, `${driveSignupUrl}?state=${encodeURIComponent(encodedState)}`);
+  res.redirect(302, `${driveSignupUrl()}?state=${encodeURIComponent(encodedState)}`);
 }
 
 export async function handleOrganizeAction(

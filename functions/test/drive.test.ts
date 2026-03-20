@@ -185,7 +185,7 @@ describe("fwd2cal Drive Agent", function() {
     expect(res.body.sentEmail.html).to.include("organize your file");
 
     // Verify auth signup link is present
-    expect(res.body.sentEmail.html).to.include("Grant Drive Access");
+    expect(res.body.sentEmail.html).to.include("Sign Up with Google");
     expect(res.body.sentEmail.html).to.include("/drive/v2/signup");
 
     // Verify threading headers

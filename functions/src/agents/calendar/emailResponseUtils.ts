@@ -1,7 +1,7 @@
 import {logger} from "firebase-functions/v2";
 import {sendEmailResend} from "../../util/resend";
 import {getSupportEmail} from "../../util/config";
-import {AGENT_EMAIL_ADDRESS} from "./config";
+import {AGENT_EMAIL_ADDRESS, AGENT_HOSTING_URL} from "./config";
 import {getEmailThreadHeaders, threadEmailHtml} from "../../util/emailUtils";
 import {mailTemplates} from "./mailTemplates";
 import {
@@ -93,6 +93,7 @@ export function getHtml(messageType: EmailResponseTemplate): string {
   const template =
     mailTemplates[messageType.templateName as keyof typeof mailTemplates];
   let html = template.html;
+  html = html.replace(/%HOSTING_URL%/g, AGENT_HOSTING_URL.value());
   Object.keys(messageType.replace).forEach((key) => {
     html = html.replace(new RegExp(`%${key}%`, "g"), messageType.replace[key]);
   });
