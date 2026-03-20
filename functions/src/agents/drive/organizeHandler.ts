@@ -60,7 +60,7 @@ import {
   findSubfolderByName,
 } from "./driveHelper";
 import {proposeOrganization, proposeFilePlacement} from "./llm";
-import {extractContentSummary} from "./fileProcessor";
+import {extractContentSummary, extractDocumentImageUrls} from "./fileProcessor";
 import {getNextFolderPrefix, toTitleCase} from "./driveUtils";
 
 // ============================================================================
@@ -1131,14 +1131,34 @@ async function executeOrganizeProposal(
           // Skip files exceeding the upload size limit (same as file proposal flow)
           let finalName = action.new_name;
           try {
-            const fileContent = meta.size <= MAX_DRIVE_UPLOAD_BYTES.value() ?
+            let fileContent = meta.size <= MAX_DRIVE_UPLOAD_BYTES.value() ?
               await readDriveFileContent(oauth2Client, action.file_id, meta.mimeType) :
               null;
             if (fileContent) {
               const contentSummary = await extractContentSummary(
                   fileContent.buffer, fileContent.parserMimeType,
               );
-              if (contentSummary) {
+              // Mirror file-proposal image extraction (buildFileInfos + collectImageUrls)
+              // 1. Document page images (same as buildFileInfos → extractDocumentImageUrls)
+              const docImageUrls = await extractDocumentImageUrls(
+                  fileContent.buffer, fileContent.parserMimeType,
+              );
+              // 2. Image files directly as base64 (equivalent to collectImageUrls, but
+              //    we already have the buffer instead of a download URL)
+              const imageExtensions = [".png", ".jpg", ".jpeg", ".webp"];
+              const isImage = imageExtensions.some((ext) =>
+                  action.current_name.toLowerCase().endsWith(ext));
+              const directImageUrls: string[] = [];
+              if (isImage && fileContent.buffer.length <= 50 * 1024 * 1024) {
+                const base64 = fileContent.buffer.toString("base64");
+                directImageUrls.push(`data:${meta.mimeType};base64,${base64}`);
+              }
+              const imageUrls = [...docImageUrls, ...directImageUrls];
+              // Release buffer before LLM call to avoid holding both buffer + base64 in memory
+              fileContent = null;
+
+              // Proceed if we have text content OR image data for the LLM
+              if (contentSummary || imageUrls.length > 0) {
                 const fileInfo: FileInfo = {
                   fileName: action.current_name,
                   mimeType: meta.mimeType,
@@ -1148,7 +1168,7 @@ async function executeOrganizeProposal(
                 const agentFolderNames = [...folderMap.keys()];
                 const nextPrefix = getNextFolderPrefix(agentFolderNames);
                 const placement = await proposeFilePlacement(
-                    [fileInfo], "", "", agentFolderNames, nextPrefix, uid,
+                    [fileInfo], "", "", agentFolderNames, nextPrefix, uid, imageUrls,
                 );
                 if (placement.proposals[0]?.suggested_name) {
                   finalName = placement.proposals[0].suggested_name;
