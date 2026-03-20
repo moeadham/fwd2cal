@@ -1,6 +1,7 @@
 import {logger} from "firebase-functions/v2";
 import {getOauthClient} from "../../auth/authHandler";
-import {AGENT_NAME} from "./config";
+import {getUserFromEmail} from "../../util/firestoreHandler";
+import {AGENT_NAME, DRIVE_USER_EMAIL} from "./config";
 import {sendEvent} from "../../util/analytics";
 import {MAX_DRIVE_UPLOAD_BYTES} from "./config";
 import {getSenderFromRawEmail} from "../../util/emailUtils";
@@ -21,9 +22,10 @@ import {
   toTitleCase, getExtension, ensureDatePrefix,
   applyTemplate, sendDriveEmailResponse, getNextFolderPrefix,
   buildEmbeddedDriveData, buildFileInfos, callProposalWithFallback,
-  isDriveAuthError,
+  isDriveAuthError, extractDriveFileIds, downloadDriveLinkedFiles,
 } from "./driveUtils";
 import {Auth} from "googleapis";
+import {Readable} from "stream";
 
 /**
  * Resolve the target folder for file uploads.
@@ -94,7 +96,9 @@ async function uploadSingleFile(
     rootFolderId: string,
 ): Promise<ProcessedDriveFile> {
   try {
-    const stream = await streamFromUrl(attachment.downloadUrl);
+    const stream = attachment.content ?
+      Readable.from(attachment.content) :
+      await streamFromUrl(attachment.downloadUrl);
     const uploaded = await uploadFile(
         oauth2Client, targetFolderId, suggestedName,
         attachment.contentType, stream,
@@ -118,7 +122,9 @@ async function uploadSingleFile(
     });
     // Fallback: upload with original name to root
     try {
-      const fallbackStream = await streamFromUrl(attachment.downloadUrl);
+      const fallbackStream = attachment.content ?
+        Readable.from(attachment.content) :
+        await streamFromUrl(attachment.downloadUrl);
       const uploaded = await uploadFile(
           oauth2Client, rootFolderId, attachment.filename,
           attachment.contentType, fallbackStream,
@@ -204,12 +210,55 @@ export async function processUpload(
   const attachments = await listAttachments(resend, resendEmailId, maxUploadBytes);
 
   if (attachments.length === 0) {
+    // Check for Gmail-saved Drive attachments (links in HTML instead of MIME attachments)
+    const driveFileIds = extractDriveFileIds(originalEmail.html || "");
+    if (driveFileIds.length > 0) {
+      logger.info("Drive: No attachments but Drive links detected, attempting download", {
+        resendEmailId, driveFileIds,
+      });
+      try {
+        const agentUid = await getUserFromEmail(DRIVE_USER_EMAIL.value());
+        if (agentUid) {
+          const agentOauth = await getOauthClient(agentUid, AGENT_NAME);
+          const driveAttachments = await downloadDriveLinkedFiles(
+              agentOauth, driveFileIds, maxUploadBytes,
+          );
+          if (driveAttachments.length > 0) {
+            // Successfully downloaded — continue with normal upload flow using these as attachments
+            return processUploadWithAttachments(
+                oauth2Client, uid, sender, originalEmail, driveAttachments,
+            );
+          }
+        }
+      } catch (error) {
+        logger.warn("Drive: Failed to download Drive-linked files", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
     logger.warn("Drive: No attachments on re-fetch", {resendEmailId});
     const html = applyTemplate(driveMailTemplates.noAttachments.html, {});
     await sendDriveEmailResponse(sender, originalEmail, html);
     return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: [], error: "No attachments"};
   }
 
+  return processUploadWithAttachments(
+      oauth2Client, uid, sender, originalEmail, attachments, savedProposal,
+  );
+}
+
+/**
+ * Core upload logic — takes already-resolved attachments (from Resend or Drive links)
+ * and runs the LLM proposal + folder resolution + upload + confirmation flow.
+ */
+async function processUploadWithAttachments(
+    oauth2Client: Auth.OAuth2Client,
+    uid: string,
+    sender: string,
+    originalEmail: TransformedEmail,
+    attachments: DriveAttachment[],
+    savedProposal?: FileProposal,
+): Promise<DriveProcessingResult> {
   // Get agent-managed folders
   let agentFolders;
   try {

@@ -1147,7 +1147,7 @@ async function executeOrganizeProposal(
               //    we already have the buffer instead of a download URL)
               const imageExtensions = [".png", ".jpg", ".jpeg", ".webp"];
               const isImage = imageExtensions.some((ext) =>
-                  action.current_name.toLowerCase().endsWith(ext));
+                action.current_name.toLowerCase().endsWith(ext));
               const directImageUrls: string[] = [];
               if (isImage && fileContent.buffer.length <= 50 * 1024 * 1024) {
                 const base64 = fileContent.buffer.toString("base64");

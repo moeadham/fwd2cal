@@ -7,6 +7,8 @@ interface ImageCandidate {
   filename: string;
   size: number;
   downloadUrl: string;
+  content?: Buffer | null;
+  contentType?: string;
 }
 
 /**
@@ -23,7 +25,13 @@ function collectImageUrls(attachments: ImageCandidate[]): string[] {
 
     if (isImage) {
       if (totalSize + attachment.size <= MAX_IMAGE_PAYLOAD_BYTES) {
-        imageUrls.push(attachment.downloadUrl);
+        // Use base64 data URL when content is available (e.g. Drive-linked files)
+        if (attachment.content && !attachment.downloadUrl) {
+          const mime = attachment.contentType || "image/jpeg";
+          imageUrls.push(`data:${mime};base64,${attachment.content.toString("base64")}`);
+        } else {
+          imageUrls.push(attachment.downloadUrl);
+        }
         totalSize += attachment.size;
         logger.info("Added image URL for LLM processing", {
           filename: attachment.filename,

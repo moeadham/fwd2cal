@@ -14,6 +14,7 @@ import {
 } from "./types";
 import {downloadAttachmentBuffer, extractContentSummary, extractDocumentImageUrls} from "./fileProcessor";
 import {proposeFilePlacement} from "./llm";
+import {Auth} from "googleapis";
 
 /**
  * Check if an error message indicates an OAuth/authentication failure.
@@ -103,6 +104,80 @@ export function isFileOrganized(
   if (!hasDatePrefix) return false;
 
   return isInManagedFolder(parentPath);
+}
+
+/**
+ * Extract Google Drive file IDs from email HTML.
+ * Gmail auto-saves large attachments to Drive and replaces
+ * them with links — these emails arrive with no MIME attachments.
+ */
+export function extractDriveFileIds(html: string): string[] {
+  const ids = new Set<string>();
+  const patterns = [
+    /drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/g,
+    /drive\.google\.com\/(?:open|uc)\?[^"]*id=([a-zA-Z0-9_-]+)/g,
+  ];
+  for (const pattern of patterns) {
+    let match;
+    while ((match = pattern.exec(html)) !== null) {
+      ids.add(match[1]);
+    }
+  }
+  return [...ids];
+}
+
+/**
+ * Download files from Google Drive using the agent's OAuth credentials.
+ * The agent account has view access because Gmail shares files with the recipient.
+ * Returns DriveAttachment objects for files that were accessible.
+ */
+export async function downloadDriveLinkedFiles(
+    agentOauthClient: Auth.OAuth2Client,
+    fileIds: string[],
+    maxBytes: number,
+): Promise<DriveAttachment[]> {
+  const {google} = await import("googleapis");
+  const drive = google.drive({version: "v3", auth: agentOauthClient});
+  const results: DriveAttachment[] = [];
+
+  for (const fileId of fileIds) {
+    try {
+      // Get file metadata
+      const meta = await drive.files.get({
+        fileId,
+        fields: "name,mimeType,size",
+      });
+      const name = meta.data.name || `drive-file-${fileId}`;
+      const mimeType = meta.data.mimeType || "application/octet-stream";
+      const size = parseInt(meta.data.size || "0", 10);
+
+      if (size > maxBytes && size > 0) {
+        logger.warn("Drive: Shared Drive file too large, skipping", {fileId, size, maxBytes});
+        continue;
+      }
+
+      // Download file content
+      const resp = await drive.files.get(
+          {fileId, alt: "media"},
+          {responseType: "arraybuffer"},
+      );
+      const buffer = Buffer.from(resp.data as ArrayBuffer);
+
+      results.push({
+        filename: name,
+        contentType: mimeType,
+        size: buffer.length,
+        content: buffer,
+        downloadUrl: "",
+      });
+      logger.info("Drive: Downloaded shared Drive file", {fileId, name, size: buffer.length});
+    } catch (error) {
+      logger.debug("Drive: Could not access shared Drive file", {
+        fileId, error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return results;
 }
 
 /**
@@ -276,7 +351,7 @@ export async function buildFileInfos(
   const allDocumentImageUrls: string[] = [];
 
   const fileInfos = await Promise.all(attachments.map(async (attachment) => {
-    const buffer = await downloadAttachmentBuffer(
+    const buffer = attachment.content ?? await downloadAttachmentBuffer(
         attachment.downloadUrl, attachment.filename,
     );
     const contentSummary = buffer ?

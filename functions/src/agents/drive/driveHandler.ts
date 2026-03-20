@@ -1,7 +1,8 @@
 import {logger} from "firebase-functions/v2";
 import {getUserFromEmail, getUserFromUID, DRIVE_USERS_COLLECTION} from "../../util/firestoreHandler";
 import {sendEvent} from "../../util/analytics";
-import {MAX_DRIVE_UPLOAD_BYTES} from "./config";
+import {getOauthClient} from "../../auth/authHandler";
+import {MAX_DRIVE_UPLOAD_BYTES, AGENT_NAME, DRIVE_USER_EMAIL} from "./config";
 import {getSenderFromRawEmail, verifyEmail} from "../../util/emailUtils";
 import {TransformedEmail, ResendClient} from "../../util/types";
 import {DriveProcessingResult} from "./types";
@@ -17,6 +18,7 @@ import {
   parseEmbeddedDriveData, parseOrganizeEmbeddedData,
   applyTemplate, sendDriveEmailResponse, getNextFolderPrefix,
   buildFileInfos, callProposalWithFallback, getExtension, ensureDatePrefix,
+  extractDriveFileIds, downloadDriveLinkedFiles,
 } from "./driveUtils";
 import {processUpload} from "./uploadHandler";
 import {handleMoveReply} from "./moveHandler";
@@ -114,19 +116,45 @@ async function handleDriveEmail(
   const attachments = await listAttachments(resend, emailId, maxUploadBytes);
 
   if (attachments.length === 0) {
-    if (!uid) {
-      // New user with no attachments — send welcome/signup invitation
-      logger.info("Drive: New user without attachments — sending signup invitation", {sender});
-      const html = applyTemplate(driveMailTemplates.noUserFound.html, {});
-      await sendDriveEmailResponse(sender, email, html);
-      sendEvent(sender, "driveUserInvited");
-      return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: []};
+    // Check if Gmail auto-saved attachments to Drive (links in HTML instead of MIME)
+    const driveFileIds = extractDriveFileIds(email.html || "");
+    if (driveFileIds.length > 0) {
+      logger.info("Drive: No attachments but Drive links detected, downloading via agent", {
+        sender, driveFileIds,
+      });
+      try {
+        const agentUid = await getUserFromEmail(DRIVE_USER_EMAIL.value());
+        if (agentUid) {
+          const agentOauth = await getOauthClient(agentUid, AGENT_NAME);
+          const driveAttachments = await downloadDriveLinkedFiles(
+              agentOauth, driveFileIds, maxUploadBytes,
+          );
+          if (driveAttachments.length > 0) {
+            // Successfully downloaded — treat as regular attachments and continue to proposal flow
+            attachments.push(...driveAttachments);
+          }
+        }
+      } catch (error) {
+        logger.warn("Drive: Failed to download Drive-linked files via agent", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
-    // Returning user who forgot attachments
-    logger.info("Drive: No attachments found", {sender});
-    const html = applyTemplate(driveMailTemplates.noAttachments.html, {});
-    await sendDriveEmailResponse(sender, email, html);
-    return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: [], error: "No attachments"};
+    if (attachments.length === 0) {
+      if (!uid) {
+        // New user with no attachments — send welcome/signup invitation
+        logger.info("Drive: New user without attachments — sending signup invitation", {sender});
+        const html = applyTemplate(driveMailTemplates.noUserFound.html, {});
+        await sendDriveEmailResponse(sender, email, html);
+        sendEvent(sender, "driveUserInvited");
+        return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: []};
+      }
+      // Returning user who forgot attachments
+      logger.info("Drive: No attachments found", {sender});
+      const html = applyTemplate(driveMailTemplates.noAttachments.html, {});
+      await sendDriveEmailResponse(sender, email, html);
+      return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: [], error: "No attachments"};
+    }
   }
 
   // Download and extract content summaries + document page images for LLM preview

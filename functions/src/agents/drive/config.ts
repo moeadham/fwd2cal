@@ -13,6 +13,10 @@ export const AGENT_EMAIL_ADDRESS = defineString("DRIVE_EMAIL_ADDRESS", {
   default: "drive@fwd2drive.com",
 });
 
+export const DRIVE_USER_EMAIL = defineString("DRIVE_USER_EMAIL", {
+  default: "drive@fwd2drive.com",
+});
+
 export const MAX_DRIVE_UPLOAD_BYTES = defineInt("MAX_DRIVE_UPLOAD_BYTES", {
   default: 26214400, // 25MB
 });
