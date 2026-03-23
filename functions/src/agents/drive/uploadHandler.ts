@@ -211,7 +211,7 @@ export async function processUpload(
 
   if (attachments.length === 0) {
     // Check for Gmail-saved Drive attachments (links in HTML instead of MIME attachments)
-    const driveFileIds = extractDriveFileIds(originalEmail.html || "");
+    const driveFileIds = extractDriveFileIds(originalEmail.html || "", originalEmail.text || "");
     if (driveFileIds.length > 0) {
       logger.info("Drive: No attachments but Drive links detected, attempting download", {
         resendEmailId, driveFileIds,

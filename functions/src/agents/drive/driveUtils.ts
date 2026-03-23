@@ -110,12 +110,15 @@ export function isFileOrganized(
  * Extract Google Drive file IDs from email HTML.
  * Gmail auto-saves large attachments to Drive and replaces
  * them with links — these emails arrive with no MIME attachments.
+ * Also matches Google Workspace links (docs, sheets, slides, drawings).
  */
-export function extractDriveFileIds(html: string): string[] {
+export function extractDriveFileIds(...sources: string[]): string[] {
+  const html = sources.join(" ");
   const ids = new Set<string>();
   const patterns = [
     /drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/g,
     /drive\.google\.com\/(?:open|uc)\?[^"]*id=([a-zA-Z0-9_-]+)/g,
+    /docs\.google\.com\/(?:document|spreadsheets|presentation|drawings)\/d\/([a-zA-Z0-9_-]+)/g,
   ];
   for (const pattern of patterns) {
     let match;
@@ -140,6 +143,22 @@ export async function downloadDriveLinkedFiles(
   const drive = google.drive({version: "v3", auth: agentOauthClient});
   const results: DriveAttachment[] = [];
 
+  // Google Workspace MIME types require export (no binary content)
+  const DOCX = "application/vnd.openxmlformats-officedocument" +
+    ".wordprocessingml.document";
+  const XLSX = "application/vnd.openxmlformats-officedocument" +
+    ".spreadsheetml.sheet";
+  const PPTX = "application/vnd.openxmlformats-officedocument" +
+    ".presentationml.presentation";
+  const WORKSPACE_EXPORT_MAP: Record<string, {
+    mimeType: string; ext: string;
+  }> = {
+    "application/vnd.google-apps.document": {mimeType: DOCX, ext: ".docx"},
+    "application/vnd.google-apps.spreadsheet": {mimeType: XLSX, ext: ".xlsx"},
+    "application/vnd.google-apps.presentation": {mimeType: PPTX, ext: ".pptx"},
+    "application/vnd.google-apps.drawing": {mimeType: "application/pdf", ext: ".pdf"},
+  };
+
   for (const fileId of fileIds) {
     try {
       // Get file metadata
@@ -151,26 +170,51 @@ export async function downloadDriveLinkedFiles(
       const mimeType = meta.data.mimeType || "application/octet-stream";
       const size = parseInt(meta.data.size || "0", 10);
 
-      if (size > maxBytes && size > 0) {
+      const exportInfo = WORKSPACE_EXPORT_MAP[mimeType];
+
+      if (!exportInfo && size > maxBytes && size > 0) {
         logger.warn("Drive: Shared Drive file too large, skipping", {fileId, size, maxBytes});
         continue;
       }
 
-      // Download file content
-      const resp = await drive.files.get(
-          {fileId, alt: "media"},
-          {responseType: "arraybuffer"},
-      );
-      const buffer = Buffer.from(resp.data as ArrayBuffer);
+      let buffer: Buffer;
+      let finalName = name;
+      let finalMimeType = mimeType;
+
+      if (exportInfo) {
+        // Google Workspace files must be exported (they have no direct binary content)
+        const resp = await drive.files.export(
+            {fileId, mimeType: exportInfo.mimeType},
+            {responseType: "arraybuffer"},
+        );
+        buffer = Buffer.from(resp.data as ArrayBuffer);
+        finalMimeType = exportInfo.mimeType;
+        // Append export extension if the name doesn't already have one
+        if (!name.match(/\.\w{2,5}$/)) {
+          finalName = name + exportInfo.ext;
+        }
+
+        if (buffer.length > maxBytes) {
+          logger.warn("Drive: Exported Workspace file too large, skipping", {fileId, size: buffer.length, maxBytes});
+          continue;
+        }
+      } else {
+        // Regular file — download directly
+        const resp = await drive.files.get(
+            {fileId, alt: "media"},
+            {responseType: "arraybuffer"},
+        );
+        buffer = Buffer.from(resp.data as ArrayBuffer);
+      }
 
       results.push({
-        filename: name,
-        contentType: mimeType,
+        filename: finalName,
+        contentType: finalMimeType,
         size: buffer.length,
         content: buffer,
         downloadUrl: "",
       });
-      logger.info("Drive: Downloaded shared Drive file", {fileId, name, size: buffer.length});
+      logger.info("Drive: Downloaded shared Drive file", {fileId, name: finalName, size: buffer.length});
     } catch (error) {
       logger.debug("Drive: Could not access shared Drive file", {
         fileId, error: error instanceof Error ? error.message : String(error),

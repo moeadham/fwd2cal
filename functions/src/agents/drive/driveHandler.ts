@@ -117,7 +117,7 @@ async function handleDriveEmail(
 
   if (attachments.length === 0) {
     // Check if Gmail auto-saved attachments to Drive (links in HTML instead of MIME)
-    const driveFileIds = extractDriveFileIds(email.html || "");
+    const driveFileIds = extractDriveFileIds(email.html || "", email.text || "");
     if (driveFileIds.length > 0) {
       logger.info("Drive: No attachments but Drive links detected, downloading via agent", {
         sender, driveFileIds,
