@@ -46,6 +46,7 @@ export function toTitleCase(str: string): string {
  * Get the file extension from a filename
  */
 export function getExtension(filename: string): string {
+  if (!filename) return "";
   const lastDot = filename.lastIndexOf(".");
   if (lastDot === -1) return "";
   return filename.slice(lastDot);
