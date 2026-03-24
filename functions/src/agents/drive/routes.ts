@@ -20,7 +20,7 @@ import {ENVIRONMENT_NAME} from "../../util/config";
 import {AGENT_NAME, AGENT_HOSTING_URL, AGENT_EMAIL_ADDRESS, DRIVE_RESEND_SIGNING_SECRET} from "./config";
 import {TaskRequest} from "../../util/types";
 import {cleanupExpiredDriveFileData} from "../../util/firestoreHandler";
-import {sendEvent} from "../../util/analytics";
+
 import {PostAuthTaskData, OrganizeActionTaskData} from "./types";
 
 // Global configuration for onRequest functions
@@ -108,7 +108,6 @@ export const v2driveOauthCallback = onRequest(
         );
         uid = result.user.uid;
         grantedScope = result.grantedScope;
-        sendEvent(uid, "drive_sign_up", "drive");
       } catch (err) {
         const error = err as { code?: number; message: string };
         logger.warn("Error in driveOauthCallback", err);
