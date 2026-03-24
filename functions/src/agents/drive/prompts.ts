@@ -57,12 +57,14 @@ Determine the new target folder for each file based on the user's instructions.
 
 Rules:
 - Parse the user's natural language instructions to determine the desired destination
-- ONLY use agent-managed folders (NN-CategoryName format). NEVER place files in arbitrary user folders.
-- The folder_id MUST be either "root" (to create a new agent-managed folder) or an exact agent-managed folder ID from the list
-- If the user mentions a category that matches an existing agent-managed folder, use that folder's ID
-- If no agent-managed folder matches, set folder_id to "root" and folder_path to the desired category name (WITHOUT the NN- prefix — the system will add it)
+- If the user wants to DELETE, TRASH, or REMOVE the file(s), set action to "trash". folder_id and folder_path can be empty strings.
+- For move instructions, set action to "move":
+  - ONLY use agent-managed folders (NN-CategoryName format). NEVER place files in arbitrary user folders.
+  - The folder_id MUST be either "root" (to create a new agent-managed folder) or an exact agent-managed folder ID from the list
+  - If the user mentions a category that matches an existing agent-managed folder, use that folder's ID
+  - If no agent-managed folder matches, set folder_id to "root" and folder_path to the desired category name (WITHOUT the NN- prefix — the system will add it)
 - If the user's instructions are ambiguous, make a reasonable best guess
-- ALL files should move to the SAME new location unless the user specifies otherwise`,
+- ALL files should have the SAME action unless the user specifies otherwise`,
   },
 
   proposeOrganization: {

@@ -125,6 +125,8 @@ async function sendDriveProcessUpload(testData: ResendTestData): Promise<DriveDi
 
 // Shared state: upload confirmation HTML is saved in DT03 and used by DT04
 let uploadConfirmationHtml = "";
+// Shared state: move confirmation HTML is saved in DT04 and used by DT04b
+let moveConfirmationHtml = "";
 
 describe("extractDocumentImages", function() {
   it("DT00 extract page screenshots from a PDF", async function() {
@@ -349,6 +351,95 @@ describe("fwd2cal Drive Agent", function() {
 
     // Verify embedded data still present (for further moves)
     expect(res.body.sentEmail.html).to.include("fwd2drive.com/d?r=");
+
+    // Save the move confirmation HTML for the trash test (DT04b)
+    moveConfirmationHtml = res.body.sentEmail.html;
+  });
+
+  it("DT04b reply to trash file instead of moving it", async function() {
+    // Use embedded data from DT04's move confirmation
+    expect(moveConfirmationHtml).to.not.be.empty;
+
+    const gmailSanitizedHtml = moveConfirmationHtml;
+
+    const replyEmailId = "test-drive-reply-trash";
+    const replyMessageId = `<test-drive-reply-trash-${Date.now()}@mail.gmail.com>`;
+    const trashInstructions = "Move to trash";
+    const domain = TESTER_PRIMARY_GOOGLE_ACCT.split("@")[1] || "gmail.com";
+
+    const replyWebhook = {
+      type: "email.received",
+      created_at: new Date().toISOString(),
+      data: {
+        email_id: replyEmailId,
+        message_id: replyMessageId,
+        from: TESTER_PRIMARY_GOOGLE_ACCT,
+        to: [DRIVE_EMAIL_ADDRESS],
+        cc: [] as string[],
+        bcc: [] as string[],
+        subject: "Re: Fwd: Conference Registration",
+        created_at: new Date().toISOString(),
+        attachments: [] as unknown[],
+      },
+    };
+
+    const replyEmailContent = {
+      id: replyEmailId,
+      subject: "Re: Fwd: Conference Registration",
+      from: TESTER_PRIMARY_GOOGLE_ACCT,
+      to: [DRIVE_EMAIL_ADDRESS],
+      html: `<p>${trashInstructions}</p><blockquote>${gmailSanitizedHtml}</blockquote>`,
+      text: trashInstructions,
+      headers: {
+        "authentication-results": `amazonses.com; spf=pass (spfCheck: domain of _spf.${domain} designates 209.85.214.171 as permitted sender) client-ip=209.85.214.171; envelope-from=${TESTER_PRIMARY_GOOGLE_ACCT}; helo=mail.${domain}; dkim=pass header.i=@${domain}; dmarc=pass header.from=${domain};`,
+        "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
+        "to": DRIVE_EMAIL_ADDRESS,
+        "subject": "Re: Fwd: Conference Registration",
+        "date": new Date().toUTCString(),
+        "message-id": replyMessageId,
+        "in-reply-to": driveEmailWithPDF.emailContent.headers["message-id"],
+        "references": driveEmailWithPDF.emailContent.headers["message-id"],
+      },
+    };
+
+    const webhookWithMock = {
+      ...replyWebhook,
+      mockData: {
+        emailContent: replyEmailContent,
+        attachmentsList: [] as AttachmentWithUrl[],
+      },
+    };
+
+    // Step 1: Send to drive callback endpoint
+    const callbackResponse = await chaiWithHttp.request(apiURL)
+      .post(DRIVE_CALLBACK_ENDPOINT)
+      .set("Content-Type", "application/json")
+      .set("svix-id", "msg_test_" + Date.now())
+      .set("svix-timestamp", Math.floor(Date.now() / 1000).toString())
+      .set("svix-signature", "v1,dummy_signature_for_testing")
+      .send(webhookWithMock);
+    const webhookData = callbackResponse.body.webhookData;
+
+    // Step 2: Dispatch to drive handler
+    const res = await chaiWithHttp
+      .request(`${DISPATCH_URL}/${APP_ID}/${DISPATCH_REGION}`)
+      .post("/v2testDriveInboundDispatch")
+      .set("Content-Type", "application/json")
+      .send({data: webhookData}) as unknown as DriveDispatchResponse;
+
+    expect(res).to.have.status(200);
+    console.log("DRIVE TRASH RESPONSE:", res.body);
+
+    expect(res.body).to.be.an("object");
+    expect(res.body.data).to.be.an("object");
+
+    // Verify file was trashed (not moved to a folder)
+    expect(res.body.data.filesSucceeded).to.be.greaterThanOrEqual(1);
+
+    // Verify trash confirmation email (not a move confirmation)
+    expect(res.body.sentEmail).to.be.an("object");
+    expect(res.body.sentEmail.html).to.be.a("string");
+    expect(res.body.sentEmail.html).to.include("moved to trash");
   });
 
   it("DT05 delete account via drive agent", async function() {

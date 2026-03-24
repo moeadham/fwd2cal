@@ -62,6 +62,20 @@ const driveMailTemplates: DriveMailTemplates = {
 %ORGANIZE_PROMO%
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
   },
+  fileTrashed: {
+    html: `Done! Your file has been moved to trash.
+<br><br>File: <b>%FILE_NAME%</b>
+<br><br>You can restore it from your Google Drive trash if needed.
+%ORGANIZE_PROMO%
+<br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
+  },
+  multipleFilesTrashed: {
+    html: `Done! Your files have been moved to trash.
+<br><br>%FILE_LIST%
+<br><br>You can restore them from your Google Drive trash if needed.
+%ORGANIZE_PROMO%
+<br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
+  },
   driveAuthFailed: {
     html: `Sorry - there was an issue authenticating with Google Drive. Please click to authorize Google Drive again, and then forward your file another time.
 <br><br><a href="%HOSTING_URL%/drive/v2/signup"><img src="%HOSTING_URL%/signup-with-google.png" alt="Sign Up with Google" width="182" height="42" style="display: block;"></a>

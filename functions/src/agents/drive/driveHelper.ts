@@ -419,6 +419,21 @@ async function deleteFolder(
 }
 
 /**
+ * Trash a file in Google Drive.
+ */
+async function trashFile(
+    oauth2Client: Auth.OAuth2Client,
+    fileId: string,
+): Promise<void> {
+  const drive = getDriveClient(oauth2Client);
+  await drive.files.update({
+    fileId: fileId,
+    requestBody: {trashed: true},
+  });
+  logger.info("Drive: File trashed", {fileId});
+}
+
+/**
  * MIME type mapping for exporting Google Workspace files to downloadable formats.
  */
 const GOOGLE_WORKSPACE_EXPORT_MAP: Record<string, string> = {
@@ -537,6 +552,7 @@ export {
   listAllDriveFiles,
   renameFile,
   deleteFolder,
+  trashFile,
   readDriveFileContent,
   findSubfolderByName,
 };

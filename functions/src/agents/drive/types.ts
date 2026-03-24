@@ -29,11 +29,14 @@ export type FileProposal = z.infer<typeof FileProposalSchema>;
 // Move instruction result (reply handler)
 export const MoveInstructionItemSchema = z.object({
   file_index: z.number().describe("The 0-based index of the file to move"),
+  action: z.enum(["move", "trash"]).describe(
+      "Whether to move the file to a folder or trash it",
+  ),
   folder_id: z.string().describe(
-      "The Google Drive folder ID to move to, or 'root' for a new folder",
+      "The Google Drive folder ID to move to, or 'root' for a new folder (ignored when action is 'trash')",
   ),
   folder_path: z.string().describe(
-      "The folder path to move to (new folder name if folder_id is 'root')",
+      "The folder path to move to (new folder name if folder_id is 'root') (ignored when action is 'trash')",
   ),
   reason: z.string().describe("Brief reasoning for the move"),
 });
@@ -238,6 +241,8 @@ export interface DriveMailTemplates {
   multipleFileProposal: DriveMailTemplate;
   fileMoved: DriveMailTemplate;
   multipleFilesMoved: DriveMailTemplate;
+  fileTrashed: DriveMailTemplate;
+  multipleFilesTrashed: DriveMailTemplate;
   driveAuthFailed: DriveMailTemplate;
   noAttachments: DriveMailTemplate;
   noUserFound: DriveMailTemplate;

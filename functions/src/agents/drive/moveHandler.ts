@@ -15,7 +15,7 @@ import {
   getDriveFolderTree, findFolderInTree, getRootFolderId,
   moveFile, createFolder, placeMarkerFile,
   findAgentManagedFolders, renameFolder, getFolderFileCount,
-  findSubfolderByName,
+  findSubfolderByName, trashFile,
 } from "./driveHelper";
 import {interpretMoveInstructions} from "./llm";
 import {
@@ -129,9 +129,44 @@ export async function handleMoveReply(
   const fileFolderIds = new Map<string, string>(); // filename → folderId
 
   const results: ProcessedDriveFile[] = [];
+  const trashedFiles: string[] = []; // filenames of trashed files
   for (const move of moveResult.moves) {
     const file = files[move.file_index];
     if (!file) continue;
+
+    // Handle trash action — delete the file instead of moving it
+    if (move.action === "trash") {
+      try {
+        await trashFile(oauth2Client, file.id);
+        trashedFiles.push(file.filename);
+        results.push({
+          filename: file.filename,
+          folderPath: "Trash",
+          suggestedName: file.filename,
+          driveFileId: file.id,
+        });
+      } catch (error) {
+        const errMsg = error instanceof Error ? error.message : String(error);
+        if (isDriveAuthError(errMsg)) {
+          logger.warn("Drive: Auth error during trash", {uid, fileId: file.id, error: errMsg});
+          const html = applyTemplate(driveMailTemplates.driveAuthFailed.html, {});
+          await sendDriveEmailResponse(sender, email, html);
+          sendEvent(uid, "driveAuthFailed", "drive");
+          return {
+            filesProcessed: files.length, filesSucceeded: 0,
+            filesFailed: files.length, results: [], error: "Auth failed",
+          };
+        }
+        logger.error("Drive: Failed to trash file", {fileId: file.id, error: errMsg});
+        results.push({
+          filename: file.filename,
+          folderPath: file.folderPath,
+          suggestedName: file.filename,
+          error: `Trash failed: ${errMsg}`,
+        });
+      }
+      continue;
+    }
 
     let newFolderId: string;
     let newFolderPath: string;
@@ -338,12 +373,28 @@ export async function handleMoveReply(
   }
 
   const succeeded = results.filter((r) => !r.error);
+  const movedFiles = succeeded.filter((r) => !trashedFiles.includes(r.filename));
 
   if (succeeded.length === 0) {
     const html = applyTemplate(driveMailTemplates.moveFailed.html, {});
     await sendDriveEmailResponse(sender, email, html);
+  } else if (trashedFiles.length > 0 && movedFiles.length === 0) {
+    // All files were trashed
+    if (trashedFiles.length === 1) {
+      const html = applyTemplate(driveMailTemplates.fileTrashed.html, {
+        FILE_NAME: trashedFiles[0],
+      });
+      await sendDriveEmailResponse(sender, email, html);
+    } else {
+      const fileListHtml = trashedFiles.map((f) => `<b>${f}</b>`).join("<br>");
+      const html = applyTemplate(driveMailTemplates.multipleFilesTrashed.html, {
+        FILE_LIST: fileListHtml,
+      });
+      await sendDriveEmailResponse(sender, email, html);
+    }
   } else {
-    const updatedFiles: DriveEmbeddedFileData[] = succeeded.map((r) => ({
+    // Some or all files were moved (not trashed)
+    const updatedFiles: DriveEmbeddedFileData[] = movedFiles.map((r) => ({
       id: r.driveFileId || "",
       folderId: fileFolderIds.get(r.filename) || "",
       folderPath: r.folderPath,
@@ -359,8 +410,8 @@ export async function handleMoveReply(
       embeddedHtml = await buildEmbeddedDriveData(uid, updatedFiles);
     }
 
-    if (succeeded.length === 1) {
-      const file = succeeded[0];
+    if (movedFiles.length === 1) {
+      const file = movedFiles[0];
       const html = applyTemplate(driveMailTemplates.fileMoved.html, {
         FILE_NAME: file.filename,
         NEW_PATH: file.folderPath,
@@ -369,7 +420,7 @@ export async function handleMoveReply(
       });
       await sendDriveEmailResponse(sender, email, html);
     } else {
-      const fileListHtml = succeeded.map((file) =>
+      const fileListHtml = movedFiles.map((file) =>
         `<b>${file.filename}</b> → ${file.folderPath}` +
         (file.driveWebLink ? ` (<a href="${file.driveWebLink}">view</a>)` : ""),
       ).join("<br>");
@@ -381,8 +432,9 @@ export async function handleMoveReply(
     }
   }
 
-  sendEvent(uid, "driveFileMoved", "drive", {
-    filesMoved: String(succeeded.length),
+  sendEvent(uid, trashedFiles.length > 0 ? "driveFileTrashed" : "driveFileMoved", "drive", {
+    filesMoved: String(movedFiles.length),
+    filesTrashed: String(trashedFiles.length),
   });
 
   return {
