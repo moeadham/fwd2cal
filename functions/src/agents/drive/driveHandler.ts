@@ -48,6 +48,9 @@ async function handleDriveEmail(
   // Load feature flags (no-ops after first call)
   await loadFeatureFlags();
 
+  // Track all inbound drive emails
+  sendEvent(sender, "driveEmailReceived", "drive");
+
   // Check if this is a REPLY to an organize-drive proposal (approval)
   // Must come before skill match — the quoted thread subject still matches "organize drive"
   if (isOrganizeDriveEnabled()) {
@@ -146,7 +149,7 @@ async function handleDriveEmail(
         logger.info("Drive: New user without attachments — sending signup invitation", {sender});
         const html = applyTemplate(driveMailTemplates.noUserFound.html, {});
         await sendDriveEmailResponse(sender, email, html);
-        sendEvent(sender, "driveUserInvited");
+        sendEvent(sender, "driveUserInvited", "drive");
         return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: []};
       }
       // Returning user who forgot attachments
@@ -220,7 +223,7 @@ async function handleDriveEmail(
     await sendDriveEmailResponse(sender, email, html);
   }
 
-  sendEvent(uid || sender, "driveFileProposed", {
+  sendEvent(uid || sender, "driveFileProposed", "drive", {
     filesCount: String(attachments.length),
     folder: proposal.folder_name,
   });

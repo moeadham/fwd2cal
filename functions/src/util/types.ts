@@ -92,7 +92,9 @@ export interface TaskDispatchOptions {
 // Async result tuple
 export type AsyncResult<T> = [Error | null, T | null];
 
-// Analytics event params
+// Analytics
+export type AnalyticsAgent = "calendar" | "drive" | "system";
+
 export interface AnalyticsEventParams {
   traffic_type?: string;
   action?: string;

@@ -61,7 +61,7 @@ export async function handleMoveReply(
       logger.warn("Drive: Auth error fetching folder tree", {uid, error: errMsg});
       const html = applyTemplate(driveMailTemplates.driveAuthFailed.html, {});
       await sendDriveEmailResponse(sender, email, html);
-      sendEvent(uid, "driveAuthFailed");
+      sendEvent(uid, "driveAuthFailed", "drive");
       return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: [], error: "Auth failed"};
     }
     logger.debug("Drive: Could not fetch folder tree", {error: errMsg});
@@ -77,7 +77,7 @@ export async function handleMoveReply(
       logger.warn("Drive: Auth error fetching agent folders", {uid, error: errMsg});
       const html = applyTemplate(driveMailTemplates.driveAuthFailed.html, {});
       await sendDriveEmailResponse(sender, email, html);
-      sendEvent(uid, "driveAuthFailed");
+      sendEvent(uid, "driveAuthFailed", "drive");
       return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: [], error: "Auth failed"};
     }
     throw err;
@@ -319,7 +319,7 @@ export async function handleMoveReply(
         logger.warn("Drive: Auth error during move", {uid, fileId: file.id, error: errMsg});
         const html = applyTemplate(driveMailTemplates.driveAuthFailed.html, {});
         await sendDriveEmailResponse(sender, email, html);
-        sendEvent(uid, "driveAuthFailed");
+        sendEvent(uid, "driveAuthFailed", "drive");
         return {
           filesProcessed: files.length, filesSucceeded: 0,
           filesFailed: files.length, results: [], error: "Auth failed",
@@ -381,7 +381,7 @@ export async function handleMoveReply(
     }
   }
 
-  sendEvent(uid, "driveFileMoved", {
+  sendEvent(uid, "driveFileMoved", "drive", {
     filesMoved: String(succeeded.length),
   });
 

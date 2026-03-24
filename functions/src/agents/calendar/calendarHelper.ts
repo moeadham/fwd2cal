@@ -80,7 +80,7 @@ function generateTimeObject(
     new Intl.DateTimeFormat(undefined, {timeZone: eventTimeZone});
   } catch {
     console.error("Invalid Time Zone in event object:", eventTimeZone);
-    sendEvent(uid, "dataQualityIssue", {reason: "invalid_timezone"});
+    sendEvent(uid, "dataQualityIssue", "calendar", {reason: "invalid_timezone"});
     // Fallback to primary calendar's timezone if event's timezone is invalid
     eventTimeZone = timezone;
   }
@@ -101,7 +101,7 @@ function generateTimeObject(
         throw new Error("Invalid end time");
       }
     } catch (_error) {
-      sendEvent(uid, "dataQualityIssue", {reason: "invalid_end_time"});
+      sendEvent(uid, "dataQualityIssue", "calendar", {reason: "invalid_end_time"});
       // Default to configured event length
       endDate = new Date(startDate.getTime() + defaultEventLength * 60000);
     }
@@ -133,7 +133,7 @@ async function addEvent(
       (cal) => cal.primary,
   ) as GoogleCalendar | undefined;
   if (!primaryCalendar) {
-    sendEvent(uid, "calendarError", {reason: "no_primary_calendar"});
+    sendEvent(uid, "calendarError", "calendar", {reason: "no_primary_calendar"});
     throw new Error("Primary calendar not found");
   }
 
@@ -229,13 +229,13 @@ async function addEvent(
         logger.error("Calendar API error (final attempt):", err.message);
         if (isRetriableError) {
           // Network/timeout error that failed after retries
-          sendEvent(uid, "calendarError", {
+          sendEvent(uid, "calendarError", "calendar", {
             reason: "api_error",
             error_type: err.code || "unknown",
           });
         } else {
           // Validation or other non-retriable error
-          sendEvent(uid, "calendarError", {reason: "validation_error"});
+          sendEvent(uid, "calendarError", "calendar", {reason: "validation_error"});
         }
         throw error; // Re-throw the error after max retries or non-retriable error
       }
@@ -246,7 +246,7 @@ async function addEvent(
     throw new Error("Failed to insert event after retries");
   }
 
-  sendEvent(uid, "addEvent", {result: "success"});
+  sendEvent(uid, "addEvent", "calendar", {result: "success"});
 
   const result: GoogleCalendarEvent = {
     kind: "calendar#event",

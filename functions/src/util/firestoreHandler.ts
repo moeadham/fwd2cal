@@ -90,7 +90,7 @@ async function storeUser(
     });
   } catch (error) {
     logger.error(`Database error in storeUser for uid ${user.uid}:`, error);
-    sendEvent(user.uid, "databaseError", {operation: "storeUser"});
+    sendEvent(user.uid, "databaseError", "system", {operation: "storeUser"});
     throw error;
   }
 }
@@ -108,7 +108,7 @@ async function updateUserTokens(
     });
   } catch (error) {
     logger.error(`Database error in updateUserTokens for uid ${uid}:`, error);
-    sendEvent(uid, "databaseError", {operation: "updateUserTokens"});
+    sendEvent(uid, "databaseError", "system", {operation: "updateUserTokens"});
     throw error;
   }
 }
@@ -130,7 +130,7 @@ async function addUserEmailAddress(
         `Database error in addUserEmailAddress for uid ${user.uid}:`,
         error,
     );
-    sendEvent(user.uid, "databaseError", {operation: "addUserEmailAddress"});
+    sendEvent(user.uid, "databaseError", "system", {operation: "addUserEmailAddress"});
     throw error;
   }
 }
@@ -151,7 +151,7 @@ async function removeEmailAddress(email: string): Promise<void> {
     // Try to get uid for analytics, but don't fail if we can't
     const uid = await getUserFromEmail(email).catch((): null => null);
     if (uid) {
-      sendEvent(uid, "databaseError", {operation: "removeEmailAddress"});
+      sendEvent(uid, "databaseError", "system", {operation: "removeEmailAddress"});
     }
     throw error;
   }
@@ -178,7 +178,7 @@ async function addPendingEmailAddress(
         `Database error in addPendingEmailAddress for uid ${uid}:`,
         error,
     );
-    sendEvent(uid, "databaseError", {operation: "addPendingEmailAddress"});
+    sendEvent(uid, "databaseError", "system", {operation: "addPendingEmailAddress"});
     throw error;
   }
 }

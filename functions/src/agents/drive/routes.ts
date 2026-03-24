@@ -108,7 +108,7 @@ export const v2driveOauthCallback = onRequest(
         );
         uid = result.user.uid;
         grantedScope = result.grantedScope;
-        sendEvent(uid, "drive_sign_up");
+        sendEvent(uid, "drive_sign_up", "drive");
       } catch (err) {
         const error = err as { code?: number; message: string };
         logger.warn("Error in driveOauthCallback", err);

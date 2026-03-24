@@ -52,7 +52,7 @@ export async function eventHandler(
   if (oauthErr || !oauth2Client) {
     logger.warn("Error getting OAuth client: ", oauthErr);
     await sendEmailResponse(sender, email, EMAIL_RESPONSES.oauthFailed, true);
-    sendEvent(uid, "calendarError", {reason: "oauth_failed"});
+    sendEvent(uid, "calendarError", "calendar", {reason: "oauth_failed"});
     return;
   }
 
@@ -74,7 +74,7 @@ export async function eventHandler(
     if (isAuthError) {
       logger.warn("OAuth error fetching calendars: ", calendarErr);
       await sendEmailResponse(sender, email, EMAIL_RESPONSES.oauthFailed, true);
-      sendEvent(uid, "calendarError", {reason: "oauth_failed"});
+      sendEvent(uid, "calendarError", "calendar", {reason: "oauth_failed"});
       return;
     }
     logger.warn(
@@ -96,7 +96,7 @@ export async function eventHandler(
       const [icsErr, icsEvent] = await handleAsync(() => eventFromICS(icsFile));
       if (icsErr) {
         logger.warn("ICS error: ", icsErr);
-        sendEvent(uid, "icsProcessingFailed", {reason: "parse_failed"});
+        sendEvent(uid, "icsProcessingFailed", "calendar", {reason: "parse_failed"});
       } else if (icsEvent) {
         event = {
           summary: icsEvent.summary,
@@ -139,14 +139,14 @@ export async function eventHandler(
     if (processEmailErr) {
       logger.warn("OpenAI error: ", processEmailErr);
       await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true);
-      sendEvent(uid, "dataQualityIssue", {reason: "ai_api_error"});
+      sendEvent(uid, "dataQualityIssue", "calendar", {reason: "ai_api_error"});
       return;
     }
 
     if (!aiEvent) {
       logger.warn("No event data returned from AI");
       await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true);
-      sendEvent(uid, "dataQualityIssue", {reason: "no_ai_response"});
+      sendEvent(uid, "dataQualityIssue", "calendar", {reason: "no_ai_response"});
       return;
     }
 
@@ -160,7 +160,7 @@ export async function eventHandler(
       };
       logger.warn("Error in email contents: ", aiEvent);
       await sendEmailResponse(sender, email, response, true);
-      sendEvent(uid, "dataQualityIssue", {reason: "ai_returned_error"});
+      sendEvent(uid, "dataQualityIssue", "calendar", {reason: "ai_returned_error"});
       return;
     } else {
       // Handle new array format
@@ -173,7 +173,7 @@ export async function eventHandler(
               EMAIL_RESPONSES.unableToParse,
               true,
           );
-          sendEvent(uid, "dataQualityIssue", {reason: "no_events_found"});
+          sendEvent(uid, "dataQualityIssue", "calendar", {reason: "no_events_found"});
           return;
         }
 
@@ -199,7 +199,7 @@ export async function eventHandler(
 
         if (aiEvent.events.length === 0) {
           logger.warn("All events had invalid times");
-          sendEvent(uid, "dataQualityIssue", {
+          sendEvent(uid, "dataQualityIssue", "calendar", {
             reason: "missing_required_fields",
           });
           await sendEmailResponse(
@@ -227,7 +227,7 @@ export async function eventHandler(
         const timeValidation = validateEventTimes(singleEvent);
         if (!timeValidation.isValid) {
           logger.warn(`Invalid event times from AI: ${timeValidation.error}`);
-          sendEvent(uid, "dataQualityIssue", {
+          sendEvent(uid, "dataQualityIssue", "calendar", {
             reason: "missing_required_fields",
           });
           await sendEmailResponse(
@@ -376,10 +376,10 @@ async function addEventsAndSendResponse(
           f.error.includes("unauthorized_client"),
     );
     if (isAuthError) {
-      sendEvent(uid, "calendarError", {reason: "oauth_failed"});
+      sendEvent(uid, "calendarError", "calendar", {reason: "oauth_failed"});
       await sendEmailResponse(sender, email, EMAIL_RESPONSES.oauthFailed, true);
     } else {
-      sendEvent(uid, "calendarError", {reason: "event_creation_failed"});
+      sendEvent(uid, "calendarError", "calendar", {reason: "event_creation_failed"});
       const errorDetails = failedEvents
           .map((f) => `${f.event.summary}: ${f.error}`).join("; ");
       const response: EmailResponseTemplate = {
@@ -449,7 +449,7 @@ async function addEventsAndSendResponse(
 
   // Add failed events info if any
   if (failedEvents.length > 0) {
-    sendEvent(uid, "addEventPartialFailure");
+    sendEvent(uid, "addEventPartialFailure", "calendar");
     responseHtml += `<p><strong>Failed to add ${failedEvents.length} event(s):</strong><br>`;
     for (const failed of failedEvents) {
       responseHtml += `- ${failed.event.summary}: ${failed.error}<br>`;

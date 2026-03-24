@@ -201,7 +201,7 @@ export async function processUpload(
     logger.error("Drive: OAuth failed during upload", {uid, error: errMsg});
     const html = applyTemplate(driveMailTemplates.driveAuthFailed.html, {});
     await sendDriveEmailResponse(sender, originalEmail, html);
-    sendEvent(uid, "driveAuthFailed");
+    sendEvent(uid, "driveAuthFailed", "drive");
     return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: [], error: "OAuth failed"};
   }
 
@@ -269,7 +269,7 @@ async function processUploadWithAttachments(
       logger.warn("Drive: Auth error fetching agent folders", {uid, error: errMsg});
       const html = applyTemplate(driveMailTemplates.driveAuthFailed.html, {});
       await sendDriveEmailResponse(sender, originalEmail, html);
-      sendEvent(uid, "driveAuthFailed");
+      sendEvent(uid, "driveAuthFailed", "drive");
       return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: [], error: "Auth failed"};
     }
     throw error;
@@ -313,7 +313,7 @@ async function processUploadWithAttachments(
       logger.warn("Drive: Auth error fetching root folder", {uid, error: errMsg});
       const html = applyTemplate(driveMailTemplates.driveAuthFailed.html, {});
       await sendDriveEmailResponse(sender, originalEmail, html);
-      sendEvent(uid, "driveAuthFailed");
+      sendEvent(uid, "driveAuthFailed", "drive");
       return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: [], error: "Auth failed"};
     }
     logger.debug("Drive: Could not get root folder ID, using 'root'", {error: errMsg});
@@ -334,7 +334,7 @@ async function processUploadWithAttachments(
       logger.warn("Drive: Auth error resolving target folder", {uid, error: errMsg});
       const html = applyTemplate(driveMailTemplates.driveAuthFailed.html, {});
       await sendDriveEmailResponse(sender, originalEmail, html);
-      sendEvent(uid, "driveAuthFailed");
+      sendEvent(uid, "driveAuthFailed", "drive");
       return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: [], error: "Auth failed"};
     }
     throw error;
@@ -385,7 +385,7 @@ async function processUploadWithAttachments(
     await sendDriveEmailResponse(sender, originalEmail, html);
   }
 
-  sendEvent(uid, "driveFileUploaded", {
+  sendEvent(uid, "driveFileUploaded", "drive", {
     filesProcessed: String(attachments.length),
     filesSucceeded: String(succeeded.length),
     filesFailed: String(failed.length),

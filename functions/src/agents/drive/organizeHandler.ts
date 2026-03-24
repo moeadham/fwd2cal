@@ -705,7 +705,7 @@ async function scanAndPropose(
 
   await sendOrganizeEmailResponse(sender, email, html);
 
-  sendEvent(uid, "driveOrganizeProposed", {
+  sendEvent(uid, "driveOrganizeProposed", "drive", {
     totalFiles: String(cost.totalFiles),
     filesToChange: String(cost.totalFiles - cost.filesToKeep),
     totalCost: cost.totalCost.toFixed(2),
@@ -870,7 +870,7 @@ async function handleOrganizeApproval(
       `<br><br>You can always ask for help: ${helpLink}<br>`;
     await sendOrganizeEmailResponse(sender, email, html);
 
-    sendEvent(uid, "driveOrganizeFailed", {
+    sendEvent(uid, "driveOrganizeFailed", "drive", {
       proposalId,
       mismatches: String(mismatches.length),
     });
@@ -905,7 +905,7 @@ async function handleOrganizeApproval(
   });
   await sendOrganizeEmailResponse(sender, email, html);
 
-  sendEvent(uid, "driveOrganizeCompleted", {
+  sendEvent(uid, "driveOrganizeCompleted", "drive", {
     filesChanged: String(filesChanged),
     failed: String(execResult.stats.failed),
   });
@@ -1355,7 +1355,7 @@ async function handleOrganizeUndo(
   const html = applyTemplate(driveMailTemplates.organizeUndone.html, {});
   await sendOrganizeEmailResponse(sender, email, html);
 
-  sendEvent(uid, "driveOrganizeUndone", {
+  sendEvent(uid, "driveOrganizeUndone", "drive", {
     proposalId,
     filesReverted: String(snapshot.length),
   });

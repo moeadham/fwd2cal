@@ -88,7 +88,7 @@ async function oauthCronJob(agentName: AgentName): Promise<void> {
         await refreshOAuthTokens(user.id, agentName);
       } catch (error) {
         logger.warn(`Failed to refresh tokens for user ${user.id}:`, error);
-        sendEvent(user.id, "tokenRefreshFailed");
+        sendEvent(user.id, "tokenRefreshFailed", agentName);
       }
     }
   } catch (error) {
@@ -179,8 +179,8 @@ async function signupCallbackHandler(
     await storeUser(tokens as OAuthTokens, userRecord, collection);
     await addUserEmailAddress(userRecord, [{email: userEmail, default: true}]);
 
-    sendEvent(userRecord.uid, "sign_up");
-    sendEvent(userEmail, "signupConversion");
+    sendEvent(userRecord.uid, "sign_up", agentName);
+    sendEvent(userEmail, "signupConversion", agentName);
 
     // Add user to Resend contacts and registered users (fire-and-forget)
     addContactToResend(userEmail);
@@ -222,7 +222,7 @@ async function verifyAdditionalEmail(
       ],
   );
   logger.log(`added ${pendingEmail.id} to user account ${pendingEmail.ownerUid}`);
-  sendEvent(pendingEmail.ownerUid, "addUserConfirmed");
+  sendEvent(pendingEmail.ownerUid, "addUserConfirmed", "system");
   return res.send({data: pendingEmail.ownerEmail});
 }
 

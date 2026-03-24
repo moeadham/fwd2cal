@@ -97,14 +97,14 @@ async function handleEmail(
       },
     };
     await sendEmailResponse(sender, email, response, true);
-    sendEvent(sender, "userInvited");
+    sendEvent(sender, "userInvited", "calendar");
     return {result: `${sender} has been invited to signup`};
   }
 
   const skillResult = await detectSkill(email.subject, email.text, uid);
   logger.log(`Request from ${sender} to ${skillResult.skillId}`);
   // Track all received emails with the skill type
-  sendEvent(uid, "emailReceived", {action: skillResult.skillId});
+  sendEvent(uid, "emailReceived", "calendar", {action: skillResult.skillId});
 
   switch (skillResult.skillId) {
     case "add-email":

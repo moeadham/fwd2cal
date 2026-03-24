@@ -56,7 +56,7 @@ export async function deleteUserAccount(
       RESEND_REGISTERED_USERS_SEGMENT_ID.value(),
   );
 
-  sendEvent(uid, "deleteAccount");
+  sendEvent(uid, "deleteAccount", "system");
   return {result: `${uid} account deleted.`, primaryEmail};
 }
 
@@ -87,12 +87,12 @@ export async function removeEmailFromUser(
   const existingUid = await getUserFromEmail(emailAddressToRemove);
   if (existingUid !== uid) {
     logger.warn(`${uid} attempted to remove ${emailAddressToRemove}, but registered to ${existingUid}`);
-    sendEvent(uid, "removeEmailFailed", {reason: "not_owned"});
+    sendEvent(uid, "removeEmailFailed", "system", {reason: "not_owned"});
     return {error: "not_owned", email: emailAddressToRemove};
   }
 
   await removeEmailAddress(emailAddressToRemove);
   logger.log(`${uid} removed ${emailAddressToRemove}`);
-  sendEvent(uid, "removeEmail");
+  sendEvent(uid, "removeEmail", "system");
   return {result: `${emailAddressToRemove} removed.`, removedEmail: emailAddressToRemove};
 }

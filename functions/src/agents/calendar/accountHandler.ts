@@ -99,7 +99,7 @@ export async function addEmailAddressToUser(
         EMAIL_TO_ADD: emailAddressToAdd,
       },
     };
-    sendEvent(uid, "addUserFailed", {reason: "email_in_use"});
+    sendEvent(uid, "addUserFailed", "calendar", {reason: "email_in_use"});
     await sendEmailResponse(sender, email, response, true);
     return;
   }
@@ -112,6 +112,6 @@ export async function addEmailAddressToUser(
     },
   };
   await sendEmailResponse(emailAddressToAdd, email, response, false);
-  sendEvent(uid, "addUserRequest");
+  sendEvent(uid, "addUserRequest", "calendar");
   return {verificationCode};
 }
