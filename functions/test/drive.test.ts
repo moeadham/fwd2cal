@@ -16,6 +16,7 @@ import {
   driveEmailWithPDF,
   driveDeleteAccount,
   driveSignup,
+  driveEmailWithArtifacts,
   automatedReplyEmail,
 } from "./bindings/resendBindings";
 import {extractDocumentImages} from "../src/util/documentParser";
@@ -455,6 +456,20 @@ describe("fwd2cal Drive Agent", function() {
     expect(res.body.sentEmail).to.be.an("object");
     expect(res.body.sentEmail.html).to.be.a("string");
     expect(res.body.sentEmail.html).to.include("account has been deleted");
+  });
+
+  it("DT05b email artifact attachments (.eml, .ics, .vcf, .p7s) are filtered out", async function() {
+    const testMessage = driveEmailWithArtifacts;
+    const res = await sendDriveWebhook(testMessage, testMessage.attachmentsList || []);
+    expect(res).to.have.status(200);
+    console.log("DRIVE ARTIFACTS RESPONSE:", res.body);
+
+    expect(res.body).to.be.an("object");
+    expect(res.body.data).to.be.an("object");
+    expect(res.body.data).to.not.have.property("error");
+
+    // Only the PDF should be processed — .eml, .ics, .vcf, .p7s should all be filtered
+    expect(res.body.data.filesProcessed).to.equal(1);
   });
 
   it("DT06 signup via email — unknown user with no attachments gets signup invitation", async function() {

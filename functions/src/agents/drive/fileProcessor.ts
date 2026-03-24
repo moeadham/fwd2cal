@@ -52,6 +52,23 @@ async function fetchUrl(url: string): Promise<FetchResponse> {
 // Inline images below this size are likely logos or tracking pixels
 const MIN_INLINE_IMAGE_BYTES = 10 * 1024; // 10KB
 
+// Email artifact file types that get attached when forwarding — not useful to upload
+const EMAIL_ARTIFACT_EXTENSIONS = new Set([
+  ".eml", ".msg", // email messages
+  ".ics", // calendar invites
+  ".vcf", // vCards
+  ".p7s", ".p7m", // digital signatures / S/MIME
+]);
+const EMAIL_ARTIFACT_MIME_TYPES = new Set([
+  "message/rfc822", // .eml
+  "application/vnd.ms-outlook", // .msg
+  "application/ms-tnef", // winmail.dat
+  "text/calendar", "application/ics", // .ics
+  "text/vcard", "text/x-vcard", // .vcf
+  "application/pkcs7-signature", "application/x-pkcs7-signature", // .p7s
+  "application/pkcs7-mime", // .p7m
+]);
+
 /**
  * List attachment metadata from a Resend email (no downloading).
  * Includes significant inline images (>10KB) — skips small logos/tracking pixels.
@@ -94,6 +111,15 @@ async function listAttachments(
 
   const attachments: DriveAttachment[] = [];
   for (const info of attachmentsList) {
+    // Skip email artifact attachments (messages, calendar invites, vCards, signatures)
+    const ext = (info.filename || "").toLowerCase().match(/\.[^.]+$/)?.[0] || "";
+    if (
+      EMAIL_ARTIFACT_EXTENSIONS.has(ext) ||
+      EMAIL_ARTIFACT_MIME_TYPES.has(info.content_type || "")
+    ) {
+      logger.info("Skipping email artifact attachment", {filename: info.filename});
+      continue;
+    }
     // Skip inline images (email header/footer/signature images)
     if (isInlineImage(info)) {
       // If there are real file attachments, skip ALL inline images (they're email chrome)

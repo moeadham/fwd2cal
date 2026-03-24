@@ -1094,6 +1094,96 @@ driveEmailMultipleAttachments.attachmentsList = [
   },
 ];
 
+// Drive Test: PDF + email artifact attachments (artifacts should be filtered out)
+const driveEmailWithArtifacts: ResendTestData = createResendTestData(
+  {
+    type: "email.received",
+    created_at: new Date().toISOString(),
+    data: {
+      email_id: "test-drive-artifacts",
+      message_id: `<test-drive-artifacts-${Date.now()}@mail.gmail.com>`,
+      from: TESTER_PRIMARY_GOOGLE_ACCT,
+      to: [DRIVE_EMAIL_ADDRESS],
+      cc: [],
+      bcc: [],
+      subject: "Fwd: Meeting Notes with Attachments",
+      created_at: new Date().toISOString(),
+      attachments: [
+        {id: "art-pdf", filename: "conference_registration.pdf", content_type: "application/pdf", content_disposition: "attachment", size: 15000},
+        {id: "art-eml", filename: "original_message.eml", content_type: "message/rfc822", content_disposition: "attachment", size: 25000},
+        {id: "art-ics", filename: "invite.ics", content_type: "text/calendar", content_disposition: "attachment", size: 1200},
+        {id: "art-vcf", filename: "contact.vcf", content_type: "text/vcard", content_disposition: "attachment", size: 800},
+        {id: "art-p7s", filename: "smime.p7s", content_type: "application/pkcs7-signature", content_disposition: "attachment", size: 3500},
+      ],
+    },
+  },
+  {
+    id: "test-drive-artifacts",
+    subject: "Fwd: Meeting Notes with Attachments",
+    from: TESTER_PRIMARY_GOOGLE_ACCT,
+    to: [DRIVE_EMAIL_ADDRESS],
+    html: "<p>Here are the meeting notes, please save to Drive.</p>",
+    text: "Here are the meeting notes, please save to Drive.",
+    headers: {
+      "authentication-results": generateAuthHeader(TESTER_PRIMARY_GOOGLE_ACCT),
+      "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
+      "to": DRIVE_EMAIL_ADDRESS,
+      "subject": "Fwd: Meeting Notes with Attachments",
+      "date": "Mon, 1 Jul 2025 14:00:00 +0000",
+      "message-id": `<test-drive-artifacts-${Date.now()}@mail.gmail.com>`,
+      "in-reply-to": "<original-message-drive-artifacts>",
+      "references": "<original-message-drive-artifacts>",
+    },
+  },
+);
+driveEmailWithArtifacts.attachmentsList = [
+  {
+    id: "art-pdf",
+    filename: "conference_registration.pdf",
+    content_type: "application/pdf",
+    content_disposition: "attachment",
+    size: 1500,
+    download_url: `file://${PDF_FILE_PATH}`,
+    expires_at: new Date(Date.now() + 3600000).toISOString(),
+  },
+  {
+    id: "art-eml",
+    filename: "original_message.eml",
+    content_type: "message/rfc822",
+    content_disposition: "attachment",
+    size: 25000,
+    download_url: `file://${PDF_FILE_PATH}`, // dummy URL, should be filtered
+    expires_at: new Date(Date.now() + 3600000).toISOString(),
+  },
+  {
+    id: "art-ics",
+    filename: "invite.ics",
+    content_type: "text/calendar",
+    content_disposition: "attachment",
+    size: 1200,
+    download_url: `file://${PDF_FILE_PATH}`,
+    expires_at: new Date(Date.now() + 3600000).toISOString(),
+  },
+  {
+    id: "art-vcf",
+    filename: "contact.vcf",
+    content_type: "text/vcard",
+    content_disposition: "attachment",
+    size: 800,
+    download_url: `file://${PDF_FILE_PATH}`,
+    expires_at: new Date(Date.now() + 3600000).toISOString(),
+  },
+  {
+    id: "art-p7s",
+    filename: "smime.p7s",
+    content_type: "application/pkcs7-signature",
+    content_disposition: "attachment",
+    size: 3500,
+    download_url: `file://${PDF_FILE_PATH}`,
+    expires_at: new Date(Date.now() + 3600000).toISOString(),
+  },
+];
+
 // Test: Automated reply subject (should be blocked by webhook filter)
 function createAutomatedReplyEmail(recipient: string): ResendTestData {
   return createResendTestData(
@@ -1158,6 +1248,7 @@ export {
   driveEmailWithPDF,
   driveEmailNoAttachments,
   driveEmailMultipleAttachments,
+  driveEmailWithArtifacts,
   automatedReplyEmail,
   automatedReplyCalendarEmail,
 };
