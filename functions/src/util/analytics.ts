@@ -56,4 +56,25 @@ async function sendEvent(
   }
 }
 
-export {sendEvent};
+/**
+ * Wrap an async handler with unhandledError event tracking.
+ * Re-throws the error so Firebase still marks the task as failed.
+ */
+function withErrorTracking<T>(
+    agent: AnalyticsAgent,
+    handler: (data: T) => Promise<void>,
+): (data: T) => Promise<void> {
+  return async (data: T) => {
+    try {
+      await handler(data);
+    } catch (err) {
+      logger.error("Unhandled error", err);
+      sendEvent("system", "unhandledError", agent, {
+        reason: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
+  };
+}
+
+export {sendEvent, withErrorTracking};

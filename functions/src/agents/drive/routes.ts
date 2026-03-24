@@ -20,6 +20,7 @@ import {ENVIRONMENT_NAME} from "../../util/config";
 import {AGENT_NAME, AGENT_HOSTING_URL, AGENT_EMAIL_ADDRESS, DRIVE_RESEND_SIGNING_SECRET} from "./config";
 import {TaskRequest} from "../../util/types";
 import {cleanupExpiredDriveFileData} from "../../util/firestoreHandler";
+import {withErrorTracking} from "../../util/analytics";
 
 import {PostAuthTaskData, OrganizeActionTaskData} from "./types";
 
@@ -173,9 +174,9 @@ export const v2driveConfirm = onRequest(
 
 export const v2driveInboundDispatch = onTaskDispatched(
     driveDispatchConfig,
-    async (req: TaskRequest): Promise<void> => {
+    withErrorTracking("drive", async (req: TaskRequest): Promise<void> => {
       await handleDriveInboundDispatch(req);
-    },
+    }),
 );
 
 export const v2testDriveInboundDispatch = onRequest(
@@ -193,9 +194,9 @@ export const v2testDriveInboundDispatch = onRequest(
 
 export const v2driveProcessAfterAuth = onTaskDispatched(
     driveDispatchConfig,
-    async (req): Promise<void> => {
+    withErrorTracking("drive", async (req): Promise<void> => {
       await handlePostAuthTask(req.data as PostAuthTaskData);
-    },
+    }),
 );
 
 export const v2testDriveProcessUpload = onRequest(
@@ -218,9 +219,9 @@ export const v2driveOrganizeAction = onRequest(
 
 export const v2driveOrganizeActionTask = onTaskDispatched(
     driveDispatchConfig,
-    async (req): Promise<void> => {
+    withErrorTracking("drive", async (req): Promise<void> => {
       await handleOrganizeActionTask(req.data as OrganizeActionTaskData);
-    },
+    }),
 );
 
 // ============================================================================

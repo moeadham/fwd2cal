@@ -15,6 +15,7 @@ import {getAgentCredentials, getRedirectUriIndex} from "../../auth/credentials";
 import {ENVIRONMENT_NAME} from "../../util/config";
 import {AGENT_NAME, AGENT_HOSTING_URL, AGENT_EMAIL_ADDRESS, RESEND_SIGNING_SECRET} from "./config";
 import {processInboundWebhook} from "../../resend/webhookUtils";
+import {withErrorTracking} from "../../util/analytics";
 import {TaskRequest} from "../../util/types";
 
 // Global configuration for onRequest functions
@@ -108,9 +109,9 @@ export const v2testOauthCallback = onRequest(
 
 export const v2resendInboundDispatch = onTaskDispatched(
     dispatchConfig,
-    async (req: TaskRequest): Promise<void> => {
+    withErrorTracking("calendar", async (req: TaskRequest): Promise<void> => {
       await handleResendInboundDispatch(req);
-    },
+    }),
 );
 
 export const v2testResendInboundDispatch = onRequest(
