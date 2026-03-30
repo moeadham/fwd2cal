@@ -367,34 +367,62 @@ async function proposeOrganization(
 
   // Files NOT in managed folders need proposals — retry with LLM
   if (uncoveredUnmanaged.length > 0) {
+    const retryChunks: DriveFileEntry[][] = [];
+    for (let i = 0; i < uncoveredUnmanaged.length; i += chunkSize) {
+      retryChunks.push(uncoveredUnmanaged.slice(i, i + chunkSize));
+    }
+
     logger.info("LLM organize: retrying omitted unmanaged files", {
       count: uncoveredUnmanaged.length,
+      totalChunks: retryChunks.length,
     });
-    try {
+
+    for (let i = 0; i < retryChunks.length; i++) {
+      const retryChunk = retryChunks[i];
       const retryText = buildChunkUserText(
-          driveStructureSummary, accumulatedFolders,
-          uncoveredUnmanaged, 0, 1, uncoveredUnmanaged.length,
+          driveStructureSummary,
+          accumulatedFolders,
+          retryChunk,
+          i,
+          retryChunks.length,
+          uncoveredUnmanaged.length,
       );
       const retryMessages: ChatMessage[] = [
         {role: "system", content: prompts.proposeOrganization.prompt},
         {role: "user", content: retryText},
       ];
-      const retryResult = await defaultCompletion<DriveOrganizeProposal>(
-          retryMessages,
-          prompts.proposeOrganization.model,
-          DEFAULT_TEMP,
-          DriveOrganizeProposalSchema,
-          uid,
-      );
-      const retryProposal = retryResult as DriveOrganizeProposal;
-      normalizeFolderPrefixes(retryProposal);
-      accumulatedFolders = retryProposal.proposed_folders;
-      allFileActions.push(...retryProposal.file_actions);
-      if (retryProposal.summary) {
-        summaries.push(retryProposal.summary);
+
+      logger.info(`LLM organize retry chunk ${i + 1}/${retryChunks.length}`, {
+        chunkFiles: retryChunk.length,
+        existingFolders: accumulatedFolders.length,
+        userTextLength: retryText.length,
+      });
+
+      try {
+        const retryResult = await defaultCompletion<DriveOrganizeProposal>(
+            retryMessages,
+            prompts.proposeOrganization.model,
+            DEFAULT_TEMP,
+            DriveOrganizeProposalSchema,
+            uid,
+        );
+        const retryProposal = retryResult as DriveOrganizeProposal;
+        normalizeFolderPrefixes(retryProposal);
+
+        logger.info(`LLM organize retry chunk ${i + 1} result`, {
+          proposedFolders: retryProposal.proposed_folders.length,
+          fileActions: retryProposal.file_actions.length,
+          chunkFiles: retryChunk.length,
+        });
+
+        accumulatedFolders = retryProposal.proposed_folders;
+        allFileActions.push(...retryProposal.file_actions);
+        if (retryProposal.summary) {
+          summaries.push(retryProposal.summary);
+        }
+      } catch (err) {
+        logger.warn(`LLM organize: retry chunk ${i + 1} failed`, err);
       }
-    } catch (err) {
-      logger.warn("LLM organize: retry for omitted files failed", err);
     }
 
     // Any still-uncovered files after retry get kept as final fallback
