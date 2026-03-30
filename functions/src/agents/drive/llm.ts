@@ -183,6 +183,80 @@ function buildChunkUserText(
 }
 
 /**
+ * Ensure every top-level proposed folder has an NN-/NNN- prefix and
+ * update any file action paths that reference renamed folders.
+ */
+function normalizeFolderPrefixes(proposal: DriveOrganizeProposal): void {
+  let maxPrefix = 0;
+  const prefixedFolderPattern = /^(\d{2,3})-/;
+
+  for (const folder of proposal.proposed_folders) {
+    const match = folder.folder_name.match(prefixedFolderPattern);
+    if (!match) {
+      continue;
+    }
+
+    maxPrefix = Math.max(maxPrefix, Number.parseInt(match[1], 10));
+  }
+
+  const renameMap = new Map<string, string>();
+  for (const folder of proposal.proposed_folders) {
+    if (prefixedFolderPattern.test(folder.folder_name)) {
+      continue;
+    }
+
+    const oldName = folder.folder_name;
+    maxPrefix += 1;
+    const newName = `${String(maxPrefix).padStart(2, "0")}-${oldName}`;
+    renameMap.set(oldName, newName);
+    folder.folder_name = newName;
+  }
+
+  if (renameMap.size === 0) {
+    return;
+  }
+
+  const renameEntries = [...renameMap.entries()]
+      .sort(([left], [right]) => right.length - left.length);
+
+  for (const folder of proposal.proposed_folders) {
+    if (!folder.subfolders) {
+      continue;
+    }
+
+    for (const subfolder of folder.subfolders) {
+      for (const [oldName, newName] of renameEntries) {
+        if (subfolder.subfolder_name === oldName) {
+          subfolder.subfolder_name = newName;
+          break;
+        }
+
+        if (subfolder.subfolder_name.startsWith(`${oldName}/`)) {
+          subfolder.subfolder_name =
+            `${newName}${subfolder.subfolder_name.slice(oldName.length)}`;
+          break;
+        }
+      }
+    }
+  }
+
+  for (const action of proposal.file_actions) {
+    const exactMatch = renameMap.get(action.new_folder);
+    if (exactMatch) {
+      action.new_folder = exactMatch;
+      continue;
+    }
+
+    for (const [oldName, newName] of renameEntries) {
+      if (action.new_folder.startsWith(`${oldName}/`)) {
+        action.new_folder = `${newName}${action.new_folder.slice(oldName.length)}`;
+        break;
+      }
+    }
+  }
+}
+
+/**
  * Propose a full Drive reorganization by processing files in chunks.
  * Each chunk receives the accumulated folder structure from prior chunks.
  */
@@ -245,6 +319,7 @@ async function proposeOrganization(
     );
 
     const chunkProposal = result as DriveOrganizeProposal;
+    normalizeFolderPrefixes(chunkProposal);
 
     logger.info(`LLM organize chunk ${i + 1} result`, {
       proposedFolders: chunkProposal.proposed_folders.length,
@@ -312,6 +387,7 @@ async function proposeOrganization(
           uid,
       );
       const retryProposal = retryResult as DriveOrganizeProposal;
+      normalizeFolderPrefixes(retryProposal);
       accumulatedFolders = retryProposal.proposed_folders;
       allFileActions.push(...retryProposal.file_actions);
       if (retryProposal.summary) {
