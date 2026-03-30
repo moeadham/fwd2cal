@@ -15,7 +15,6 @@ import {getSupportEmail} from "../../util/config";
 import {
   AGENT_EMAIL_ADDRESS,
   DRIVE_ACTION_SIGNING_KEY,
-  ORGANIZE_DRIVE_MAX_FILES,
   ORGANIZE_DRIVE_CHUNK_SIZE,
   ORGANIZE_DRIVE_TEXT_MAX_TOKENS,
   ORGANIZE_DRIVE_IMAGE_MAX_TOKENS,
@@ -514,8 +513,6 @@ async function scanAndPropose(
     emailId: string,
     uid: string,
 ): Promise<OrganizeProcessingResult> {
-  const maxFiles = ORGANIZE_DRIVE_MAX_FILES.value();
-
   let oauth2Client;
   try {
     oauth2Client = await getOauthClient(uid, AGENT_NAME);
@@ -566,21 +563,6 @@ async function scanAndPropose(
     const html = applyTemplate(driveMailTemplates.organizeNoFiles.html, {});
     await sendOrganizeEmailResponse(sender, email, html);
     return emptyResult();
-  }
-
-  // Check for drives that are too large
-  const supportEmail = getSupportEmail(AGENT_EMAIL_ADDRESS.value());
-  if (nonFolderFiles.length > maxFiles) {
-    await sendOrganizeEmailResponse(sender, email,
-        `Your Google Drive has over ${maxFiles.toLocaleString()} files. ` +
-        `We currently support drives with up to ${maxFiles.toLocaleString()} files. ` +
-        `We're working on expanding this limit!<br><br>` +
-        `You can always ask for help: ` +
-        `<a href="mailto:${supportEmail}">${supportEmail}</a>`);
-    return {
-      totalFiles: nonFolderFiles.length, filesToMove: 0, filesToRename: 0,
-      totalCost: 0, proposalSent: false, error: "Drive too large",
-    };
   }
 
   // Build structure summary

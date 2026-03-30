@@ -41,10 +41,6 @@ export const ORGANIZE_DRIVE_COST_PER_M_INPUT_TOKENS = defineString(
     },
 );
 
-export const ORGANIZE_DRIVE_MAX_FILES = defineInt("ORGANIZE_DRIVE_MAX_FILES", {
-  default: 5000,
-});
-
 export const ORGANIZE_DRIVE_FULL_LISTING_THRESHOLD = defineInt(
     "ORGANIZE_DRIVE_FULL_LISTING_THRESHOLD", {
       default: 500,
