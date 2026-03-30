@@ -11,6 +11,8 @@ import {
   handleTestProcessUpload,
   handlePostAuthTask,
   handleOrganizeActionTask,
+  handleOrganizeChunkTask,
+  handleRetryOrganizeProposal,
   dispatchPostAuthTask,
 } from "./dispatchHandler";
 import {signupCallbackHandler, hasRequiredScopes, oauthCronJob} from "../../auth/authHandler";
@@ -21,8 +23,13 @@ import {AGENT_NAME, AGENT_HOSTING_URL, AGENT_EMAIL_ADDRESS, DRIVE_RESEND_SIGNING
 import {TaskRequest} from "../../util/types";
 import {cleanupExpiredDriveFileData} from "../../util/firestoreHandler";
 import {withErrorTracking} from "../../util/analytics";
+import {cleanupStuckOrganizeProposals} from "./organizeHandler";
 
-import {PostAuthTaskData, OrganizeActionTaskData} from "./types";
+import {
+  PostAuthTaskData,
+  OrganizeActionTaskData,
+  OrganizeChunkTaskData,
+} from "./types";
 
 // Global configuration for onRequest functions
 const onRequestConfig: HttpsOptions = {
@@ -33,8 +40,9 @@ const onRequestConfig: HttpsOptions = {
 
 const driveDispatchConfig: TaskQueueOptions = {
   retryConfig: {
-    maxAttempts: 1,
-    minBackoffSeconds: 1,
+    maxAttempts: 3,
+    minBackoffSeconds: 30,
+    maxBackoffSeconds: 120,
   },
   memory: "2GiB",
   timeoutSeconds: 1800,
@@ -217,10 +225,24 @@ export const v2driveOrganizeAction = onRequest(
     },
 );
 
+export const v2driveRetryOrganizeProposal = onRequest(
+    onRequestConfig,
+    async (req, res) => {
+      await handleRetryOrganizeProposal(req, res);
+    },
+);
+
 export const v2driveOrganizeActionTask = onTaskDispatched(
     driveDispatchConfig,
     withErrorTracking("drive", async (req): Promise<void> => {
       await handleOrganizeActionTask(req.data as OrganizeActionTaskData);
+    }),
+);
+
+export const v2driveOrganizeChunkTask = onTaskDispatched(
+    driveDispatchConfig,
+    withErrorTracking("drive", async (req): Promise<void> => {
+      await handleOrganizeChunkTask(req.data as OrganizeChunkTaskData);
     }),
 );
 
@@ -237,6 +259,18 @@ export const v2cleanupDriveFileData = onSchedule(
     async () => {
       const deleted = await cleanupExpiredDriveFileData();
       logger.info("Drive: Cleanup complete", {deleted});
+    },
+);
+
+export const v2cleanupStuckOrganizeProposals = onSchedule(
+    {
+      schedule: "every 15 minutes",
+      timeZone: "UTC",
+      memory: "512MiB",
+    },
+    async () => {
+      const result = await cleanupStuckOrganizeProposals();
+      logger.info("Drive organize cleanup complete", result);
     },
 );
 

@@ -5,7 +5,12 @@ import type {Request, Response} from "express";
 
 import {handleDriveEmail} from "./driveHandler";
 import {processUpload} from "./uploadHandler";
-import {handleOrganizeDrive, handleOrganizeApproval, signActionToken} from "./organizeHandler";
+import {
+  handleOrganizeDrive,
+  handleOrganizeApproval,
+  processOrganizeChunk,
+  signActionToken,
+} from "./organizeHandler";
 import {driveSignupUrl} from "./mailTemplates";
 import {ENVIRONMENT_NAME, RESEND_API_KEY} from "../../util/config";
 import {sendEvent} from "../../util/analytics";
@@ -32,6 +37,7 @@ import {
   OrganizeProposalDoc,
   PostAuthTaskData,
   OrganizeActionTaskData,
+  OrganizeChunkTaskData,
 } from "./types";
 
 // ============================================================================
@@ -224,6 +230,28 @@ export async function dispatchOrganizeActionTask(
   });
 }
 
+export async function dispatchOrganizeChunkTask(
+    data: OrganizeChunkTaskData,
+): Promise<void> {
+  const isLocal = ENVIRONMENT_NAME.value() === "local" ||
+    ENVIRONMENT_NAME.value() === "test";
+  if (isLocal) {
+    const {transformedEmail} = await fetchEmailById(data.emailId);
+    await processOrganizeChunk(transformedEmail, data);
+    return;
+  }
+  const queue = getFunctions().taskQueue(
+      "locations/us-central1/functions/v2driveOrganizeChunkTask",
+  );
+  await queue.enqueue(data, {
+    dispatchDeadlineSeconds: 60 * 30,
+  });
+  logger.info("Drive organize chunk: Dispatched task", {
+    proposalId: data.proposalId,
+    chunkIndex: data.chunkIndex,
+  });
+}
+
 // ============================================================================
 // HTTP ROUTE HANDLERS
 // ============================================================================
@@ -412,6 +440,78 @@ export async function handleTestProcessUpload(
   }
 }
 
+export async function handleRetryOrganizeProposal(
+    req: Request,
+    res: Response,
+): Promise<void> {
+  const proposalId = req.query.proposalId as string;
+  if (!proposalId) {
+    res.status(400).json({error: "Missing proposalId"});
+    return;
+  }
+
+  let proposalDoc: OrganizeProposalDoc | null = null;
+  try {
+    const raw = await getOrganizeProposal(proposalId);
+    if (!raw) {
+      res.status(404).json({error: "Proposal not found"});
+      return;
+    }
+    proposalDoc = raw as unknown as OrganizeProposalDoc;
+  } catch (err) {
+    logger.error("Drive organize retry: Failed to fetch proposal", {
+      proposalId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    res.status(500).json({error: "Failed to fetch proposal"});
+    return;
+  }
+
+  if (!proposalDoc.emailId || !proposalDoc.uid) {
+    res.status(500).json({error: "Proposal is missing retry metadata"});
+    return;
+  }
+
+  if (proposalDoc.status !== "generating" && proposalDoc.status !== "failed") {
+    res.status(400).json({
+      error: `Proposal status is ${proposalDoc.status}, not stuck`,
+    });
+    return;
+  }
+
+  const chunkIndex = proposalDoc.currentChunk || 0;
+
+  try {
+    if (proposalDoc.status === "failed") {
+      await updateOrganizeProposalStatus(proposalId, "generating", {
+        attemptCount: 1,
+        generationStartedAt: new Date().toISOString(),
+        lastError: null,
+      });
+    }
+
+    await dispatchOrganizeChunkTask({
+      proposalId,
+      emailId: proposalDoc.emailId,
+      uid: proposalDoc.uid,
+      chunkIndex,
+    });
+
+    res.status(200).json({
+      proposalId,
+      chunkIndex,
+      message: "Retry dispatched",
+    });
+  } catch (err) {
+    logger.error("Drive organize retry: Dispatch failed", {
+      proposalId,
+      chunkIndex,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    res.status(500).json({error: "Failed to dispatch retry"});
+  }
+}
+
 // ============================================================================
 // TASK QUEUE HANDLERS
 // ============================================================================
@@ -442,4 +542,16 @@ export async function handleOrganizeActionTask(
   await handleOrganizeApproval(transformedEmail, proposalId);
 
   logger.info("Drive organize action task: Complete", {proposalId, action});
+}
+
+export async function handleOrganizeChunkTask(
+    data: OrganizeChunkTaskData,
+): Promise<void> {
+  const {proposalId, emailId, chunkIndex} = data;
+  logger.info("Drive organize chunk task: Starting", {proposalId, chunkIndex});
+
+  const {transformedEmail} = await fetchEmailById(emailId);
+  await processOrganizeChunk(transformedEmail, data);
+
+  logger.info("Drive organize chunk task: Complete", {proposalId, chunkIndex});
 }

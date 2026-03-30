@@ -177,14 +177,19 @@ export interface OrganizeProposalDoc {
   uid: string;
   senderEmail: string;
   emailId: string;
-  status: "pending" | "approved" | "executing" | "completed" | "undone";
+  status: "generating" | "pending" | "approved" | "executing" | "completed" | "failed" | "undone";
   createdAt: string;
   expiresAt: string;
   storagePath: string;
-  proposal: DriveOrganizeProposal;
-  cost: OrganizeCostBreakdown;
+  proposal?: DriveOrganizeProposal;
+  cost?: OrganizeCostBreakdown;
   snapshot?: OrganizeSnapshotAction[];
   completedAt?: string;
+  generationStartedAt?: string;
+  attemptCount?: number;
+  lastError?: string;
+  currentChunk?: number;
+  totalChunks?: number;
 }
 
 // Snapshot for undo (stored in Firestore)
@@ -312,4 +317,26 @@ export interface OrganizeActionTaskData {
   proposalId: string;
   action: string;
   emailId: string;
+}
+
+export interface OrganizeChunkTaskData {
+  proposalId: string;
+  emailId: string;
+  uid: string;
+  chunkIndex: number;
+}
+
+export interface OrganizeIntermediateState {
+  driveStructureSummary: string;
+  fileEntries: DriveFileEntry[];
+  chunkSize: number;
+  seedFolders: DriveOrganizeProposal["proposed_folders"];
+  preSkipActions: DriveOrganizeProposal["file_actions"];
+  folderRenameActions: DriveOrganizeProposal["file_actions"];
+  accumulatedFolders: DriveOrganizeProposal["proposed_folders"];
+  allFileActions: DriveOrganizeProposal["file_actions"];
+  summaries: string[];
+  completedChunks: number;
+  totalChunks: number;
+  senderEmail: string;
 }

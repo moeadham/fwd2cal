@@ -256,89 +256,19 @@ function normalizeFolderPrefixes(proposal: DriveOrganizeProposal): void {
   }
 }
 
-/**
- * Propose a full Drive reorganization by processing files in chunks.
- * Each chunk receives the accumulated folder structure from prior chunks.
- */
-async function proposeOrganization(
+async function backfillUncoveredFiles(
     driveStructureSummary: string,
-    fileEntries: DriveFileEntry[],
+    nonFolders: DriveFileEntry[],
     chunkSize: number,
+    accumulatedFolders: DriveOrganizeProposal["proposed_folders"],
+    allFileActions: DriveOrganizeProposal["file_actions"],
+    summaries: string[],
     uid: string | null = null,
-    seedFolders: DriveOrganizeProposal["proposed_folders"] = [],
-): Promise<DriveOrganizeProposal> {
-  const nonFolders = fileEntries.filter((f) => !f.isFolder);
-  const totalFiles = nonFolders.length;
-
-  // Split non-folder files into chunks
-  const chunks: DriveFileEntry[][] = [];
-  for (let i = 0; i < nonFolders.length; i += chunkSize) {
-    chunks.push(nonFolders.slice(i, i + chunkSize));
-  }
-
-  logger.info("LLM organize: starting chunked processing", {
-    totalFiles,
-    chunkSize,
-    totalChunks: chunks.length,
-    seedFolders: seedFolders.length,
-  });
-
-  // Accumulated state across chunks — start with seed folders from existing Drive structure
-  let accumulatedFolders: DriveOrganizeProposal["proposed_folders"] = [...seedFolders];
-  const allFileActions: DriveOrganizeProposal["file_actions"] = [];
-  const summaries: string[] = [];
-
-  for (let i = 0; i < chunks.length; i++) {
-    const chunk = chunks[i];
-    const userText = buildChunkUserText(
-        driveStructureSummary,
-        accumulatedFolders,
-        chunk,
-        i,
-        chunks.length,
-        totalFiles,
-    );
-
-    const messages: ChatMessage[] = [
-      {role: "system", content: prompts.proposeOrganization.prompt},
-      {role: "user", content: userText},
-    ];
-
-    logger.info(`LLM organize chunk ${i + 1}/${chunks.length}`, {
-      chunkFiles: chunk.length,
-      existingFolders: accumulatedFolders.length,
-      userTextLength: userText.length,
-    });
-
-    const result = await defaultCompletion<DriveOrganizeProposal>(
-        messages,
-        prompts.proposeOrganization.model,
-        DEFAULT_TEMP,
-        DriveOrganizeProposalSchema,
-        uid,
-    );
-
-    const chunkProposal = result as DriveOrganizeProposal;
-    normalizeFolderPrefixes(chunkProposal);
-
-    logger.info(`LLM organize chunk ${i + 1} result`, {
-      proposedFolders: chunkProposal.proposed_folders.length,
-      fileActions: chunkProposal.file_actions.length,
-      chunkFiles: chunk.length,
-    });
-
-    // Update accumulated folders (LLM returns full list each time)
-    accumulatedFolders = chunkProposal.proposed_folders;
-
-    // Collect file actions from this chunk
-    allFileActions.push(...chunkProposal.file_actions);
-
-    if (chunkProposal.summary) {
-      summaries.push(chunkProposal.summary);
-    }
-  }
-
-  // Back-fill files not addressed by any chunk
+): Promise<{
+  accumulatedFolders: DriveOrganizeProposal["proposed_folders"];
+  allFileActions: DriveOrganizeProposal["file_actions"];
+  summaries: string[];
+}> {
   const coveredIds = new Set(allFileActions.map((a) => a.file_id));
   const uncoveredManaged: DriveFileEntry[] = [];
   const uncoveredUnmanaged: DriveFileEntry[] = [];
@@ -352,7 +282,6 @@ async function proposeOrganization(
     }
   }
 
-  // Files in managed folders can be kept as-is
   for (const file of uncoveredManaged) {
     allFileActions.push({
       file_id: file.id,
@@ -365,7 +294,6 @@ async function proposeOrganization(
     });
   }
 
-  // Files NOT in managed folders need proposals — retry with LLM
   if (uncoveredUnmanaged.length > 0) {
     const retryChunks: DriveFileEntry[][] = [];
     for (let i = 0; i < uncoveredUnmanaged.length; i += chunkSize) {
@@ -425,7 +353,6 @@ async function proposeOrganization(
       }
     }
 
-    // Any still-uncovered files after retry get kept as final fallback
     const retryCoveredIds = new Set(allFileActions.map((a) => a.file_id));
     for (const file of uncoveredUnmanaged) {
       if (!retryCoveredIds.has(file.id)) {
@@ -442,6 +369,140 @@ async function proposeOrganization(
     }
   }
 
+  return {accumulatedFolders, allFileActions, summaries};
+}
+
+async function consolidateSummaries(
+    summaries: string[],
+    uid: string | null = null,
+): Promise<string> {
+  let finalSummary = summaries[0] ?? "";
+  if (summaries.length <= 1) {
+    return finalSummary;
+  }
+
+  const consolidateMessages: ChatMessage[] = [
+    {
+      role: "system",
+      content: prompts.consolidateSummaries.prompt,
+    },
+    {
+      role: "user",
+      content: summaries.map((s, i) =>
+        `Batch ${i + 1}: ${s}`).join("\n"),
+    },
+  ];
+  try {
+    const result = await defaultCompletion<{summary: string}>(
+        consolidateMessages,
+        prompts.consolidateSummaries.model,
+        DEFAULT_TEMP,
+        z.object({summary: z.string()}),
+        uid,
+    );
+    finalSummary = (result as {summary: string}).summary;
+  } catch (err) {
+    logger.warn("Failed to consolidate summaries, using first", err);
+  }
+  return finalSummary;
+}
+
+/**
+ * Propose a full Drive reorganization by processing files in chunks.
+ * Each chunk receives the accumulated folder structure from prior chunks.
+ */
+async function proposeOrganization(
+    driveStructureSummary: string,
+    fileEntries: DriveFileEntry[],
+    chunkSize: number,
+    uid: string | null = null,
+    seedFolders: DriveOrganizeProposal["proposed_folders"] = [],
+): Promise<DriveOrganizeProposal> {
+  const nonFolders = fileEntries.filter((f) => !f.isFolder);
+  const totalFiles = nonFolders.length;
+
+  // Split non-folder files into chunks
+  const chunks: DriveFileEntry[][] = [];
+  for (let i = 0; i < nonFolders.length; i += chunkSize) {
+    chunks.push(nonFolders.slice(i, i + chunkSize));
+  }
+
+  logger.info("LLM organize: starting chunked processing", {
+    totalFiles,
+    chunkSize,
+    totalChunks: chunks.length,
+    seedFolders: seedFolders.length,
+  });
+
+  // Accumulated state across chunks — start with seed folders from existing Drive structure
+  let accumulatedFolders: DriveOrganizeProposal["proposed_folders"] = [...seedFolders];
+  let allFileActions: DriveOrganizeProposal["file_actions"] = [];
+  let summaries: string[] = [];
+
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
+    const userText = buildChunkUserText(
+        driveStructureSummary,
+        accumulatedFolders,
+        chunk,
+        i,
+        chunks.length,
+        totalFiles,
+    );
+
+    const messages: ChatMessage[] = [
+      {role: "system", content: prompts.proposeOrganization.prompt},
+      {role: "user", content: userText},
+    ];
+
+    logger.info(`LLM organize chunk ${i + 1}/${chunks.length}`, {
+      chunkFiles: chunk.length,
+      existingFolders: accumulatedFolders.length,
+      userTextLength: userText.length,
+    });
+
+    const result = await defaultCompletion<DriveOrganizeProposal>(
+        messages,
+        prompts.proposeOrganization.model,
+        DEFAULT_TEMP,
+        DriveOrganizeProposalSchema,
+        uid,
+    );
+
+    const chunkProposal = result as DriveOrganizeProposal;
+    normalizeFolderPrefixes(chunkProposal);
+
+    logger.info(`LLM organize chunk ${i + 1} result`, {
+      proposedFolders: chunkProposal.proposed_folders.length,
+      fileActions: chunkProposal.file_actions.length,
+      chunkFiles: chunk.length,
+    });
+
+    // Update accumulated folders (LLM returns full list each time)
+    accumulatedFolders = chunkProposal.proposed_folders;
+
+    // Collect file actions from this chunk
+    allFileActions.push(...chunkProposal.file_actions);
+
+    if (chunkProposal.summary) {
+      summaries.push(chunkProposal.summary);
+    }
+  }
+
+  ({
+    accumulatedFolders,
+    allFileActions,
+    summaries,
+  } = await backfillUncoveredFiles(
+      driveStructureSummary,
+      nonFolders,
+      chunkSize,
+      accumulatedFolders,
+      allFileActions,
+      summaries,
+      uid,
+  ));
+
   const keptCount = allFileActions.filter((a) => a.action === "keep").length;
   logger.info("LLM organize: chunked processing complete", {
     totalFiles,
@@ -450,33 +511,7 @@ async function proposeOrganization(
     finalFolders: accumulatedFolders.length,
   });
 
-  // Consolidate per-batch summaries into one concise summary
-  let finalSummary = summaries[0] ?? "";
-  if (summaries.length > 1) {
-    const consolidateMessages: ChatMessage[] = [
-      {
-        role: "system",
-        content: prompts.consolidateSummaries.prompt,
-      },
-      {
-        role: "user",
-        content: summaries.map((s, i) =>
-          `Batch ${i + 1}: ${s}`).join("\n"),
-      },
-    ];
-    try {
-      const result = await defaultCompletion<{summary: string}>(
-          consolidateMessages,
-          prompts.consolidateSummaries.model,
-          DEFAULT_TEMP,
-          z.object({summary: z.string()}),
-          uid,
-      );
-      finalSummary = (result as {summary: string}).summary;
-    } catch (err) {
-      logger.warn("Failed to consolidate summaries, using first", err);
-    }
-  }
+  const finalSummary = await consolidateSummaries(summaries, uid);
 
   return {
     proposed_folders: accumulatedFolders,
@@ -489,4 +524,8 @@ export {
   proposeFilePlacement,
   interpretMoveInstructions,
   proposeOrganization,
+  buildChunkUserText,
+  normalizeFolderPrefixes,
+  backfillUncoveredFiles,
+  consolidateSummaries,
 };

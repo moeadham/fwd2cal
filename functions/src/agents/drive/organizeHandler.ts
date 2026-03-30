@@ -5,7 +5,12 @@ import {
   getUserFromUID,
   DRIVE_USERS_COLLECTION,
   saveOrganizeProposal,
+  saveOrganizeIntermediateState,
+  getOrganizeIntermediateState,
+  finalizeOrganizeProposal,
   getOrganizeProposal,
+  findGeneratingProposal,
+  getStuckOrganizeProposals,
   updateOrganizeProposalStatus,
 } from "../../util/firestoreHandler";
 import {getOauthClient} from "../../auth/authHandler";
@@ -28,10 +33,11 @@ import {
   threadEmailHtml,
 } from "../../util/emailUtils";
 import {sendEmailResend} from "../../util/resend";
-import {TransformedEmail} from "../../util/types";
+import {ChatMessage, TransformedEmail} from "../../util/types";
 import {applyTemplate, isDriveAuthError, isFileOrganized} from "./driveUtils";
 import {
   DriveFileEntry,
+  DriveOrganizeProposalSchema,
   DriveOrganizeProposal,
   OrganizeCostBreakdown,
   OrganizeProcessingResult,
@@ -39,6 +45,8 @@ import {
   OrganizeProposalDoc,
   OrganizeSnapshotAction,
   FileInfo,
+  OrganizeChunkTaskData,
+  OrganizeIntermediateState,
 } from "./types";
 import {Auth} from "googleapis";
 import {driveMailTemplates, driveFullScopeSignupUrl, driveOrganizeActionUrl} from "./mailTemplates";
@@ -58,9 +66,18 @@ import {
   readDriveFileContent,
   findSubfolderByName,
 } from "./driveHelper";
-import {proposeOrganization, proposeFilePlacement} from "./llm";
+import {
+  buildChunkUserText,
+  normalizeFolderPrefixes,
+  backfillUncoveredFiles,
+  consolidateSummaries,
+  proposeFilePlacement,
+} from "./llm";
 import {extractContentSummary, extractDocumentImageUrls} from "./fileProcessor";
 import {getNextFolderPrefix, toTitleCase} from "./driveUtils";
+import {dispatchOrganizeChunkTask, fetchEmailById} from "./dispatchHandler";
+import {defaultCompletion, DEFAULT_TEMP} from "../../util/openai";
+import {prompts} from "./prompts";
 
 // ============================================================================
 // HELPERS
@@ -319,6 +336,52 @@ function buildOrganizeEmbeddedData(data: OrganizeEmbeddedData): string {
   return link;
 }
 
+async function sendOrganizeProposalEmail(
+    sender: string,
+    email: TransformedEmail,
+    proposalId: string,
+    proposal: DriveOrganizeProposal,
+    cost: OrganizeCostBreakdown,
+): Promise<void> {
+  const embeddedData: OrganizeEmbeddedData = {proposalId};
+  const embeddedHtml = buildOrganizeEmbeddedData(embeddedData);
+  const folderTreeHtml = renderFolderTree(proposal);
+
+  const approveToken = signActionToken(proposalId, "approve");
+  const approveLink = `${driveOrganizeActionUrl()}?proposalId=${proposalId}&action=approve&token=${approveToken}`;
+
+  const html = applyTemplate(driveMailTemplates.organizeProposal.html, {
+    SUMMARY: proposal.summary,
+    TOTAL_FILES: String(cost.totalFiles),
+    FILES_TO_CHANGE: String(cost.totalFiles - cost.filesToKeep),
+    FILES_TO_KEEP: String(cost.filesToKeep),
+    FOLDER_TREE: folderTreeHtml,
+    TOTAL_COST: `$${cost.totalCost.toFixed(2)}`,
+    TEXT_FILES: String(cost.textFiles),
+    TEXT_COST: `$${(cost.textFiles * cost.costPerTextFile).toFixed(2)}`,
+    IMAGE_FILES: String(cost.imageFiles),
+    IMAGE_COST: `$${(cost.imageFiles * cost.costPerImageFile).toFixed(2)}`,
+    EMBEDDED_DATA: embeddedHtml,
+    APPROVE_LINK: approveLink,
+  });
+
+  await sendOrganizeEmailResponse(sender, email, html);
+}
+
+async function failOrganizeGeneration(
+    proposalId: string,
+    sender: string,
+    email: TransformedEmail,
+    errorMessage: string,
+): Promise<void> {
+  await updateOrganizeProposalStatus(proposalId, "failed", {
+    generationStartedAt: null,
+    lastError: errorMessage,
+  });
+  const html = applyTemplate(driveMailTemplates.organizeError.html, {});
+  await sendOrganizeEmailResponse(sender, email, html);
+}
+
 /**
  * Extract root-level folders from Drive, deduplicate by base name
  * (case-insensitive), normalize NNN prefix format, and assign
@@ -458,6 +521,14 @@ async function handleOrganizeDrive(
     return sendOrganizeScopeUpgradeEmail(email, sender, emailId);
   }
 
+  const generatingProposal = await findGeneratingProposal(uid, emailId);
+  if (generatingProposal) {
+    const html = "We're still working on your Drive organization proposal. " +
+      "You'll receive an email when it's ready.";
+    await sendOrganizeEmailResponse(sender, email, html);
+    return emptyResult();
+  }
+
   // User has full scope — proceed with organization
   return scanAndPropose(email, sender, emailId, uid);
 }
@@ -526,10 +597,6 @@ async function scanAndPropose(
     await sendOrganizeEmailResponse(sender, email, html);
     return emptyResult("OAuth failed");
   }
-
-  const scanStartedHtml = applyTemplate(driveMailTemplates.organizeScanStarted.html, {});
-  await sendOrganizeEmailResponse(sender, email, scanStartedHtml);
-  logger.info("Drive organize: Sent scan-started acknowledgment", {sender});
 
   // Scan entire Drive
   logger.info("Drive organize: Scanning drive", {uid, sender});
@@ -600,116 +667,405 @@ async function scanAndPropose(
         reason: "Already organized",
       }));
 
+  const chunkSize = ORGANIZE_DRIVE_CHUNK_SIZE.value();
+  const totalChunks = needsLlm.length === 0 ?
+    0 :
+    Math.ceil(needsLlm.length / chunkSize);
+
   // Call LLM for reorganization proposal (chunked)
   logger.info("Drive organize: Calling LLM", {
     uid, fileCount: nonFolderFiles.length,
     alreadyOrganized: alreadyOrganized.length,
     needsLlm: needsLlm.length,
+    totalChunks,
   });
 
-  let proposal: DriveOrganizeProposal;
   if (needsLlm.length === 0) {
-    proposal = {
+    const proposal: DriveOrganizeProposal = {
       proposed_folders: seedFolders,
-      file_actions: [],
+      file_actions: [...folderRenameActions, ...preSkipActions],
       summary: "All files are already well-organized.",
     };
-  } else {
+
+    const cost = calculateOrganizeCost(proposal, nonFolderFiles);
+
     try {
-      const chunkSize = ORGANIZE_DRIVE_CHUNK_SIZE.value();
-      const llmFileEntries = [...folderFiles, ...needsLlm];
-      proposal = await proposeOrganization(
-          treeSummary, llmFileEntries, chunkSize, uid, seedFolders,
-      );
+      const now = new Date();
+      const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+      const proposalId = await saveOrganizeProposal({
+        uid,
+        senderEmail: sender,
+        emailId,
+        status: "pending",
+        createdAt: now.toISOString(),
+        expiresAt: expiresAt.toISOString(),
+        proposal,
+        cost,
+      });
+
+      await sendOrganizeProposalEmail(sender, email, proposalId, proposal, cost);
+
+      sendEvent(uid, "driveOrganizeProposed", "drive", {
+        totalFiles: String(cost.totalFiles),
+        filesToChange: String(cost.totalFiles - cost.filesToKeep),
+        totalCost: cost.totalCost.toFixed(2),
+      });
+
+      logger.info("Drive organize: Proposal sent", {
+        uid, totalFiles: cost.totalFiles,
+        filesToChange: cost.totalFiles - cost.filesToKeep,
+        totalCost: cost.totalCost,
+        proposalId,
+      });
+
+      return {
+        totalFiles: cost.totalFiles,
+        filesToMove: cost.filesToMove,
+        filesToRename: cost.filesToRename,
+        totalCost: cost.totalCost,
+        proposalSent: true,
+      };
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
-      logger.error("Drive organize: LLM proposal failed", {
+      logger.error("Drive organize: Failed to save direct proposal", {
         uid, error: errMsg,
       });
       const html = applyTemplate(driveMailTemplates.organizeError.html, {});
       await sendOrganizeEmailResponse(sender, email, html);
-      return emptyResult("LLM failed", nonFolderFiles.length);
+      return emptyResult("Save failed", nonFolderFiles.length);
     }
   }
 
-  // Merge folder rename actions and pre-skip keeps into the proposal
-  proposal.file_actions.push(...folderRenameActions);
-  proposal.file_actions.push(...preSkipActions);
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
-  // Calculate cost
-  const cost = calculateOrganizeCost(proposal, nonFolderFiles);
-
-  // Save proposal to Firestore
-  let proposalId: string;
   try {
-    const now = new Date();
-    const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-    proposalId = await saveOrganizeProposal({
+    const proposalId = await saveOrganizeProposal({
       uid,
       senderEmail: sender,
       emailId,
-      status: "pending",
+      status: "generating",
       createdAt: now.toISOString(),
       expiresAt: expiresAt.toISOString(),
-      proposal,
-      cost,
+      generationStartedAt: now.toISOString(),
+      attemptCount: 1,
+      currentChunk: 0,
+      totalChunks,
     });
+
+    const intermediateState: OrganizeIntermediateState = {
+      driveStructureSummary: treeSummary,
+      fileEntries: [...folderFiles, ...needsLlm],
+      chunkSize,
+      seedFolders,
+      preSkipActions,
+      folderRenameActions,
+      accumulatedFolders: [...seedFolders],
+      allFileActions: [],
+      summaries: [],
+      completedChunks: 0,
+      totalChunks,
+      senderEmail: sender,
+    };
+    await saveOrganizeIntermediateState(
+        proposalId,
+        intermediateState as unknown as Record<string, unknown>,
+    );
+
+    const scanStartedHtml = applyTemplate(
+        driveMailTemplates.organizeScanStarted.html,
+        {},
+    );
+    await sendOrganizeEmailResponse(sender, email, scanStartedHtml);
+    logger.info("Drive organize: Sent scan-started acknowledgment", {
+      sender,
+      proposalId,
+      totalChunks,
+    });
+
+    await dispatchOrganizeChunkTask({
+      proposalId,
+      emailId,
+      uid,
+      chunkIndex: 0,
+    });
+
+    return emptyResult(undefined, nonFolderFiles.length);
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    logger.error("Drive organize: Failed to save proposal", {
+    logger.error("Drive organize: Failed to initialize chunked proposal", {
       uid, error: errMsg,
     });
     const html = applyTemplate(driveMailTemplates.organizeError.html, {});
     await sendOrganizeEmailResponse(sender, email, html);
-    return emptyResult("Save failed", nonFolderFiles.length);
+    return emptyResult("Chunk initialization failed", nonFolderFiles.length);
+  }
+}
+
+async function processOrganizeChunk(
+    email: TransformedEmail,
+    data: OrganizeChunkTaskData,
+): Promise<void> {
+  const {proposalId, uid, chunkIndex} = data;
+  const sender = getSenderFromRawEmail(email) || "";
+
+  let proposalDoc: OrganizeProposalDoc | null = null;
+  try {
+    const rawProposal = await getOrganizeProposal(proposalId);
+    if (!rawProposal) {
+      throw new Error("Proposal not found");
+    }
+    proposalDoc = rawProposal as unknown as OrganizeProposalDoc;
+    if (proposalDoc.status !== "generating") {
+      logger.info("Drive organize chunk: Proposal no longer generating", {
+        proposalId,
+        status: proposalDoc.status,
+      });
+      return;
+    }
+
+    const state = await getOrganizeIntermediateState(proposalId) as
+      unknown as OrganizeIntermediateState;
+    const nonFolders = state.fileEntries.filter((f) => !f.isFolder);
+    const chunks: DriveFileEntry[][] = [];
+    for (let i = 0; i < nonFolders.length; i += state.chunkSize) {
+      chunks.push(nonFolders.slice(i, i + state.chunkSize));
+    }
+
+    if (chunkIndex < state.completedChunks) {
+      logger.info("Drive organize chunk: Already completed", {
+        proposalId,
+        chunkIndex,
+        completedChunks: state.completedChunks,
+      });
+      return;
+    }
+
+    if (chunkIndex > state.completedChunks) {
+      logger.warn("Drive organize chunk: Out-of-order dispatch", {
+        proposalId,
+        chunkIndex,
+        completedChunks: state.completedChunks,
+      });
+      return;
+    }
+
+    const chunk = chunks[chunkIndex];
+    if (!chunk) {
+      logger.warn("Drive organize chunk: Missing chunk", {
+        proposalId,
+        chunkIndex,
+        totalChunks: chunks.length,
+      });
+      return;
+    }
+
+    const userText = buildChunkUserText(
+        state.driveStructureSummary,
+        state.accumulatedFolders,
+        chunk,
+        chunkIndex,
+        chunks.length,
+        nonFolders.length,
+    );
+    const messages: ChatMessage[] = [
+      {role: "system", content: prompts.proposeOrganization.prompt},
+      {role: "user", content: userText},
+    ];
+
+    logger.info(`LLM organize chunk ${chunkIndex + 1}/${chunks.length}`, {
+      proposalId,
+      chunkFiles: chunk.length,
+      existingFolders: state.accumulatedFolders.length,
+      userTextLength: userText.length,
+    });
+
+    const result = await defaultCompletion<DriveOrganizeProposal>(
+        messages,
+        prompts.proposeOrganization.model,
+        DEFAULT_TEMP,
+        DriveOrganizeProposalSchema,
+        uid,
+    );
+    const chunkProposal = result as DriveOrganizeProposal;
+    normalizeFolderPrefixes(chunkProposal);
+
+    state.accumulatedFolders = chunkProposal.proposed_folders;
+    state.allFileActions.push(...chunkProposal.file_actions);
+    if (chunkProposal.summary) {
+      state.summaries.push(chunkProposal.summary);
+    }
+    state.completedChunks = chunkIndex + 1;
+
+    const heartbeat = new Date().toISOString();
+
+    if (state.completedChunks < state.totalChunks) {
+      await saveOrganizeIntermediateState(
+          proposalId,
+          state as unknown as Record<string, unknown>,
+      );
+      await updateOrganizeProposalStatus(proposalId, "generating", {
+        currentChunk: state.completedChunks,
+        totalChunks: state.totalChunks,
+        generationStartedAt: heartbeat,
+        lastError: null,
+      });
+
+      await dispatchOrganizeChunkTask({
+        proposalId,
+        emailId: proposalDoc.emailId,
+        uid,
+        chunkIndex: state.completedChunks,
+      });
+      return;
+    }
+
+    ({
+      accumulatedFolders: state.accumulatedFolders,
+      allFileActions: state.allFileActions,
+      summaries: state.summaries,
+    } = await backfillUncoveredFiles(
+        state.driveStructureSummary,
+        nonFolders,
+        state.chunkSize,
+        state.accumulatedFolders,
+        state.allFileActions,
+        state.summaries,
+        uid,
+    ));
+
+    const finalSummary = await consolidateSummaries(state.summaries, uid);
+    const finalProposal: DriveOrganizeProposal = {
+      proposed_folders: state.accumulatedFolders,
+      file_actions: [
+        ...state.allFileActions,
+        ...state.folderRenameActions,
+        ...state.preSkipActions,
+      ],
+      summary: finalSummary,
+    };
+    const cost = calculateOrganizeCost(
+        finalProposal,
+        state.fileEntries.filter((f) => !f.isFolder),
+    );
+
+    await sendOrganizeProposalEmail(
+        state.senderEmail || sender,
+        email,
+        proposalId,
+        finalProposal,
+        cost,
+    );
+    await finalizeOrganizeProposal(
+        proposalId,
+        finalProposal as unknown as Record<string, unknown>,
+        cost as unknown as Record<string, unknown>,
+    );
+
+    sendEvent(uid, "driveOrganizeProposed", "drive", {
+      totalFiles: String(cost.totalFiles),
+      filesToChange: String(cost.totalFiles - cost.filesToKeep),
+      totalCost: cost.totalCost.toFixed(2),
+    });
+
+    logger.info("Drive organize: Chunked proposal finalized", {
+      proposalId,
+      uid,
+      totalFiles: cost.totalFiles,
+      filesToChange: cost.totalFiles - cost.filesToKeep,
+      totalCost: cost.totalCost,
+    });
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    logger.error("Drive organize chunk: Failed", {
+      proposalId,
+      chunkIndex,
+      error: errMsg,
+    });
+    if (proposalDoc?.status === "generating") {
+      await updateOrganizeProposalStatus(proposalId, "generating", {
+        lastError: errMsg,
+      }).catch((updateError) => {
+        logger.error("Drive organize chunk: Failed to persist error", {
+          proposalId,
+          error: updateError instanceof Error ? updateError.message : String(updateError),
+        });
+      });
+    }
+    throw error;
+  }
+}
+
+async function cleanupStuckOrganizeProposals(): Promise<{
+  checked: number;
+  retried: number;
+  failed: number;
+}> {
+  const stuckProposals = await getStuckOrganizeProposals(45);
+  let retried = 0;
+  let failed = 0;
+  logger.info("Drive organize cleanup: Found stuck proposals", {
+    count: stuckProposals.length,
+  });
+
+  for (const rawProposal of stuckProposals) {
+    const proposal = rawProposal as {id: string} & Partial<OrganizeProposalDoc>;
+    const proposalId = proposal.id;
+    const attemptCount = proposal.attemptCount || 1;
+    const currentChunk = proposal.currentChunk || 0;
+
+    try {
+      if (attemptCount >= 3) {
+        try {
+          const {transformedEmail} = await fetchEmailById(proposal.emailId!);
+          await failOrganizeGeneration(
+              proposalId,
+              proposal.senderEmail || getSenderFromRawEmail(transformedEmail) || "",
+              transformedEmail,
+              proposal.lastError || "Max retries exhausted",
+          );
+        } catch (error) {
+          const lastError = error instanceof Error ? error.message : String(error);
+          await updateOrganizeProposalStatus(proposalId, "failed", {
+            generationStartedAt: null,
+            lastError: lastError.includes("Failed to fetch email") ?
+              "Original email expired" :
+              lastError,
+          });
+        }
+        failed++;
+        continue;
+      }
+
+      await updateOrganizeProposalStatus(proposalId, "generating", {
+        attemptCount: attemptCount + 1,
+        generationStartedAt: new Date().toISOString(),
+      });
+      await dispatchOrganizeChunkTask({
+        proposalId,
+        emailId: proposal.emailId!,
+        uid: proposal.uid!,
+        chunkIndex: currentChunk,
+      });
+
+      logger.info("Drive organize cleanup: Redispatched stuck proposal", {
+        proposalId,
+        attemptCount: attemptCount + 1,
+        chunkIndex: currentChunk,
+      });
+      retried++;
+    } catch (error) {
+      logger.error("Drive organize cleanup: Failed", {
+        proposalId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
-  // Build embedded data
-  const embeddedData: OrganizeEmbeddedData = {proposalId};
-  const embeddedHtml = buildOrganizeEmbeddedData(embeddedData);
-
-  // Render proposal email
-  const folderTreeHtml = renderFolderTree(proposal);
-
-  const approveToken = signActionToken(proposalId, "approve");
-  const approveLink = `${driveOrganizeActionUrl()}?proposalId=${proposalId}&action=approve&token=${approveToken}`;
-
-  const html = applyTemplate(driveMailTemplates.organizeProposal.html, {
-    SUMMARY: proposal.summary,
-    TOTAL_FILES: String(cost.totalFiles),
-    FILES_TO_CHANGE: String(cost.totalFiles - cost.filesToKeep),
-    FILES_TO_KEEP: String(cost.filesToKeep),
-    FOLDER_TREE: folderTreeHtml,
-    TOTAL_COST: `$${cost.totalCost.toFixed(2)}`,
-    TEXT_FILES: String(cost.textFiles),
-    TEXT_COST: `$${(cost.textFiles * cost.costPerTextFile).toFixed(2)}`,
-    IMAGE_FILES: String(cost.imageFiles),
-    IMAGE_COST: `$${(cost.imageFiles * cost.costPerImageFile).toFixed(2)}`,
-    EMBEDDED_DATA: embeddedHtml,
-    APPROVE_LINK: approveLink,
-  });
-
-  await sendOrganizeEmailResponse(sender, email, html);
-
-  sendEvent(uid, "driveOrganizeProposed", "drive", {
-    totalFiles: String(cost.totalFiles),
-    filesToChange: String(cost.totalFiles - cost.filesToKeep),
-    totalCost: cost.totalCost.toFixed(2),
-  });
-
-  logger.info("Drive organize: Proposal sent", {
-    uid, totalFiles: cost.totalFiles,
-    filesToChange: cost.totalFiles - cost.filesToKeep,
-    totalCost: cost.totalCost,
-    proposalId,
-  });
-
   return {
-    totalFiles: cost.totalFiles,
-    filesToMove: cost.filesToMove,
-    filesToRename: cost.filesToRename,
-    totalCost: cost.totalCost,
-    proposalSent: true,
+    checked: stuckProposals.length,
+    retried,
+    failed,
   };
 }
 
@@ -796,6 +1152,13 @@ async function handleOrganizeApproval(
       `<br><br>You can always ask for help: ${helpLink}<br>`;
     await sendOrganizeEmailResponse(sender, email, html);
     return emptyResult("Proposal expired");
+  }
+
+  if (!proposalDoc.proposal || !proposalDoc.cost) {
+    logger.error("Drive organize: Proposal payload missing", {proposalId});
+    const html = applyTemplate(driveMailTemplates.organizeError.html, {});
+    await sendOrganizeEmailResponse(sender, email, html);
+    return emptyResult("Proposal missing");
   }
 
   // Mark as executing
@@ -1449,4 +1812,11 @@ async function undoOrganizeActions(
   await cleanupEmptyManagedFolders(oauth2Client);
 }
 
-export {handleOrganizeDrive, hasFullDriveScope, handleOrganizeApproval, signActionToken};
+export {
+  handleOrganizeDrive,
+  hasFullDriveScope,
+  handleOrganizeApproval,
+  processOrganizeChunk,
+  cleanupStuckOrganizeProposals,
+  signActionToken,
+};

@@ -239,12 +239,13 @@ async function saveOrganizeProposal(
     const docRef = getFirestore().collection("OrganizeProposals").doc();
     const storagePath = getProposalPath(docRef.id);
 
-    // Upload bulk data to GCS
-    const bucket = getStorage().bucket();
-    const file = bucket.file(storagePath);
-    await file.save(JSON.stringify({proposal, cost}), {
-      contentType: "application/json",
-    });
+    if (proposal !== undefined || cost !== undefined) {
+      const bucket = getStorage().bucket();
+      const file = bucket.file(storagePath);
+      await file.save(JSON.stringify({proposal, cost}), {
+        contentType: "application/json",
+      });
+    }
 
     // Save lightweight metadata to Firestore
     await docRef.set({...metadata, storagePath});
@@ -252,6 +253,85 @@ async function saveOrganizeProposal(
     return docRef.id;
   } catch (error) {
     logger.error("Database error in saveOrganizeProposal:", error);
+    throw error;
+  }
+}
+
+async function saveOrganizeIntermediateState(
+    proposalId: string,
+    state: Record<string, unknown>,
+): Promise<void> {
+  try {
+    const doc = await getFirestore()
+        .collection("OrganizeProposals")
+        .doc(proposalId)
+        .get();
+    if (!doc.exists) {
+      throw new Error("Organize proposal not found");
+    }
+
+    const storagePath = doc.data()?.storagePath as string;
+    const bucket = getStorage().bucket();
+    await bucket.file(storagePath).save(JSON.stringify(state), {
+      contentType: "application/json",
+    });
+  } catch (error) {
+    logger.error("Database error in saveOrganizeIntermediateState:", error);
+    throw error;
+  }
+}
+
+async function getOrganizeIntermediateState(
+    proposalId: string,
+): Promise<Record<string, unknown>> {
+  try {
+    const doc = await getFirestore()
+        .collection("OrganizeProposals")
+        .doc(proposalId)
+        .get();
+    if (!doc.exists) {
+      throw new Error("Organize proposal not found");
+    }
+
+    const storagePath = doc.data()?.storagePath as string;
+    const bucket = getStorage().bucket();
+    const [contents] = await bucket.file(storagePath).download();
+    return JSON.parse(contents.toString()) as Record<string, unknown>;
+  } catch (error) {
+    logger.error("Database error in getOrganizeIntermediateState:", error);
+    throw error;
+  }
+}
+
+async function finalizeOrganizeProposal(
+    proposalId: string,
+    proposal: Record<string, unknown>,
+    cost: Record<string, unknown>,
+): Promise<void> {
+  try {
+    const docRef = getFirestore()
+        .collection("OrganizeProposals")
+        .doc(proposalId);
+    const doc = await docRef.get();
+    if (!doc.exists) {
+      throw new Error("Organize proposal not found");
+    }
+
+    const storagePath = doc.data()?.storagePath as string;
+    const bucket = getStorage().bucket();
+    await bucket.file(storagePath).save(JSON.stringify({proposal, cost}), {
+      contentType: "application/json",
+    });
+
+    await docRef.update({
+      status: "pending",
+      generationStartedAt: null,
+      currentChunk: null,
+      totalChunks: null,
+      lastError: null,
+    });
+  } catch (error) {
+    logger.error("Database error in finalizeOrganizeProposal:", error);
     throw error;
   }
 }
@@ -275,6 +355,47 @@ async function getOrganizeProposal(
     return {id: doc.id, ...data, ...bulkData} as Record<string, unknown>;
   } catch (error) {
     logger.error("Database error in getOrganizeProposal:", error);
+    throw error;
+  }
+}
+
+async function findGeneratingProposal(
+    uid: string,
+    _emailId: string,
+): Promise<{id: string; [key: string]: unknown} | null> {
+  try {
+    const snapshot = await getFirestore()
+        .collection("OrganizeProposals")
+        .where("uid", "==", uid)
+        .where("status", "==", "generating")
+        .limit(1)
+        .get();
+    if (snapshot.empty) {
+      return null;
+    }
+
+    const doc = snapshot.docs[0];
+    return {id: doc.id, ...doc.data()};
+  } catch (error) {
+    logger.error("Database error in findGeneratingProposal:", error);
+    throw error;
+  }
+}
+
+async function getStuckOrganizeProposals(
+    staleMinutes: number,
+): Promise<Array<{id: string; [key: string]: unknown}>> {
+  try {
+    const cutoff = new Date(Date.now() - staleMinutes * 60 * 1000).toISOString();
+    const snapshot = await getFirestore()
+        .collection("OrganizeProposals")
+        .where("status", "==", "generating")
+        .where("generationStartedAt", "<", cutoff)
+        .get();
+
+    return snapshot.docs.map((doc) => ({id: doc.id, ...doc.data()}));
+  } catch (error) {
+    logger.error("Database error in getStuckOrganizeProposals:", error);
     throw error;
   }
 }
@@ -395,7 +516,12 @@ export {
   removeEmailAddress,
   deleteUser,
   saveOrganizeProposal,
+  saveOrganizeIntermediateState,
+  getOrganizeIntermediateState,
+  finalizeOrganizeProposal,
   getOrganizeProposal,
+  findGeneratingProposal,
+  getStuckOrganizeProposals,
   updateOrganizeProposalStatus,
   saveDriveFileData,
   getDriveFileData,
