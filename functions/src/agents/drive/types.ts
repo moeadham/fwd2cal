@@ -249,6 +249,8 @@ export interface DriveMailTemplates {
   uploadFailed: DriveMailTemplate;
   moveFailed: DriveMailTemplate;
   organizeAuthRequired: DriveMailTemplate;
+  organizeScanStarted: DriveMailTemplate;
+  organizeExecutionStarted: DriveMailTemplate;
   organizeProposal: DriveMailTemplate;
   organizeError: DriveMailTemplate;
   organizeNoFiles: DriveMailTemplate;

@@ -115,6 +115,16 @@ Once authorized, you can forward emails with attachments to <a href="mailto:driv
 <br><br>We take your privacy seriously. We will only propose changes &mdash; nothing moves until you approve.
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
   },
+  organizeScanStarted: {
+    html: `Got it &mdash; we're scanning your Google Drive now to build an organization proposal.
+<br><br>Please wait, this may take a few minutes depending on the size of your Drive. We'll send you a proposal to review once it's ready &mdash; nothing will be moved without your approval.
+<br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
+  },
+  organizeExecutionStarted: {
+    html: `Your approval has been received &mdash; we're reorganizing your Google Drive now.
+<br><br>Please wait, this may take a few minutes depending on the size of your Drive. You'll receive a confirmation email when it's done.
+<br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
+  },
   organizeProposal: {
     html: `Here's our proposal to organize your Google Drive:
 <br><br>

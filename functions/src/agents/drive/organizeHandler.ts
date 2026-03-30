@@ -527,6 +527,10 @@ async function scanAndPropose(
     return emptyResult("OAuth failed");
   }
 
+  const scanStartedHtml = applyTemplate(driveMailTemplates.organizeScanStarted.html, {});
+  await sendOrganizeEmailResponse(sender, email, scanStartedHtml);
+  logger.info("Drive organize: Sent scan-started acknowledgment", {sender});
+
   // Scan entire Drive
   logger.info("Drive organize: Scanning drive", {uid, sender});
   let rawFiles;
@@ -812,6 +816,13 @@ async function handleOrganizeApproval(
     await sendOrganizeEmailResponse(sender, email, html);
     return emptyResult("OAuth failed");
   }
+
+  const execStartedHtml = applyTemplate(driveMailTemplates.organizeExecutionStarted.html, {});
+  await sendOrganizeEmailResponse(sender, email, execStartedHtml);
+  logger.info("Drive organize: Sent execution-started acknowledgment", {
+    sender,
+    proposalId,
+  });
 
   // Execute the proposal
   const proposal = proposalDoc.proposal;
