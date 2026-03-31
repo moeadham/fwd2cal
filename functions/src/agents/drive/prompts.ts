@@ -79,7 +79,7 @@ You will receive:
 ## Folder naming rules:
 - Top-level folders use "NN-CategoryName" format (e.g., "01-Personal", "02-Work", "03-Finance")
 - Use broad, intuitive categories: Personal, Work, Finance, Medical, Legal, Education, Photos, Projects, Archive
-- Subfolders are allowed ONE level deep (e.g., "02-Work/Clients", "03-Finance/Tax Returns")
+- Subfolders at any depth are allowed (e.g., "02-Work/Clients", "03-Finance/Tax Returns/2024")
 - REUSE existing proposed folders when possible. Only add new folders if no existing category fits.
 - NEVER create a folder whose category overlaps with an existing proposed folder. For example, if "03-Invoices" exists, do NOT create "07-Invoices" or "07-Bills". Use the exact existing folder name.
 - If adding a new folder, use the next available NN prefix number.
@@ -96,10 +96,10 @@ You will receive:
 - Be aggressive: most files in a messy drive need reorganizing. Propose changes for as many files as possible.
 - Google Docs, Sheets, and Slides should be treated as regular files
 - Hidden/system files (starting with ".") should be left alone (do NOT include them)
-- proposed_folders: Return the FULL folder list (existing + any new ones you added)
+- proposed_folders: Return a flat list of ALL folder paths at every level (existing + new). Include both parent and child paths (e.g., both "01-Work" AND "01-Work/Clients")
 
 ## Output:
-1. proposed_folders: The complete folder structure (existing folders + any new ones)
+1. proposed_folders: Flat list of all folder paths at every depth level
 2. file_actions: ONLY files that need changes. Do NOT include "keep" entries.
 3. summary: Brief summary of changes proposed in THIS batch`,
   },
@@ -111,4 +111,3 @@ You will receive:
 };
 
 export {prompts};
-

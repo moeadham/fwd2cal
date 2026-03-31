@@ -306,30 +306,67 @@ function calculateOrganizeCost(
  * Render proposed folder tree as monospace HTML.
  */
 function renderFolderTree(proposal: DriveOrganizeProposal): string {
+  type TreeNode = {
+    children: Map<string, TreeNode>;
+    fullPath: string;
+  };
+
   let tree = "My Drive/<br>";
-  const folders = proposal.proposed_folders;
-  for (let i = 0; i < folders.length; i++) {
-    const folder = folders[i];
-    const isLastFolder = i === folders.length - 1;
-    const fileCount = proposal.file_actions.filter(
-        (a) => a.new_folder === folder.folder_name,
-    ).length;
-    const folderPrefix = isLastFolder ? "└── " : "├── ";
-    tree += `${folderPrefix}${folder.folder_name}/&nbsp;&nbsp;(${fileCount} files)<br>`;
-    if (folder.subfolders) {
-      const verticalLine = isLastFolder ? "&nbsp;&nbsp;&nbsp;&nbsp;" : "│&nbsp;&nbsp;&nbsp;";
-      for (let j = 0; j < folder.subfolders.length; j++) {
-        const sub = folder.subfolders[j];
-        const isLastSub = j === folder.subfolders.length - 1;
-        const subPath = `${folder.folder_name}/${sub.subfolder_name}`;
-        const subCount = proposal.file_actions.filter(
-            (a) => a.new_folder === subPath,
-        ).length;
-        const subPrefix = isLastSub ? "└── " : "├── ";
-        tree += `${verticalLine}${subPrefix}${sub.subfolder_name}/&nbsp;&nbsp;(${subCount} files)<br>`;
+  if (proposal.proposed_folders.length === 0) {
+    return tree;
+  }
+
+  const root: TreeNode = {
+    children: new Map<string, TreeNode>(),
+    fullPath: "",
+  };
+  const uniquePaths = new Set<string>();
+
+  for (const folder of proposal.proposed_folders) {
+    const normalizedPath = folder.folder_path
+        .split("/")
+        .map((segment) => segment.trim())
+        .filter(Boolean)
+        .join("/");
+    if (!normalizedPath) {
+      continue;
+    }
+    uniquePaths.add(normalizedPath);
+  }
+
+  for (const folderPath of [...uniquePaths].sort((a, b) => a.localeCompare(b))) {
+    let current = root;
+    let currentPath = "";
+    for (const segment of folderPath.split("/")) {
+      currentPath = currentPath ? `${currentPath}/${segment}` : segment;
+      let child = current.children.get(segment);
+      if (!child) {
+        child = {children: new Map<string, TreeNode>(), fullPath: currentPath};
+        current.children.set(segment, child);
       }
+      current = child;
     }
   }
+
+  const fileCounts = new Map<string, number>();
+  for (const action of proposal.file_actions) {
+    fileCounts.set(action.new_folder, (fileCounts.get(action.new_folder) || 0) + 1);
+  }
+
+  function renderChildren(node: TreeNode, prefix: string): void {
+    const children = [...node.children.entries()]
+        .sort(([left], [right]) => left.localeCompare(right));
+    for (let i = 0; i < children.length; i++) {
+      const [segment, child] = children[i];
+      const isLast = i === children.length - 1;
+      const branch = isLast ? "└── " : "├── ";
+      const count = fileCounts.get(child.fullPath) || 0;
+      tree += `${prefix}${branch}${segment}/&nbsp;&nbsp;(${count} files)<br>`;
+      renderChildren(child, `${prefix}${isLast ? "&nbsp;&nbsp;&nbsp;&nbsp;" : "│&nbsp;&nbsp;&nbsp;"}`);
+    }
+  }
+
+  renderChildren(root, "");
   return tree;
 }
 
@@ -413,7 +450,7 @@ function seedFoldersFromDrive(
   const folderRenameActions: DriveOrganizeProposal["file_actions"] = [];
 
   // Track seen base names (case-insensitive) to merge duplicates
-  const seenNames = new Map<string, string>(); // normalized → seed folder_name
+  const seenNames = new Map<string, string>(); // normalized → seed folder_path
   let nextPrefix = 1;
 
   for (const folder of rootFolders) {
@@ -443,9 +480,8 @@ function seedFoldersFromDrive(
     seenNames.set(normalizedName, newName);
 
     seedFolders.push({
-      folder_name: newName,
+      folder_path: newName,
       description: `Existing folder "${folder.name}"`,
-      subfolders: null,
     });
 
     folderRenameActions.push({
@@ -1342,37 +1378,51 @@ async function executeOrganizeProposal(
   }
   for (const action of proposal.file_actions) {
     if (action.action === "rename" && action.current_path === "My Drive" &&
-        proposal.proposed_folders.some((f) => f.folder_name === action.new_name)) {
+        proposal.proposed_folders.some((f) => f.folder_path === action.new_name)) {
       folderMap.set(action.new_name, action.file_id);
     }
   }
 
   for (const folder of proposal.proposed_folders) {
-    // Already mapped from a managed/rename action, or exists at root with the name
-    let folderId = folderMap.get(folder.folder_name) ||
-      existingRootFolders.get(folder.folder_name);
-    if (!folderId) {
-      folderId = await createFolder(oauth2Client, folder.folder_name, rootFolderId);
-      await placeMarkerFile(oauth2Client, folderId);
+    const segments = folder.folder_path.split("/").filter(Boolean);
+    if (segments.length === 0) {
+      continue;
     }
-    folderMap.set(folder.folder_name, folderId);
 
-    // Create subfolders
-    if (folder.subfolders) {
-      for (const sub of folder.subfolders) {
-        const subPath = `${folder.folder_name}/${sub.subfolder_name}`;
-        const existingSubId = await findSubfolder(
-            drive, folderId, sub.subfolder_name,
-        );
-        if (existingSubId) {
-          folderMap.set(subPath, existingSubId);
-        } else {
-          const subId = await createFolder(
-              oauth2Client, sub.subfolder_name, folderId,
-          );
-          folderMap.set(subPath, subId);
-        }
+    if (segments.length === 1) {
+      let folderId = folderMap.get(folder.folder_path) ||
+        existingRootFolders.get(folder.folder_path);
+      if (!folderId) {
+        folderId = await createFolder(oauth2Client, folder.folder_path, rootFolderId);
+        await placeMarkerFile(oauth2Client, folderId);
       }
+      folderMap.set(folder.folder_path, folderId);
+      continue;
+    }
+
+    let parentId = folderMap.get(segments[0]) || existingRootFolders.get(segments[0]);
+    if (!parentId) {
+      parentId = await createFolder(oauth2Client, segments[0], rootFolderId);
+      await placeMarkerFile(oauth2Client, parentId);
+      folderMap.set(segments[0], parentId);
+    }
+
+    let resolvedPath = segments[0];
+    for (let i = 1; i < segments.length; i++) {
+      const segment = segments[i];
+      const currentPath = `${resolvedPath}/${segment}`;
+      let folderId = folderMap.get(currentPath);
+      if (!folderId) {
+        const existingSubId = await findSubfolder(drive, parentId, segment);
+        if (existingSubId) {
+          folderId = existingSubId;
+        } else {
+          folderId = await createFolder(oauth2Client, segment, parentId);
+        }
+        folderMap.set(currentPath, folderId);
+      }
+      parentId = folderId;
+      resolvedPath = currentPath;
     }
   }
 
@@ -1486,7 +1536,7 @@ async function executeOrganizeProposal(
       if (action.action === "rename" || action.action === "move_and_rename") {
         // For folder renames (from seedFoldersFromDrive), use renameFolder
         const isFolder = action.current_path === "My Drive" &&
-          proposal.proposed_folders.some((f) => f.folder_name === action.new_name);
+          proposal.proposed_folders.some((f) => f.folder_path === action.new_name);
         if (isFolder) {
           await renameFolder(oauth2Client, action.file_id, action.new_name);
           snapshotEntry.newName = action.new_name;

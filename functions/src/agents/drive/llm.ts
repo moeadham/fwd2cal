@@ -159,13 +159,7 @@ function buildChunkUserText(
   if (existingFolders.length > 0) {
     userText += `## Previously Proposed Folders (reuse these)\n`;
     for (const folder of existingFolders) {
-      userText += `- ${folder.folder_name}: ${folder.description}`;
-      if (folder.subfolders) {
-        const subs = folder.subfolders
-            .map((s) => s.subfolder_name).join(", ");
-        userText += ` [subfolders: ${subs}]`;
-      }
-      userText += "\n";
+      userText += `- ${folder.folder_path}: ${folder.description}\n`;
     }
     userText += "\n";
   }
@@ -191,7 +185,8 @@ function normalizeFolderPrefixes(proposal: DriveOrganizeProposal): void {
   const prefixedFolderPattern = /^(\d{2,3})-/;
 
   for (const folder of proposal.proposed_folders) {
-    const match = folder.folder_name.match(prefixedFolderPattern);
+    const rootSegment = folder.folder_path.split("/")[0];
+    const match = rootSegment.match(prefixedFolderPattern);
     if (!match) {
       continue;
     }
@@ -201,15 +196,19 @@ function normalizeFolderPrefixes(proposal: DriveOrganizeProposal): void {
 
   const renameMap = new Map<string, string>();
   for (const folder of proposal.proposed_folders) {
-    if (prefixedFolderPattern.test(folder.folder_name)) {
+    if (folder.folder_path.includes("/")) {
       continue;
     }
 
-    const oldName = folder.folder_name;
+    if (prefixedFolderPattern.test(folder.folder_path)) {
+      continue;
+    }
+
+    const oldName = folder.folder_path;
     maxPrefix += 1;
     const newName = `${String(maxPrefix).padStart(2, "0")}-${oldName}`;
     renameMap.set(oldName, newName);
-    folder.folder_name = newName;
+    folder.folder_path = newName;
   }
 
   if (renameMap.size === 0) {
@@ -220,23 +219,14 @@ function normalizeFolderPrefixes(proposal: DriveOrganizeProposal): void {
       .sort(([left], [right]) => right.length - left.length);
 
   for (const folder of proposal.proposed_folders) {
-    if (!folder.subfolders) {
+    if (!folder.folder_path.includes("/")) {
       continue;
     }
 
-    for (const subfolder of folder.subfolders) {
-      for (const [oldName, newName] of renameEntries) {
-        if (subfolder.subfolder_name === oldName) {
-          subfolder.subfolder_name = newName;
-          break;
-        }
-
-        if (subfolder.subfolder_name.startsWith(`${oldName}/`)) {
-          subfolder.subfolder_name =
-            `${newName}${subfolder.subfolder_name.slice(oldName.length)}`;
-          break;
-        }
-      }
+    const [rootSegment, ...rest] = folder.folder_path.split("/");
+    const renamedRoot = renameMap.get(rootSegment);
+    if (renamedRoot) {
+      folder.folder_path = [renamedRoot, ...rest].join("/");
     }
   }
 

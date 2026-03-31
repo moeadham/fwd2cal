@@ -107,14 +107,10 @@ export interface DriveFileEntry {
 
 // Proposed folder in the new structure
 export const OrganizeFolderSchema = z.object({
-  folder_name: z.string().describe(
-      "Folder name with NN-Category format (e.g., '01-Personal', '02-Work')",
+  folder_path: z.string().describe(
+      "Full folder path, e.g. '01-Personal' or '01-Personal/Medical/2024'",
   ),
   description: z.string().describe("Brief description of what this folder contains"),
-  subfolders: z.array(z.object({
-    subfolder_name: z.string().describe("Subfolder name"),
-    description: z.string().describe("Brief description"),
-  })).nullable().describe("Optional subfolders within this category, null if none"),
 });
 
 // Proposed action for a single file
@@ -126,7 +122,7 @@ export const OrganizeFileActionSchema = z.object({
       "Proposed new filename in YYYY.MM.DD - description.ext format",
   ),
   new_folder: z.string().describe(
-      "Target folder name (NN-Category or NN-Category/Subfolder)",
+      "Target folder path (e.g. '01-Work' or '01-Work/Clients/Acme')",
   ),
   action: z.enum(["move", "rename", "move_and_rename", "keep"]).describe(
       "What action to take on this file",
@@ -137,7 +133,7 @@ export const OrganizeFileActionSchema = z.object({
 // Full reorganization proposal
 export const DriveOrganizeProposalSchema = z.object({
   proposed_folders: z.array(OrganizeFolderSchema).describe(
-      "The proposed top-level folder structure",
+      "Flat list of all folder paths in the proposed structure",
   ),
   file_actions: z.array(OrganizeFileActionSchema).describe(
       "Proposed action for each file in the drive",
