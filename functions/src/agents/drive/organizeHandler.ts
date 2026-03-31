@@ -303,6 +303,16 @@ function calculateOrganizeCost(
 }
 
 /**
+ * Format a plain-text summary as HTML: add line breaks between sentences
+ * and bold YYYY.MM.DD filename references.
+ */
+function formatSummaryHtml(summary: string): string {
+  let html = summary.replace(/\.\s+/g, ".<br>");
+  html = html.replace(/\d{4}\.\d{2}\.\d{2}\s*-\s*\S+/g, (match) => `<b>${match}</b>`);
+  return html;
+}
+
+/**
  * Render proposed folder tree as monospace HTML.
  */
 function renderFolderTree(proposal: DriveOrganizeProposal): string {
@@ -396,7 +406,7 @@ async function sendOrganizeProposalEmail(
   const approveLink = `${driveOrganizeActionUrl()}?proposalId=${proposalId}&action=approve&token=${approveToken}`;
 
   const html = applyTemplate(driveMailTemplates.organizeProposal.html, {
-    SUMMARY: proposal.summary,
+    SUMMARY: formatSummaryHtml(proposal.summary),
     TOTAL_FILES: String(cost.totalFiles),
     FILES_TO_CHANGE: String(cost.totalFiles - cost.filesToKeep),
     FILES_TO_KEEP: String(cost.filesToKeep),
@@ -1297,7 +1307,7 @@ async function handleOrganizeApproval(
   const undoLink = `${driveOrganizeActionUrl()}?proposalId=${proposalId}&action=undo&token=${undoToken}`;
 
   const html = applyTemplate(driveMailTemplates.organizeComplete.html, {
-    SUMMARY: proposal.summary,
+    SUMMARY: formatSummaryHtml(proposal.summary),
     FILES_CHANGED: String(filesChanged),
     FOLDER_TREE: folderTreeHtml,
     EMBEDDED_DATA: embeddedHtml,
