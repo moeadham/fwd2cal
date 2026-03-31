@@ -138,7 +138,8 @@ function buildFileEntries(
       size: string;
       webViewLink: string;
     }>,
-): DriveFileEntry[] {
+    rootFolderId: string,
+): {entries: DriveFileEntry[]; isDrivePath: (id: string) => boolean} {
   // Build a map of id → name for path computation
   const nameMap = new Map<string, string>();
   for (const f of rawFiles) {
@@ -153,6 +154,27 @@ function buildFileEntries(
     }
   }
 
+  // Cache: file id → whether its parent chain reaches My Drive root.
+  // Files outside My Drive (e.g. Computers/Drive for Desktop backups)
+  // have parent chains that terminate at a different root.
+  const cache = new Map<string, boolean>();
+
+  function isDrivePath(id: string): boolean {
+    if (cache.has(id)) return cache.get(id)!;
+    const parent = parentMap.get(id);
+    if (!parent) {
+      cache.set(id, false);
+      return false;
+    }
+    if (parent === rootFolderId) {
+      cache.set(id, true);
+      return true;
+    }
+    const result = isDrivePath(parent);
+    cache.set(id, result);
+    return result;
+  }
+
   function getPath(id: string): string {
     const parts: string[] = [];
     let current = parentMap.get(id);
@@ -163,7 +185,7 @@ function buildFileEntries(
     return parts.join("/") || "My Drive";
   }
 
-  return rawFiles.map((f) => ({
+  const entries = rawFiles.map((f) => ({
     id: f.id,
     name: f.name,
     mimeType: f.mimeType,
@@ -174,6 +196,8 @@ function buildFileEntries(
     webViewLink: f.webViewLink,
     isFolder: f.mimeType === "application/vnd.google-apps.folder",
   }));
+
+  return {entries, isDrivePath};
 }
 
 /**
@@ -828,7 +852,15 @@ async function scanAndPropose(
   logger.info("Drive organize: Raw files from API", {
     rawCount: rawFiles.length,
   });
-  const fileEntries = buildFileEntries(rawFiles);
+  const rootFolderId = await getRootFolderId(oauth2Client);
+  const {entries: allFileEntries, isDrivePath} = buildFileEntries(
+      rawFiles, rootFolderId,
+  );
+  const fileEntries = allFileEntries.filter((f) => isDrivePath(f.id));
+  logger.info("Drive organize: Excluded non-Drive files", {
+    excludedCount: allFileEntries.length - fileEntries.length,
+    remainingCount: fileEntries.length,
+  });
   const nonFolderFiles = fileEntries.filter((f) => !f.isFolder);
   const folderFiles = fileEntries.filter((f) => f.isFolder);
   logger.info("Drive organize: File breakdown", {
@@ -1427,7 +1459,7 @@ async function handleOrganizeApproval(
   });
 
   // Execute the proposal
-  const proposal = proposalDoc.proposal;
+  const proposal = proposalDoc.proposal!;
   let execResult;
   try {
     execResult = await executeOrganizeProposal(oauth2Client, proposal, uid);
