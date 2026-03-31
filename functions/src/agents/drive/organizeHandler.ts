@@ -307,18 +307,26 @@ function calculateOrganizeCost(
  */
 function renderFolderTree(proposal: DriveOrganizeProposal): string {
   let tree = "My Drive/<br>";
-  for (const folder of proposal.proposed_folders) {
+  const folders = proposal.proposed_folders;
+  for (let i = 0; i < folders.length; i++) {
+    const folder = folders[i];
+    const isLastFolder = i === folders.length - 1;
     const fileCount = proposal.file_actions.filter(
         (a) => a.new_folder === folder.folder_name,
     ).length;
-    tree += `&nbsp;&nbsp;${folder.folder_name}/&nbsp;&nbsp;(${fileCount} files)<br>`;
+    const folderPrefix = isLastFolder ? "└── " : "├── ";
+    tree += `${folderPrefix}${folder.folder_name}/&nbsp;&nbsp;(${fileCount} files)<br>`;
     if (folder.subfolders) {
-      for (const sub of folder.subfolders) {
+      const verticalLine = isLastFolder ? "&nbsp;&nbsp;&nbsp;&nbsp;" : "│&nbsp;&nbsp;&nbsp;";
+      for (let j = 0; j < folder.subfolders.length; j++) {
+        const sub = folder.subfolders[j];
+        const isLastSub = j === folder.subfolders.length - 1;
         const subPath = `${folder.folder_name}/${sub.subfolder_name}`;
         const subCount = proposal.file_actions.filter(
             (a) => a.new_folder === subPath,
         ).length;
-        tree += `&nbsp;&nbsp;&nbsp;&nbsp;${sub.subfolder_name}/&nbsp;&nbsp;(${subCount} files)<br>`;
+        const subPrefix = isLastSub ? "└── " : "├── ";
+        tree += `${verticalLine}${subPrefix}${sub.subfolder_name}/&nbsp;&nbsp;(${subCount} files)<br>`;
       }
     }
   }
