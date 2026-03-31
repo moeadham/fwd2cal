@@ -143,6 +143,62 @@ async function interpretMoveInstructions(
 }
 
 /**
+ * Revise an existing organize-drive proposal based on a user's reply.
+ */
+async function reviseOrganization(
+    currentProposal: DriveOrganizeProposal,
+    userInstructions: string,
+    uid: string | null = null,
+): Promise<DriveOrganizeProposal> {
+  let userText = `## User Requested Changes\n${userInstructions}\n\n`;
+
+  userText += `## Current Proposed Folders\n`;
+  if (currentProposal.proposed_folders.length > 0) {
+    for (const folder of currentProposal.proposed_folders) {
+      userText += `- ${folder.folder_path}: ${folder.description}\n`;
+    }
+  } else {
+    userText += "(none)\n";
+  }
+
+  userText += `\n## Current File Actions\n`;
+  if (currentProposal.file_actions.length > 0) {
+    for (const action of currentProposal.file_actions) {
+      userText += `- [${action.file_id}] "${action.current_name}" from "${action.current_path}"` +
+        ` -> "${action.new_folder}/${action.new_name}" (${action.action})` +
+        ` reason: ${action.reason}\n`;
+    }
+  } else {
+    userText += "(none)\n";
+  }
+
+  userText += `\n## Current Summary\n${currentProposal.summary}\n`;
+
+  const messages: ChatMessage[] = [
+    {role: "system", content: prompts.reviseOrganization.prompt},
+    {role: "user", content: userText},
+  ];
+
+  logger.info("Drive organize revision prompt", {
+    fileActions: currentProposal.file_actions.length,
+    proposedFolders: currentProposal.proposed_folders.length,
+    userTextLength: userText.length,
+  });
+
+  const result = await defaultCompletion<DriveOrganizeProposal>(
+      messages,
+      prompts.reviseOrganization.model,
+      DEFAULT_TEMP,
+      DriveOrganizeProposalSchema,
+      uid,
+  );
+
+  const revisedProposal = result as DriveOrganizeProposal;
+  normalizeFolderPrefixes(revisedProposal);
+  return revisedProposal;
+}
+
+/**
  * Build user text for a single chunk of files.
  */
 function buildChunkUserText(
@@ -514,6 +570,7 @@ export {
   proposeFilePlacement,
   interpretMoveInstructions,
   proposeOrganization,
+  reviseOrganization,
   buildChunkUserText,
   normalizeFolderPrefixes,
   backfillUncoveredFiles,

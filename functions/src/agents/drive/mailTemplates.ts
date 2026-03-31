@@ -145,6 +145,8 @@ Once authorized, you can forward emails with attachments to <a href="mailto:driv
 <a href="%APPROVE_LINK%" style="display:inline-block; padding:10px 20px; margin:5px 0; background-color:#3498db; color:white; text-align:center; text-decoration:none; font-weight:bold; border-radius:5px; border:none; cursor:pointer;">Approve &amp; Organize</a>
 <br><br>
 <span style="color:#999;font-size:13px;">Or reply &quot;approve&quot; to this email.</span>
+<br>
+<span style="color:#999;font-size:13px;">Want changes? Reply with your instructions and we'll revise the proposal.</span>
 %EMBEDDED_DATA%
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
   },

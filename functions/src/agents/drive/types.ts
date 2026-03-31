@@ -179,6 +179,7 @@ export interface OrganizeProposalDoc {
   storagePath: string;
   proposal?: DriveOrganizeProposal;
   cost?: OrganizeCostBreakdown;
+  mimeMap?: Record<string, string>;
   snapshot?: OrganizeSnapshotAction[];
   completedAt?: string;
   generationStartedAt?: string;
@@ -223,6 +224,7 @@ export interface DrivePrompts {
   proposeFilePlacement: DrivePromptConfig;
   interpretMoveInstructions: DrivePromptConfig;
   proposeOrganization: DrivePromptConfig;
+  reviseOrganization: DrivePromptConfig;
   consolidateSummaries: DrivePromptConfig;
 }
 

@@ -72,6 +72,7 @@ import {
   backfillUncoveredFiles,
   consolidateSummaries,
   proposeFilePlacement,
+  reviseOrganization,
 } from "./llm";
 import {extractContentSummary, extractDocumentImageUrls} from "./fileProcessor";
 import {getNextFolderPrefix, toTitleCase} from "./driveUtils";
@@ -302,6 +303,91 @@ function calculateOrganizeCost(
   };
 }
 
+function calculateOrganizeCostFromMimeMap(
+    proposal: DriveOrganizeProposal,
+    mimeMap: Record<string, string>,
+): OrganizeCostBreakdown {
+  const textMaxTokens = ORGANIZE_DRIVE_TEXT_MAX_TOKENS.value();
+  const imageMaxTokens = ORGANIZE_DRIVE_IMAGE_MAX_TOKENS.value();
+  const costPerMTokens = parseFloat(ORGANIZE_DRIVE_COST_PER_M_INPUT_TOKENS.value());
+
+  const costPerTextFile = (textMaxTokens * costPerMTokens) / 1_000_000;
+  const costPerImageFile = (imageMaxTokens * costPerMTokens) / 1_000_000;
+
+  const actions = proposal.file_actions;
+  const filesToMove = actions.filter(
+      (a) => a.action === "move" || a.action === "move_and_rename",
+  ).length;
+  const filesToRename = actions.filter(
+      (a) => a.action === "rename" || a.action === "move_and_rename",
+  ).length;
+  const filesToKeep = actions.filter((a) => a.action === "keep").length;
+  const changedActions = actions.filter((a) => a.action !== "keep");
+
+  let textFiles = 0;
+  let imageFiles = 0;
+  for (const action of changedActions) {
+    const mime = mimeMap[action.file_id] || "text/plain";
+    if (isImageMimeType(mime)) {
+      imageFiles++;
+    } else {
+      textFiles++;
+    }
+  }
+
+  const totalCost =
+    textFiles * costPerTextFile + imageFiles * costPerImageFile;
+
+  return {
+    totalFiles: actions.length,
+    filesToMove,
+    filesToRename,
+    filesToKeep,
+    textFiles,
+    imageFiles,
+    costPerTextFile,
+    costPerImageFile,
+    totalCost,
+  };
+}
+
+function extractReplyBody(text: string): string {
+  if (!text) {
+    return "";
+  }
+
+  const normalized = text.replace(/\r\n/g, "\n");
+  const lines = normalized.split("\n");
+  const collected: string[] = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (/^On .+ wrote:$/i.test(trimmed) ||
+      /^---Original Message---$/i.test(trimmed) ||
+      trimmed.startsWith(">")) {
+      break;
+    }
+    collected.push(line);
+  }
+
+  return collected.join("\n").trim();
+}
+
+function isApprovalText(text: string): boolean {
+  const replyBody = extractReplyBody(text).toLowerCase().trim();
+  if (!replyBody) {
+    return false;
+  }
+
+  const approvalPattern = new RegExp(
+      "^(approve[d]?|yes|yep|yeah|ok|okay|sure|go ahead|do it|" +
+      "go for it|looks good|lgtm|confirm(ed)?|execute|proceed|" +
+      "sounds good|perfect|great)[.?!]?$",
+      "i",
+  );
+  return approvalPattern.test(replyBody);
+}
+
 /**
  * Format a plain-text summary as HTML: add line breaks between sentences
  * and bold YYYY.MM.DD filename references.
@@ -527,6 +613,74 @@ function emptyResult(
   };
 }
 
+async function handleOrganizeRevision(
+    email: TransformedEmail,
+    sender: string,
+    uid: string,
+    proposalId: string,
+    proposalDoc: OrganizeProposalDoc,
+    userInstructions: string,
+): Promise<OrganizeProcessingResult> {
+  try {
+    const revisedProposal = await reviseOrganization(
+        proposalDoc.proposal!,
+        userInstructions,
+        uid,
+    );
+    const newCost = calculateOrganizeCostFromMimeMap(
+        revisedProposal,
+        proposalDoc.mimeMap || {},
+    );
+
+    await finalizeOrganizeProposal(
+        proposalId,
+        revisedProposal as unknown as Record<string, unknown>,
+        newCost as unknown as Record<string, unknown>,
+        proposalDoc.mimeMap as unknown as Record<string, unknown> | undefined,
+    );
+    await sendOrganizeProposalEmail(
+        sender,
+        email,
+        proposalId,
+        revisedProposal,
+        newCost,
+    );
+
+    sendEvent(uid, "driveOrganizeRevised", "drive", {
+      proposalId,
+      totalFiles: String(newCost.totalFiles),
+      filesToChange: String(newCost.totalFiles - newCost.filesToKeep),
+      totalCost: newCost.totalCost.toFixed(2),
+    });
+
+    logger.info("Drive organize: Proposal revised", {
+      proposalId,
+      uid,
+      totalFiles: newCost.totalFiles,
+      filesToChange: newCost.totalFiles - newCost.filesToKeep,
+      totalCost: newCost.totalCost,
+    });
+
+    return {
+      totalFiles: newCost.totalFiles,
+      filesToMove: newCost.filesToMove,
+      filesToRename: newCost.filesToRename,
+      totalCost: newCost.totalCost,
+      proposalSent: true,
+    };
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    logger.error("Drive organize revision: Failed", {
+      proposalId,
+      uid,
+      error: errMsg,
+    });
+    const html = applyTemplate(driveMailTemplates.organizeError.html, {});
+    await sendOrganizeEmailResponse(sender, email, html);
+    return emptyResult("Revision failed");
+  }
+}
+
 // ============================================================================
 // MAIN HANDLER
 // ============================================================================
@@ -742,6 +896,9 @@ async function scanAndPropose(
     };
 
     const cost = calculateOrganizeCost(proposal, nonFolderFiles);
+    const mimeMap = Object.fromEntries(
+        nonFolderFiles.map((file) => [file.id, file.mimeType]),
+    );
 
     try {
       const now = new Date();
@@ -755,6 +912,7 @@ async function scanAndPropose(
         expiresAt: expiresAt.toISOString(),
         proposal,
         cost,
+        mimeMap,
       });
 
       await sendOrganizeProposalEmail(sender, email, proposalId, proposal, cost);
@@ -1002,6 +1160,11 @@ async function processOrganizeChunk(
         finalProposal,
         state.fileEntries.filter((f) => !f.isFolder),
     );
+    const mimeMap = Object.fromEntries(
+        state.fileEntries
+            .filter((f) => !f.isFolder)
+            .map((file) => [file.id, file.mimeType]),
+    );
 
     await sendOrganizeProposalEmail(
         state.senderEmail || sender,
@@ -1014,6 +1177,7 @@ async function processOrganizeChunk(
         proposalId,
         finalProposal as unknown as Record<string, unknown>,
         cost as unknown as Record<string, unknown>,
+        mimeMap as Record<string, unknown>,
     );
 
     sendEvent(uid, "driveOrganizeProposed", "drive", {
@@ -1213,6 +1377,27 @@ async function handleOrganizeApproval(
     const html = applyTemplate(driveMailTemplates.organizeError.html, {});
     await sendOrganizeEmailResponse(sender, email, html);
     return emptyResult("Proposal missing");
+  }
+
+  const replyBody = extractReplyBody(email.text || "");
+  const isApproval = isApprovalText(email.text || "");
+
+  if (replyBody.length === 0 && !isApproval) {
+    const html = "We received your reply but couldn't find any instructions. " +
+      "Reply with changes you'd like to make, or reply &quot;approve&quot; to proceed.";
+    await sendOrganizeEmailResponse(sender, email, html);
+    return emptyResult("Empty reply");
+  }
+
+  if (!isApproval && proposalDoc.status === "pending") {
+    return handleOrganizeRevision(
+        email,
+        sender,
+        uid,
+        proposalId,
+        proposalDoc,
+        replyBody,
+    );
   }
 
   // Mark as executing

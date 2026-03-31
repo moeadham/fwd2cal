@@ -235,14 +235,14 @@ async function saveOrganizeProposal(
     data: Record<string, unknown>,
 ): Promise<string> {
   try {
-    const {proposal, cost, ...metadata} = data;
+    const {proposal, cost, mimeMap, ...metadata} = data;
     const docRef = getFirestore().collection("OrganizeProposals").doc();
     const storagePath = getProposalPath(docRef.id);
 
-    if (proposal !== undefined || cost !== undefined) {
+    if (proposal !== undefined || cost !== undefined || mimeMap !== undefined) {
       const bucket = getStorage().bucket();
       const file = bucket.file(storagePath);
-      await file.save(JSON.stringify({proposal, cost}), {
+      await file.save(JSON.stringify({proposal, cost, mimeMap}), {
         contentType: "application/json",
       });
     }
@@ -307,6 +307,7 @@ async function finalizeOrganizeProposal(
     proposalId: string,
     proposal: Record<string, unknown>,
     cost: Record<string, unknown>,
+    mimeMap?: Record<string, unknown>,
 ): Promise<void> {
   try {
     const docRef = getFirestore()
@@ -319,7 +320,7 @@ async function finalizeOrganizeProposal(
 
     const storagePath = doc.data()?.storagePath as string;
     const bucket = getStorage().bucket();
-    await bucket.file(storagePath).save(JSON.stringify({proposal, cost}), {
+    await bucket.file(storagePath).save(JSON.stringify({proposal, cost, mimeMap}), {
       contentType: "application/json",
     });
 
