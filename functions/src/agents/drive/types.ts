@@ -329,7 +329,6 @@ export interface OrganizeIntermediateState {
   fileEntries: DriveFileEntry[];
   chunkSize: number;
   seedFolders: DriveOrganizeProposal["proposed_folders"];
-  preSkipActions: DriveOrganizeProposal["file_actions"];
   folderRenameActions: DriveOrganizeProposal["file_actions"];
   accumulatedFolders: DriveOrganizeProposal["proposed_folders"];
   allFileActions: DriveOrganizeProposal["file_actions"];

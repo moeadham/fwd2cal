@@ -34,7 +34,7 @@ import {
 } from "../../util/emailUtils";
 import {sendEmailResend} from "../../util/resend";
 import {ChatMessage, TransformedEmail} from "../../util/types";
-import {applyTemplate, isDriveAuthError, isFileOrganized} from "./driveUtils";
+import {applyTemplate, isDriveAuthError} from "./driveUtils";
 import {
   DriveFileEntry,
   DriveOrganizeProposalSchema,
@@ -892,45 +892,22 @@ async function scanAndPropose(
     folderRenames: folderRenameActions.filter((a) => a.action === "rename").length,
   });
 
-  // Deterministic skip: files already matching naming conventions
-  const alreadyOrganized: typeof nonFolderFiles = [];
-  const needsLlm: typeof nonFolderFiles = [];
-  for (const f of nonFolderFiles) {
-    if (isFileOrganized(f.name, f.parentPath)) {
-      alreadyOrganized.push(f);
-    } else {
-      needsLlm.push(f);
-    }
-  }
-  const preSkipActions: DriveOrganizeProposal["file_actions"] = alreadyOrganized
-      .map((f) => ({
-        file_id: f.id,
-        current_name: f.name,
-        current_path: f.parentPath,
-        new_name: f.name,
-        new_folder: f.parentPath,
-        action: "keep" as const,
-        reason: "Already organized",
-      }));
-
   const chunkSize = ORGANIZE_DRIVE_CHUNK_SIZE.value();
-  const totalChunks = needsLlm.length === 0 ?
+  const totalChunks = nonFolderFiles.length === 0 ?
     0 :
-    Math.ceil(needsLlm.length / chunkSize);
+    Math.ceil(nonFolderFiles.length / chunkSize);
 
   // Call LLM for reorganization proposal (chunked)
   logger.info("Drive organize: Calling LLM", {
     uid, fileCount: nonFolderFiles.length,
-    alreadyOrganized: alreadyOrganized.length,
-    needsLlm: needsLlm.length,
     totalChunks,
   });
 
-  if (needsLlm.length === 0) {
+  if (nonFolderFiles.length === 0) {
     const proposal: DriveOrganizeProposal = {
       proposed_folders: seedFolders,
-      file_actions: [...folderRenameActions, ...preSkipActions],
-      summary: "All files are already well-organized.",
+      file_actions: [...folderRenameActions],
+      summary: "No files found to organize.",
     };
     reconcileFileActions(proposal);
 
@@ -1006,10 +983,9 @@ async function scanAndPropose(
 
     const intermediateState: OrganizeIntermediateState = {
       driveStructureSummary: treeSummary,
-      fileEntries: [...folderFiles, ...needsLlm],
+      fileEntries: [...folderFiles, ...nonFolderFiles],
       chunkSize,
       seedFolders,
-      preSkipActions,
       folderRenameActions,
       accumulatedFolders: [...seedFolders],
       allFileActions: [],
@@ -1191,7 +1167,6 @@ async function processOrganizeChunk(
       file_actions: [
         ...state.allFileActions,
         ...state.folderRenameActions,
-        ...state.preSkipActions,
       ],
       summary: finalSummary,
     };
