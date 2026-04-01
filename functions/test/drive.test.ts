@@ -20,6 +20,8 @@ import {
   automatedReplyEmail,
 } from "./bindings/resendBindings";
 import {extractDocumentImages} from "../src/util/documentParser";
+import {mergeRevisedProposal, reconcileFileActions} from "../src/agents/drive/llm";
+import {DriveOrganizeProposal} from "../src/agents/drive/types";
 
 chai.use(chaiHttp);
 const expect = chai.expect;
@@ -77,6 +79,30 @@ interface DriveDispatchResponse {
     };
   };
   status: number;
+}
+
+function makeOrganizeProposal(
+    fileIds: string[],
+    folderByFileId: Record<string, string>,
+    proposedFolders?: string[],
+): DriveOrganizeProposal {
+  const folderPaths = proposedFolders || [...new Set(Object.values(folderByFileId))];
+  return {
+    proposed_folders: folderPaths.map((folderPath) => ({
+      folder_path: folderPath,
+      description: `Folder ${folderPath}`,
+    })),
+    file_actions: fileIds.map((fileId, index) => ({
+      file_id: fileId,
+      current_name: `file-${fileId}.pdf`,
+      current_path: "Inbox",
+      new_name: `file-${fileId}.pdf`,
+      new_folder: folderByFileId[fileId],
+      action: "move",
+      reason: `Reason ${index}`,
+    })),
+    summary: "summary",
+  };
 }
 
 // Helper: send Resend webhook and dispatch to drive handler (Phase 1 — proposal)
@@ -163,6 +189,375 @@ describe("Webhook filtering", function() {
 
     expect(res).to.have.status(200);
     expect(res.body.message).to.equal("Automated reply, skipping");
+  });
+});
+
+describe("mergeRevisedProposal", function() {
+  it("DT00c merges no-op revisions without changing revised actions", function() {
+    const original = makeOrganizeProposal(
+        ["1", "2", "3", "4", "5"],
+        {"1": "01-Docs", "2": "01-Docs", "3": "02-Photos", "4": "02-Photos", "5": "03-Misc"},
+    );
+    const revised = makeOrganizeProposal(
+        ["1", "2", "3", "4", "5"],
+        {"1": "01-Docs", "2": "01-Docs", "3": "02-Photos", "4": "02-Photos", "5": "03-Misc"},
+    );
+
+    const result = mergeRevisedProposal(original, revised);
+
+    expect(result.file_actions).to.deep.equal(revised.file_actions);
+    expect(result.file_actions).to.have.length(5);
+  });
+
+  it("DT00d backfills actions dropped by the revision output", function() {
+    const original = makeOrganizeProposal(
+        ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"],
+        {
+          "1": "01-Docs",
+          "2": "01-Docs",
+          "3": "01-Docs",
+          "4": "01-Docs",
+          "5": "02-Photos",
+          "6": "02-Photos",
+          "7": "02-Photos",
+          "8": "03-Misc",
+          "9": "03-Misc",
+          "10": "03-Misc",
+        },
+    );
+    const revised = makeOrganizeProposal(
+        ["1", "5", "10"],
+        {"1": "01-Docs", "5": "02-Photos", "10": "03-Misc"},
+    );
+
+    const result = mergeRevisedProposal(original, revised);
+
+    expect(result.file_actions).to.have.length(10);
+    expect(result.file_actions.filter((action) => ["1", "5", "10"].includes(action.file_id)))
+        .to.deep.equal(revised.file_actions);
+    expect(result.file_actions.filter((action) => !["1", "5", "10"].includes(action.file_id)))
+        .to.have.length(7);
+  });
+
+  it("DT00e updates carried-over actions when a top-level folder is renamed", function() {
+    const original = makeOrganizeProposal(
+        ["1", "2", "3"],
+        {"1": "05-Finance", "2": "05-Finance", "3": "07-Travel"},
+        ["05-Finance", "07-Travel"],
+    );
+    const revised = makeOrganizeProposal(
+        ["1"],
+        {"1": "05-Financial"},
+        ["05-Financial", "07-Travel"],
+    );
+
+    const result = mergeRevisedProposal(original, revised);
+
+    expect(result.file_actions.find((action) => action.file_id === "2")?.new_folder)
+        .to.equal("05-Financial");
+  });
+
+  it("DT00f propagates root folder renames to nested subfolders", function() {
+    const original = makeOrganizeProposal(
+        ["1", "2"],
+        {"1": "05-Finance/Taxes/2024", "2": "07-Travel"},
+        ["05-Finance", "05-Finance/Taxes", "05-Finance/Taxes/2024", "07-Travel"],
+    );
+    const revised = makeOrganizeProposal(
+        ["2"],
+        {"2": "07-Travel"},
+        ["05-Financial", "05-Financial/Taxes", "05-Financial/Taxes/2024", "07-Travel"],
+    );
+
+    const result = mergeRevisedProposal(original, revised);
+
+    expect(result.file_actions.find((action) => action.file_id === "1")?.new_folder)
+        .to.equal("05-Financial/Taxes/2024");
+  });
+
+  it("DT00g preserves actions with no rename match without re-adding old folders", function() {
+    const original = makeOrganizeProposal(
+        ["1", "2"],
+        {"1": "99-Misc", "2": "01-Docs"},
+        ["99-Misc", "01-Docs"],
+    );
+    const revised = makeOrganizeProposal(
+        ["2"],
+        {"2": "01-Docs"},
+        ["01-Docs"],
+    );
+
+    const result = mergeRevisedProposal(original, revised);
+
+    expect(result.file_actions.find((action) => action.file_id === "1")?.new_folder)
+        .to.equal("99-Misc");
+    expect(result.proposed_folders.some((folder) => folder.folder_path === "99-Misc")).to.equal(false);
+  });
+
+  it("DT00h keeps only revised folders while remapping renamed nested paths", function() {
+    const original = makeOrganizeProposal(
+        ["1"],
+        {"1": "05-Finance/Taxes/2024"},
+        ["05-Finance", "05-Finance/Taxes", "05-Finance/Taxes/2024"],
+    );
+    const revised = makeOrganizeProposal(
+        [],
+        {},
+        ["05-Financial", "05-Financial/Taxes", "05-Financial/Taxes/2024"],
+    );
+
+    const result = mergeRevisedProposal(original, revised);
+    const folderPaths = result.proposed_folders.map((folder) => folder.folder_path);
+
+    expect(folderPaths).to.include("05-Financial");
+    expect(folderPaths).to.include("05-Financial/Taxes");
+    expect(folderPaths).to.include("05-Financial/Taxes/2024");
+    expect(folderPaths).to.not.include("05-Finance");
+    expect(folderPaths).to.not.include("05-Finance/Taxes");
+    expect(folderPaths).to.not.include("05-Finance/Taxes/2024");
+    expect(result.file_actions.find((action) => action.file_id === "1")?.new_folder)
+        .to.equal("05-Financial/Taxes/2024");
+  });
+
+  it("DT00i scales to large proposals while preserving all file actions", function() {
+    const fileIds = Array.from({length: 100}, (_, index) => String(index + 1));
+    const originalFolders: Record<string, string> = {};
+    for (let index = 0; index < fileIds.length; index++) {
+      originalFolders[fileIds[index]] = index < 50 ? "01-Docs" : "02-Photos";
+    }
+
+    const original = makeOrganizeProposal(fileIds, originalFolders, ["01-Docs", "02-Photos"]);
+    const revised = makeOrganizeProposal(
+        ["1", "2", "3", "51", "52"],
+        {
+          "1": "01-Docs",
+          "2": "01-Docs",
+          "3": "01-Docs",
+          "51": "02-Photos",
+          "52": "02-Photos",
+        },
+        ["01-Docs", "02-Photos"],
+    );
+
+    const result = mergeRevisedProposal(original, revised);
+
+    expect(result.file_actions).to.have.length(100);
+  });
+
+  it("DT00j remaps restructured folders using suffix matches", function() {
+    const original = makeOrganizeProposal(
+        ["1", "2"],
+        {"1": "08-Bitaccess/Contract", "2": "08-Bitaccess/Contract"},
+        ["08-Bitaccess", "08-Bitaccess/Contract"],
+    );
+    const revised = makeOrganizeProposal(
+        ["1"],
+        {"1": "04-Work/Bitaccess/Contract"},
+        ["04-Work", "04-Work/Bitaccess", "04-Work/Bitaccess/Contract"],
+    );
+
+    const result = mergeRevisedProposal(original, revised);
+
+    expect(result.file_actions.find((action) => action.file_id === "2")?.new_folder)
+        .to.equal("04-Work/Bitaccess/Contract");
+    expect(result.proposed_folders.some((folder) => folder.folder_path === "08-Bitaccess")).to.equal(false);
+    expect(result.proposed_folders.some((folder) => folder.folder_path === "08-Bitaccess/Contract")).to.equal(false);
+  });
+
+  it("DT00k remaps multiple folders independently via suffix matching", function() {
+    const original = makeOrganizeProposal(
+        ["1", "2", "3", "4"],
+        {
+          "1": "08-Bitaccess",
+          "2": "08-Bitaccess/Contract",
+          "3": "13-Pavonis",
+          "4": "13-Pavonis/Invoices",
+        },
+        [
+          "08-Bitaccess",
+          "08-Bitaccess/Contract",
+          "13-Pavonis",
+          "13-Pavonis/Invoices",
+        ],
+    );
+    const revised = makeOrganizeProposal(
+        ["1"],
+        {"1": "04-Work/Bitaccess"},
+        [
+          "04-Work",
+          "04-Work/Bitaccess",
+          "04-Work/Bitaccess/Contract",
+          "04-Work/Pavonis",
+          "04-Work/Pavonis/Invoices",
+        ],
+    );
+
+    const result = mergeRevisedProposal(original, revised);
+
+    expect(result.file_actions.find((action) => action.file_id === "2")?.new_folder)
+        .to.equal("04-Work/Bitaccess/Contract");
+    expect(result.file_actions.find((action) => action.file_id === "3")?.new_folder)
+        .to.equal("04-Work/Pavonis");
+    expect(result.file_actions.find((action) => action.file_id === "4")?.new_folder)
+        .to.equal("04-Work/Pavonis/Invoices");
+    expect(result.proposed_folders.some((folder) => folder.folder_path === "08-Bitaccess")).to.equal(false);
+    expect(result.proposed_folders.some((folder) => folder.folder_path === "13-Pavonis")).to.equal(false);
+  });
+
+  it("DT00l1 prunes stale folder when LLM revision includes it with 0 files", function() {
+    const original = makeOrganizeProposal(
+        ["1", "2"],
+        {"1": "13-Pavonis", "2": "13-Pavonis"},
+        ["13-Pavonis"],
+    );
+    // LLM revision moves files to 04-Work/Pavonis but leaves 13-Pavonis in proposed_folders
+    const revised = makeOrganizeProposal(
+        ["1", "2"],
+        {"1": "04-Work/Pavonis", "2": "04-Work/Pavonis"},
+        ["04-Work", "04-Work/Pavonis", "13-Pavonis"],
+    );
+
+    const result = mergeRevisedProposal(original, revised);
+
+    expect(result.proposed_folders.some((f) => f.folder_path === "13-Pavonis")).to.equal(false);
+    expect(result.proposed_folders.some((f) => f.folder_path === "04-Work")).to.equal(true);
+    expect(result.proposed_folders.some((f) => f.folder_path === "04-Work/Pavonis")).to.equal(true);
+    expect(result.file_actions.every((a) => a.new_folder === "04-Work/Pavonis")).to.equal(true);
+  });
+
+  it("DT00l falls back gracefully when no suffix match exists", function() {
+    const original = makeOrganizeProposal(
+        ["1"],
+        {"1": "99-Misc"},
+        ["99-Misc"],
+    );
+    const revised = makeOrganizeProposal(
+        [],
+        {},
+        ["01-Docs", "02-Photos"],
+    );
+
+    const result = mergeRevisedProposal(original, revised);
+
+    expect(result.file_actions).to.have.length(1);
+    expect(result.file_actions[0].new_folder).to.equal("99-Misc");
+    expect(result.proposed_folders.map((folder) => folder.folder_path))
+        .to.deep.equal([]);
+  });
+});
+
+describe("reconcileFileActions", function() {
+  it("DT00m reconciles renumbered root folders", function() {
+    const proposal = makeOrganizeProposal(
+        ["1"],
+        {"1": "14-Personal"},
+        ["01-Personal"],
+    );
+
+    reconcileFileActions(proposal);
+
+    expect(proposal.file_actions[0].new_folder).to.equal("01-Personal");
+  });
+
+  it("DT00n reconciles restructured folders via suffix", function() {
+    const proposal = makeOrganizeProposal(
+        ["1"],
+        {"1": "08-Bitaccess"},
+        ["04-Work", "04-Work/Bitaccess"],
+    );
+
+    reconcileFileActions(proposal);
+
+    expect(proposal.file_actions[0].new_folder).to.equal("04-Work/Bitaccess");
+  });
+
+  it("DT00o reconciles subfolders under a renamed root", function() {
+    const proposal = makeOrganizeProposal(
+        ["1"],
+        {"1": "14-Personal/Medical"},
+        ["01-Personal", "01-Personal/Medical"],
+    );
+
+    reconcileFileActions(proposal);
+
+    expect(proposal.file_actions[0].new_folder).to.equal("01-Personal/Medical");
+  });
+
+  it("DT00p keep actions with no match add folders to the proposal", function() {
+    const proposal = makeOrganizeProposal(
+        ["1"],
+        {"1": "03-Photos"},
+        ["01-Personal"],
+    );
+    proposal.file_actions[0].action = "keep";
+
+    reconcileFileActions(proposal);
+
+    expect(proposal.file_actions[0].new_folder).to.equal("03-Photos");
+    expect(proposal.proposed_folders.some((folder) => folder.folder_path === "03-Photos")).to.equal(true);
+  });
+
+  it("DT00q non-keep actions with no match stay orphaned", function() {
+    const proposal = makeOrganizeProposal(
+        ["1"],
+        {"1": "03-Photos"},
+        ["01-Personal"],
+    );
+    proposal.file_actions[0].action = "move";
+
+    reconcileFileActions(proposal);
+
+    expect(proposal.file_actions[0].new_folder).to.equal("03-Photos");
+    expect(proposal.proposed_folders.some((folder) => folder.folder_path === "03-Photos")).to.equal(false);
+  });
+
+  it("DT00r raw Drive paths without a prefix map by base name", function() {
+    const proposal = makeOrganizeProposal(
+        ["1"],
+        {"1": "Visibl"},
+        ["17-Visibl"],
+    );
+
+    reconcileFileActions(proposal);
+
+    expect(proposal.file_actions[0].new_folder).to.equal("17-Visibl");
+  });
+
+  it("DT00s reconciles mixed proposals so visible actions match proposed folders", function() {
+    const proposal = makeOrganizeProposal(
+        ["1", "2", "3", "4", "5"],
+        {
+          "1": "14-Personal",
+          "2": "08-Bitaccess",
+          "3": "Visibl",
+          "4": "03-Photos",
+          "5": "05-Others",
+        },
+        ["01-Personal", "04-Work", "04-Work/Bitaccess", "17-Visibl"],
+    );
+    proposal.file_actions[0].action = "keep";
+    proposal.file_actions[1].action = "move";
+    proposal.file_actions[2].action = "move";
+    proposal.file_actions[3].action = "keep";
+    proposal.file_actions[4].action = "move";
+
+    reconcileFileActions(proposal);
+
+    const visibleFolderPaths = new Set(proposal.proposed_folders.map((folder) => folder.folder_path));
+    expect(proposal.file_actions.find((action) => action.file_id === "1")?.new_folder).to.equal("01-Personal");
+    expect(proposal.file_actions.find((action) => action.file_id === "2")?.new_folder).to.equal("04-Work/Bitaccess");
+    expect(proposal.file_actions.find((action) => action.file_id === "3")?.new_folder).to.equal("17-Visibl");
+    expect(proposal.file_actions.find((action) => action.file_id === "4")?.new_folder).to.equal("03-Photos");
+    expect(visibleFolderPaths.has("03-Photos")).to.equal(true);
+    expect(proposal.file_actions.find((action) => action.file_id === "5")?.new_folder).to.equal("05-Others");
+    expect(visibleFolderPaths.has("05-Others")).to.equal(false);
+
+    for (const action of proposal.file_actions) {
+      if (action.file_id === "5") {
+        continue;
+      }
+      expect(visibleFolderPaths.has(action.new_folder)).to.equal(true);
+    }
   });
 });
 

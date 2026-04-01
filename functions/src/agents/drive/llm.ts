@@ -302,6 +302,259 @@ function normalizeFolderPrefixes(proposal: DriveOrganizeProposal): void {
   }
 }
 
+function normalizeFolderPath(folderPath: string): string {
+  return folderPath
+      .split("/")
+      .map((segment) => segment.trim())
+      .filter(Boolean)
+      .join("/");
+}
+
+function stripFolderPrefix(segment: string): string {
+  return segment.replace(/^\d{2,3}-/, "");
+}
+
+function getFolderSegments(folderPath: string): string[] {
+  return normalizeFolderPath(folderPath)
+      .split("/")
+      .filter(Boolean);
+}
+
+function getFolderSemanticSegments(folderPath: string): string[] {
+  return getFolderSegments(folderPath).map((segment) => stripFolderPrefix(segment));
+}
+
+function getSharedSuffixLength(left: string[], right: string[]): number {
+  let count = 0;
+  while (
+    count < left.length &&
+    count < right.length &&
+    left[left.length - 1 - count] === right[right.length - 1 - count]
+  ) {
+    count += 1;
+  }
+  return count;
+}
+
+function getSharedPrefixLength(left: string[], right: string[]): number {
+  let count = 0;
+  while (count < left.length && count < right.length && left[count] === right[count]) {
+    count += 1;
+  }
+  return count;
+}
+
+function findClosestRevisedFolder(
+    originalFolder: string,
+    revisedFolders: string[],
+): string | null {
+  if (revisedFolders.length === 0) {
+    return null;
+  }
+
+  const originalSegments = getFolderSemanticSegments(originalFolder);
+  let bestMatch: string | null = null;
+  let bestScore = -1;
+  let bestSuffix = -1;
+
+  for (const candidate of revisedFolders) {
+    const candidateSegments = getFolderSemanticSegments(candidate);
+    const suffixScore = getSharedSuffixLength(originalSegments, candidateSegments);
+    const prefixScore = getSharedPrefixLength(originalSegments, candidateSegments);
+    const totalScore = suffixScore * 10 + prefixScore;
+    if (totalScore > bestScore || (totalScore === bestScore && suffixScore > bestSuffix)) {
+      bestMatch = candidate;
+      bestScore = totalScore;
+      bestSuffix = suffixScore;
+    }
+  }
+
+  return bestScore > 0 ? bestMatch : null;
+}
+
+function reconcileFileActions(proposal: DriveOrganizeProposal): void {
+  const normalizedFolders = new Set<string>();
+  const folderDescriptions = new Map<string, string>();
+  for (const folder of proposal.proposed_folders) {
+    const normalizedPath = normalizeFolderPath(folder.folder_path);
+    if (!normalizedPath || normalizedFolders.has(normalizedPath)) {
+      continue;
+    }
+    normalizedFolders.add(normalizedPath);
+    folderDescriptions.set(normalizedPath, folder.description);
+    folder.folder_path = normalizedPath;
+  }
+
+  const proposedFolderPaths = [...normalizedFolders].sort((a, b) => a.localeCompare(b));
+  const proposedRoots = [...new Set(
+      proposedFolderPaths
+          .map((folderPath) => getFolderSegments(folderPath)[0])
+          .filter(Boolean),
+  )].sort((a, b) => a.localeCompare(b));
+  const prefixedFolderPattern = /^(\d{2,3})-/;
+
+  const baseNameRootMap = new Map<string, string>();
+  const prefixRootMap = new Map<string, string>();
+  for (const root of proposedRoots) {
+    const baseName = stripFolderPrefix(root).toLowerCase();
+    if (!baseNameRootMap.has(baseName)) {
+      baseNameRootMap.set(baseName, root);
+    } else {
+      const current = baseNameRootMap.get(baseName)!;
+      const currentDepth = getFolderSegments(current).length;
+      const candidateDepth = getFolderSegments(root).length;
+      if (candidateDepth < currentDepth || (candidateDepth === currentDepth && root.localeCompare(current) < 0)) {
+        baseNameRootMap.set(baseName, root);
+      }
+    }
+
+    const prefixMatch = root.match(prefixedFolderPattern);
+    if (prefixMatch && !prefixRootMap.has(prefixMatch[1])) {
+      prefixRootMap.set(prefixMatch[1], root);
+    }
+  }
+
+  let reconciled = 0;
+  let keepFoldersAdded = 0;
+  let unmapped = 0;
+
+  for (const action of proposal.file_actions) {
+    const normalizedNewFolder = normalizeFolderPath(action.new_folder);
+    action.new_folder = normalizedNewFolder;
+
+    if (!normalizedNewFolder || normalizedFolders.has(normalizedNewFolder)) {
+      continue;
+    }
+
+    let mappedFolder: string | null = null;
+    const segments = getFolderSegments(normalizedNewFolder);
+    if (segments.length > 0) {
+      const [rootSegment, ...rest] = segments;
+      let mappedRoot = baseNameRootMap.get(stripFolderPrefix(rootSegment).toLowerCase());
+      if (!mappedRoot) {
+        const prefixMatch = rootSegment.match(prefixedFolderPattern);
+        if (prefixMatch) {
+          mappedRoot = prefixRootMap.get(prefixMatch[1]);
+        }
+      }
+      if (mappedRoot) {
+        const candidate = [mappedRoot, ...rest].join("/");
+        if (normalizedFolders.has(candidate)) {
+          mappedFolder = candidate;
+        } else if (rest.length === 0) {
+          mappedFolder = mappedRoot;
+        }
+      }
+    }
+
+    if (!mappedFolder) {
+      mappedFolder = findClosestRevisedFolder(normalizedNewFolder, proposedFolderPaths);
+    }
+
+    if (!mappedFolder && segments.length === 1) {
+      mappedFolder = baseNameRootMap.get(stripFolderPrefix(segments[0]).toLowerCase()) || null;
+    }
+
+    if (mappedFolder) {
+      action.new_folder = mappedFolder;
+      reconciled += 1;
+      continue;
+    }
+
+    if (action.action === "keep" && normalizedNewFolder &&
+        normalizedNewFolder !== "My Drive") {
+      const pathSegments = getFolderSegments(normalizedNewFolder);
+      let currentPath = "";
+      for (const segment of pathSegments) {
+        currentPath = currentPath ? `${currentPath}/${segment}` : segment;
+        if (normalizedFolders.has(currentPath)) {
+          continue;
+        }
+        normalizedFolders.add(currentPath);
+        folderDescriptions.set(currentPath, "Existing folder");
+        proposal.proposed_folders.push({
+          folder_path: currentPath,
+          description: "Existing folder",
+        });
+        keepFoldersAdded += 1;
+      }
+      continue;
+    }
+
+    unmapped += 1;
+  }
+
+  proposal.proposed_folders = [...normalizedFolders]
+      .sort((a, b) => a.localeCompare(b))
+      .map((folderPath) => ({
+        folder_path: folderPath,
+        description: folderDescriptions.get(folderPath) || "",
+      }));
+
+  logger.info("Drive organize: reconciled file actions", {
+    reconciled,
+    keepFoldersAdded,
+    unmapped,
+  });
+}
+
+function mergeRevisedProposal(
+    original: DriveOrganizeProposal,
+    revised: DriveOrganizeProposal,
+): DriveOrganizeProposal {
+  const revisedFileIds = new Set(revised.file_actions.map((action) => action.file_id));
+  const merged: DriveOrganizeProposal = {
+    proposed_folders: revised.proposed_folders.map((folder) => ({...folder})),
+    file_actions: [...revised.file_actions],
+    summary: revised.summary,
+  };
+
+  let carriedOverCount = 0;
+  for (const action of original.file_actions) {
+    if (revisedFileIds.has(action.file_id)) {
+      continue;
+    }
+
+    merged.file_actions.push({
+      ...action,
+      new_folder: normalizeFolderPath(action.new_folder),
+    });
+    carriedOverCount += 1;
+  }
+
+  reconcileFileActions(merged);
+
+  // Prune folders with no file actions pointing to them (directly or as parent).
+  // After a revision, the LLM or carry-over reconciliation may leave stale
+  // folders (e.g. "13-Pavonis") that had all their files moved elsewhere.
+  const referencedFolders = new Set<string>();
+  for (const action of merged.file_actions) {
+    const folder = normalizeFolderPath(action.new_folder);
+    if (!folder) continue;
+    referencedFolders.add(folder);
+    const segments = getFolderSegments(folder);
+    let path = "";
+    for (const segment of segments) {
+      path = path ? `${path}/${segment}` : segment;
+      referencedFolders.add(path);
+    }
+  }
+  const beforeCount = merged.proposed_folders.length;
+  merged.proposed_folders = merged.proposed_folders.filter((f) =>
+    referencedFolders.has(normalizeFolderPath(f.folder_path)),
+  );
+
+  logger.info("Drive organize revision: merged revised proposal", {
+    originalCount: original.file_actions.length,
+    revisedCount: revised.file_actions.length,
+    mergedCount: merged.file_actions.length,
+    carriedOverCount,
+    prunedFolders: beforeCount - merged.proposed_folders.length,
+  });
+
+  return merged;
+}
+
 async function backfillUncoveredFiles(
     driveStructureSummary: string,
     nonFolders: DriveFileEntry[],
@@ -573,6 +826,8 @@ export {
   reviseOrganization,
   buildChunkUserText,
   normalizeFolderPrefixes,
+  mergeRevisedProposal,
+  reconcileFileActions,
   backfillUncoveredFiles,
   consolidateSummaries,
 };

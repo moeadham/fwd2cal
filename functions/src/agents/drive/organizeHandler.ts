@@ -69,6 +69,8 @@ import {
 import {
   buildChunkUserText,
   normalizeFolderPrefixes,
+  mergeRevisedProposal,
+  reconcileFileActions,
   backfillUncoveredFiles,
   consolidateSummaries,
   proposeFilePlacement,
@@ -651,14 +653,18 @@ async function handleOrganizeRevision(
         userInstructions,
         uid,
     );
-    const newCost = calculateOrganizeCostFromMimeMap(
+    const mergedProposal = mergeRevisedProposal(
+        proposalDoc.proposal!,
         revisedProposal,
+    );
+    const newCost = calculateOrganizeCostFromMimeMap(
+        mergedProposal,
         proposalDoc.mimeMap || {},
     );
 
     await finalizeOrganizeProposal(
         proposalId,
-        revisedProposal as unknown as Record<string, unknown>,
+        mergedProposal as unknown as Record<string, unknown>,
         newCost as unknown as Record<string, unknown>,
         proposalDoc.mimeMap as unknown as Record<string, unknown> | undefined,
     );
@@ -666,7 +672,7 @@ async function handleOrganizeRevision(
         sender,
         email,
         proposalId,
-        revisedProposal,
+        mergedProposal,
         newCost,
     );
 
@@ -926,6 +932,7 @@ async function scanAndPropose(
       file_actions: [...folderRenameActions, ...preSkipActions],
       summary: "All files are already well-organized.",
     };
+    reconcileFileActions(proposal);
 
     const cost = calculateOrganizeCost(proposal, nonFolderFiles);
     const mimeMap = Object.fromEntries(
@@ -1188,6 +1195,7 @@ async function processOrganizeChunk(
       ],
       summary: finalSummary,
     };
+    reconcileFileActions(finalProposal);
     const cost = calculateOrganizeCost(
         finalProposal,
         state.fileEntries.filter((f) => !f.isFolder),
