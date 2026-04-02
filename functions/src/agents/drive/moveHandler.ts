@@ -15,7 +15,7 @@ import {
   getDriveFolderTree, findFolderInTree, getRootFolderId,
   moveFile, createFolder, placeMarkerFile,
   findAgentManagedFolders, renameFolder, getFolderFileCount,
-  findSubfolderByName, trashFile,
+  findSubfolderByName, trashFile, renameFile,
 } from "./driveHelper";
 import {interpretMoveInstructions} from "./llm";
 import {
@@ -106,6 +106,7 @@ export async function handleMoveReply(
       file_index: m.file_index,
       folder_id: m.folder_id,
       folder_path: m.folder_path,
+      new_filename: m.new_filename,
     })),
   });
 
@@ -323,13 +324,17 @@ export async function handleMoveReply(
     }
 
     try {
+      const displayName = move.new_filename || file.filename;
       if (skipMove) {
         // File is already in the renamed folder
+        if (move.new_filename) {
+          await renameFile(oauth2Client, file.id, move.new_filename);
+        }
         fileFolderIds.set(file.filename, newFolderId);
         results.push({
           filename: file.filename,
           folderPath: newFolderPath,
-          suggestedName: file.filename,
+          suggestedName: displayName,
           driveFileId: file.id,
           driveWebLink: file.webLink,
         });
@@ -337,13 +342,16 @@ export async function handleMoveReply(
         const moved = await moveFile(
             oauth2Client, file.id, newFolderId, file.folderId,
         );
+        if (move.new_filename) {
+          await renameFile(oauth2Client, file.id, move.new_filename);
+        }
         await placeMarkerFile(oauth2Client, newFolderId);
         fileFolderIds.set(file.filename, newFolderId);
 
         results.push({
           filename: file.filename,
           folderPath: newFolderPath,
-          suggestedName: file.filename,
+          suggestedName: displayName,
           driveFileId: moved.id,
           driveWebLink: moved.webViewLink,
         });
@@ -398,7 +406,7 @@ export async function handleMoveReply(
       id: r.driveFileId || "",
       folderId: fileFolderIds.get(r.filename) || "",
       folderPath: r.folderPath,
-      filename: r.filename,
+      filename: r.suggestedName,
       webLink: r.driveWebLink || "",
     }));
 
@@ -413,7 +421,7 @@ export async function handleMoveReply(
     if (movedFiles.length === 1) {
       const file = movedFiles[0];
       const html = applyTemplate(driveMailTemplates.fileMoved.html, {
-        FILE_NAME: file.filename,
+        FILE_NAME: file.suggestedName,
         NEW_PATH: file.folderPath,
         FILE_LINK: file.driveWebLink || "#",
         EMBEDDED_DATA: embeddedHtml,
@@ -421,7 +429,7 @@ export async function handleMoveReply(
       await sendDriveEmailResponse(sender, email, html);
     } else {
       const fileListHtml = movedFiles.map((file) =>
-        `<b>${file.filename}</b> → ${file.folderPath}` +
+        `<b>${file.suggestedName}</b> → ${file.folderPath}` +
         (file.driveWebLink ? ` (<a href="${file.driveWebLink}">view</a>)` : ""),
       ).join("<br>");
       const html = applyTemplate(driveMailTemplates.multipleFilesMoved.html, {

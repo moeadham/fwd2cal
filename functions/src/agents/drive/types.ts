@@ -39,6 +39,9 @@ export const MoveInstructionItemSchema = z.object({
       "The folder path to move to (new folder name if folder_id is 'root') (ignored when action is 'trash')",
   ),
   reason: z.string().describe("Brief reasoning for the move"),
+  new_filename: z.string().nullable().optional().describe(
+      "New filename to rename the file to (including extension). Omit to keep current name.",
+  ),
 });
 
 export const MoveInstructionSchema = z.object({

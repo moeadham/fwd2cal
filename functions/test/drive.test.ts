@@ -4,6 +4,8 @@ import chaiHttp from "chai-http";
 import {exec} from "child_process";
 import * as fs from "fs";
 import * as path from "path";
+import {initializeApp} from "firebase-admin/app";
+import {getFirestore} from "firebase-admin/firestore";
 import type {Response} from "superagent";
 
 const chaiWithHttp = chai as typeof chai & {
@@ -17,11 +19,12 @@ import {
   driveDeleteAccount,
   driveSignup,
   driveEmailWithArtifacts,
+  driveEmailWithJapaneseConferenceInvitationPDF,
   automatedReplyEmail,
 } from "./bindings/resendBindings";
 import {extractDocumentImages} from "../src/util/documentParser";
 import {mergeRevisedProposal, reconcileFileActions} from "../src/agents/drive/llm";
-import {DriveOrganizeProposal} from "../src/agents/drive/types";
+import {DriveOrganizeProposal, MoveInstructionSchema} from "../src/agents/drive/types";
 
 chai.use(chaiHttp);
 const expect = chai.expect;
@@ -32,6 +35,10 @@ const DRIVE_EMAIL_ADDRESS = process.env.DRIVE_EMAIL_ADDRESS || "drive@fwd2drive.
 const DISPATCH_URL = "http://127.0.0.1:5001";
 const DISPATCH_REGION = "us-central1";
 const APP_ID = process.env.GCLOUD_PROJECT || "fwd2cal-dev-2578e";
+
+process.env.FIRESTORE_EMULATOR_HOST = "127.0.0.1:8080";
+const testApp = initializeApp({projectId: APP_ID}, "drive-test");
+const db = getFirestore(testApp);
 
 interface WebhookWithMock {
   type: string;
@@ -154,6 +161,15 @@ async function sendDriveProcessUpload(testData: ResendTestData): Promise<DriveDi
 let uploadConfirmationHtml = "";
 // Shared state: move confirmation HTML is saved in DT04 and used by DT04b
 let moveConfirmationHtml = "";
+
+function extractEmbeddedFileDataId(html: string): string {
+  const linkMatch = html.match(/fwd2drive\.com\/d\?r=([A-Za-z0-9_-]+)/);
+  expect(linkMatch, "embedded drive link should be present").to.not.equal(null);
+  const json = Buffer.from(linkMatch![1], "base64url").toString();
+  const parsed = JSON.parse(json) as {fileDataId?: string};
+  expect(parsed.fileDataId, "embedded fileDataId should be present").to.be.a("string").and.not.be.empty;
+  return parsed.fileDataId!;
+}
 
 describe("extractDocumentImages", function() {
   it("DT00 extract page screenshots from a PDF", async function() {
@@ -561,6 +577,46 @@ describe("reconcileFileActions", function() {
   });
 });
 
+describe("MoveInstructionSchema", function() {
+  it("DT00t accepts optional new_filename and still allows omission", function() {
+    const withRename = MoveInstructionSchema.parse({
+      moves: [{
+        file_index: 0,
+        action: "move",
+        folder_id: "folder-123",
+        folder_path: "01-Receipts",
+        reason: "Rename in English",
+        new_filename: "Conference Registration.pdf",
+      }],
+    });
+
+    const withoutRename = MoveInstructionSchema.parse({
+      moves: [{
+        file_index: 0,
+        action: "move",
+        folder_id: "folder-123",
+        folder_path: "01-Receipts",
+        reason: "Keep original name",
+      }],
+    });
+
+    const withNullRename = MoveInstructionSchema.parse({
+      moves: [{
+        file_index: 0,
+        action: "move",
+        folder_id: "folder-123",
+        folder_path: "01-Receipts",
+        reason: "Model returned null for unused field",
+        new_filename: null,
+      }],
+    });
+
+    expect(withRename.moves[0].new_filename).to.equal("Conference Registration.pdf");
+    expect(withoutRename.moves[0]).to.not.have.property("new_filename");
+    expect(withNullRename.moves[0].new_filename).to.equal(null);
+  });
+});
+
 describe("fwd2cal Drive Agent", function() {
   it("DT01 propose folder and filename for a single PDF attachment", async function() {
     const testMessage = driveEmailWithPDF;
@@ -836,6 +892,101 @@ describe("fwd2cal Drive Agent", function() {
     expect(res.body.sentEmail).to.be.an("object");
     expect(res.body.sentEmail.html).to.be.a("string");
     expect(res.body.sentEmail.html).to.include("moved to trash");
+  });
+
+  it("DT04c reply to rename file in English", async function() {
+    const japaneseSourceFilename = "医療保険の資格情報（健康保険証情報）_20260402090250.pdf";
+    const uploadRes = await sendDriveProcessUpload(driveEmailWithJapaneseConferenceInvitationPDF);
+    expect(uploadRes).to.have.status(200);
+    expect(uploadRes.body.data.filesSucceeded).to.equal(1);
+
+    const gmailSanitizedHtml = uploadRes.body.sentEmail.html;
+    const uploadFileDataId = extractEmbeddedFileDataId(uploadRes.body.sentEmail.html);
+    const uploadFileDataDoc = await db.collection("DriveFileData").doc(uploadFileDataId).get();
+    expect(uploadFileDataDoc.exists).to.equal(true);
+    const uploadedFiles = uploadFileDataDoc.data()?.files as Array<{filename: string}>;
+    expect(uploadedFiles).to.have.length.greaterThan(0);
+
+    // Confirm the fixture itself uses a Japanese filename even if upload-time naming rewrites it.
+    expect(driveEmailWithJapaneseConferenceInvitationPDF.attachmentsList?.[0].filename).to.equal(japaneseSourceFilename);
+    expect(driveEmailWithJapaneseConferenceInvitationPDF.webhook.data.attachments[0].filename).to.equal(japaneseSourceFilename);
+
+    const preReplyFilename = uploadedFiles[0].filename;
+    const replyEmailId = "test-drive-reply-rename";
+    const replyMessageId = `<test-drive-reply-rename-${Date.now()}@mail.gmail.com>`;
+    const renameInstructions = "Rename the file in English";
+    const domain = TESTER_PRIMARY_GOOGLE_ACCT.split("@")[1] || "gmail.com";
+
+    const replyWebhook = {
+      type: "email.received",
+      created_at: new Date().toISOString(),
+      data: {
+        email_id: replyEmailId,
+        message_id: replyMessageId,
+        from: TESTER_PRIMARY_GOOGLE_ACCT,
+        to: [DRIVE_EMAIL_ADDRESS],
+        cc: [] as string[],
+        bcc: [] as string[],
+        subject: "Re: Fwd: Conference Registration",
+        created_at: new Date().toISOString(),
+        attachments: [] as unknown[],
+      },
+    };
+
+    const replyEmailContent = {
+      id: replyEmailId,
+      subject: "Re: Fwd: Conference Registration",
+      from: TESTER_PRIMARY_GOOGLE_ACCT,
+      to: [DRIVE_EMAIL_ADDRESS],
+      html: `<p>${renameInstructions}</p><blockquote>${gmailSanitizedHtml}</blockquote>`,
+      text: renameInstructions,
+      headers: {
+        "authentication-results": `amazonses.com; spf=pass (spfCheck: domain of _spf.${domain} designates 209.85.214.171 as permitted sender) client-ip=209.85.214.171; envelope-from=${TESTER_PRIMARY_GOOGLE_ACCT}; helo=mail.${domain}; dkim=pass header.i=@${domain}; dmarc=pass header.from=${domain};`,
+        "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
+        "to": DRIVE_EMAIL_ADDRESS,
+        "subject": "Re: Fwd: Conference Registration",
+        "date": new Date().toUTCString(),
+        "message-id": replyMessageId,
+        "in-reply-to": driveEmailWithJapaneseConferenceInvitationPDF.emailContent.headers["message-id"],
+        "references": driveEmailWithJapaneseConferenceInvitationPDF.emailContent.headers["message-id"],
+      },
+    };
+
+    const webhookWithMock = {
+      ...replyWebhook,
+      mockData: {
+        emailContent: replyEmailContent,
+        attachmentsList: [] as AttachmentWithUrl[],
+      },
+    };
+
+    const callbackResponse = await chaiWithHttp.request(apiURL)
+      .post(DRIVE_CALLBACK_ENDPOINT)
+      .set("Content-Type", "application/json")
+      .set("svix-id", "msg_test_" + Date.now())
+      .set("svix-timestamp", Math.floor(Date.now() / 1000).toString())
+      .set("svix-signature", "v1,dummy_signature_for_testing")
+      .send(webhookWithMock);
+    const webhookData = callbackResponse.body.webhookData;
+
+    const res = await chaiWithHttp
+      .request(`${DISPATCH_URL}/${APP_ID}/${DISPATCH_REGION}`)
+      .post("/v2testDriveInboundDispatch")
+      .set("Content-Type", "application/json")
+      .send({data: webhookData}) as unknown as DriveDispatchResponse;
+
+    expect(res).to.have.status(200);
+    expect(res.body.data.filesSucceeded).to.be.greaterThanOrEqual(1);
+    expect(res.body.sentEmail.html).to.include("has been moved");
+    expect(res.body.sentEmail.html).to.include("fwd2drive.com/d?r=");
+
+    const fileDataId = extractEmbeddedFileDataId(res.body.sentEmail.html);
+    const fileDataDoc = await db.collection("DriveFileData").doc(fileDataId).get();
+    expect(fileDataDoc.exists).to.equal(true);
+    const storedFiles = fileDataDoc.data()?.files as Array<{filename: string}>;
+    expect(storedFiles[0].filename).to.include("Japanese Conference");
+    expect(storedFiles[0].filename).to.match(/\.pdf$/);
+    console.log("RENAMED FILE:", storedFiles[0].filename);
   });
 
   it("DT05 delete account via drive agent", async function() {

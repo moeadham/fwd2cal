@@ -556,6 +556,7 @@ const emailWithPDFAttachment: ResendTestData = createResendTestData(
 // PDF test file with event details (Tech Conference 2026, July 15, 2026, 9:00 AM - 5:00 PM, San Francisco Convention Center)
 // File located at: test/bindings/conference_registration.pdf
 const PDF_FILE_PATH = require("path").join(__dirname, "conference_registration.pdf");
+const JAPANESE_CONFERENCE_INVITATION_PDF_FILE_PATH = require("path").join(__dirname, "japanese_conference_invitation_sample.pdf");
 
 // Add attachmentsList with file URL for PDF test
 emailWithPDFAttachment.attachmentsList = [
@@ -948,6 +949,61 @@ driveEmailWithPDF.attachmentsList = [
   },
 ];
 
+const driveEmailWithJapaneseConferenceInvitationPDF: ResendTestData = createResendTestData(
+  {
+    type: "email.received",
+    created_at: new Date().toISOString(),
+    data: {
+      email_id: "test-drive-pdf-japanese",
+      message_id: `<test-drive-pdf-japanese-${Date.now()}@mail.gmail.com>`,
+      from: TESTER_PRIMARY_GOOGLE_ACCT,
+      to: [DRIVE_EMAIL_ADDRESS],
+      cc: [],
+      bcc: [],
+      subject: "Fwd: Japanese Conference Invitation",
+      created_at: new Date().toISOString(),
+      attachments: [
+        {
+          id: "drive-pdf-japanese-1",
+          filename: "医療保険の資格情報（健康保険証情報）_20260402090250.pdf",
+          content_type: "application/pdf",
+          content_disposition: "attachment",
+          size: 65905,
+        },
+      ],
+    },
+  },
+  {
+    id: "test-drive-pdf-japanese",
+    subject: "Fwd: Japanese Conference Invitation",
+    from: TESTER_PRIMARY_GOOGLE_ACCT,
+    to: [DRIVE_EMAIL_ADDRESS],
+    html: "<p>Please save this Japanese conference invitation PDF to my drive.</p>",
+    text: "Please save this Japanese conference invitation PDF to my drive.",
+    headers: {
+      "authentication-results": generateAuthHeader(TESTER_PRIMARY_GOOGLE_ACCT),
+      "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
+      "to": DRIVE_EMAIL_ADDRESS,
+      "subject": "Fwd: Japanese Conference Invitation",
+      "date": "Thu, 2 Apr 2026 09:45:00 +0000",
+      "message-id": `<test-drive-pdf-japanese-${Date.now()}@mail.gmail.com>`,
+      "in-reply-to": "<original-message-drive-pdf-japanese>",
+      "references": "<original-message-drive-pdf-japanese>",
+    },
+  },
+);
+driveEmailWithJapaneseConferenceInvitationPDF.attachmentsList = [
+  {
+    id: "drive-pdf-japanese-1",
+    filename: "医療保険の資格情報（健康保険証情報）_20260402090250.pdf",
+    content_type: "application/pdf",
+    content_disposition: "attachment",
+    size: 65905,
+    download_url: `file://${JAPANESE_CONFERENCE_INVITATION_PDF_FILE_PATH}`,
+    expires_at: new Date(Date.now() + 3600000).toISOString(),
+  },
+];
+
 // Drive Test 2: No attachments
 const driveEmailNoAttachments: ResendTestData = createResendTestData(
   {
@@ -1246,6 +1302,7 @@ export {
   driveDeleteAccount,
   driveSignup,
   driveEmailWithPDF,
+  driveEmailWithJapaneseConferenceInvitationPDF,
   driveEmailNoAttachments,
   driveEmailMultipleAttachments,
   driveEmailWithArtifacts,
