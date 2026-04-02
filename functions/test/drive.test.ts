@@ -6,6 +6,7 @@ import * as fs from "fs";
 import * as path from "path";
 import {initializeApp} from "firebase-admin/app";
 import {getFirestore} from "firebase-admin/firestore";
+import OpenAI from "openai";
 import type {Response} from "superagent";
 
 const chaiWithHttp = chai as typeof chai & {
@@ -23,8 +24,15 @@ import {
   automatedReplyEmail,
 } from "./bindings/resendBindings";
 import {extractDocumentImages} from "../src/util/documentParser";
-import {mergeRevisedProposal, reconcileFileActions} from "../src/agents/drive/llm";
+import {
+  mergeRevisedProposal,
+  reconcileFileActions,
+  refineOrganizationProposal,
+  renderFolderTreePlainText,
+} from "../src/agents/drive/llm";
 import {DriveOrganizeProposal, MoveInstructionSchema} from "../src/agents/drive/types";
+import {setOpenAIClientForTest} from "../src/util/openai";
+
 
 chai.use(chaiHttp);
 const expect = chai.expect;
@@ -32,6 +40,7 @@ const apiURL = "http://127.0.0.1:5002";
 const DRIVE_CALLBACK_ENDPOINT = "/drive/v2/inboundCallback";
 const TESTER_PRIMARY_GOOGLE_ACCT = process.env.TESTER_PRIMARY_GOOGLE_ACCT || "";
 const DRIVE_EMAIL_ADDRESS = process.env.DRIVE_EMAIL_ADDRESS || "drive@fwd2drive.com";
+const MOCK_LLM = process.env.MOCK_LLM !== "false";
 const DISPATCH_URL = "http://127.0.0.1:5001";
 const DISPATCH_REGION = "us-central1";
 const APP_ID = process.env.GCLOUD_PROJECT || "fwd2cal-dev-2578e";
@@ -617,6 +626,168 @@ describe("MoveInstructionSchema", function() {
   });
 });
 
+describe("refineOrganizationProposal", function() {
+  afterEach(function() {
+    setOpenAIClientForTest(null);
+  });
+
+  it("DT00tb applies folder rename mappings from the refinement result", async function() {
+    this.timeout(60000);
+    const refinedResult = {
+      refined_folders: [
+        {
+          folder_path: "05-Financial",
+          description: "Finance documents",
+        },
+        {
+          folder_path: "05-Financial/Taxes",
+          description: "Tax records",
+        },
+        {
+          folder_path: "05-Financial/Taxes/2024",
+          description: "2024 taxes",
+        },
+        {
+          folder_path: "07-Travel",
+          description: "Travel documents",
+        },
+      ],
+      folder_renames: [
+        {old_path: "05-Finance", new_path: "05-Financial"},
+      ],
+      summary: "Grouped finance records under a cleaner Financial hierarchy.",
+    };
+    if (MOCK_LLM) {
+      const fakeClient = {
+        chat: {
+          completions: {
+            parse: async () => ({
+              choices: [{
+                message: {parsed: refinedResult},
+                finish_reason: "stop",
+              }],
+              usage: {total_tokens: 21},
+            }),
+            create: async () => ({
+              choices: [{
+                message: {
+                  content: JSON.stringify(refinedResult),
+                },
+              }],
+              usage: {total_tokens: 21},
+            }),
+          },
+        },
+      } as unknown as OpenAI;
+      setOpenAIClientForTest(fakeClient);
+    }
+    const proposal = makeOrganizeProposal(
+        ["1", "2"],
+        {
+          "1": "05-Finance/Taxes/2024",
+          "2": "07-Travel",
+        },
+        ["05-Finance", "05-Finance/Taxes", "05-Finance/Taxes/2024", "07-Travel"],
+    );
+
+    const result = await refineOrganizationProposal(proposal);
+
+    if (MOCK_LLM) {
+      expect(result.summary).to.equal("Grouped finance records under a cleaner Financial hierarchy.");
+      expect(result.proposed_folders.map((folder) => folder.folder_path)).to.deep.equal([
+        "05-Financial",
+        "05-Financial/Taxes",
+        "05-Financial/Taxes/2024",
+        "07-Travel",
+      ]);
+      expect(result.file_actions.find((action) => action.file_id === "1")?.new_folder)
+          .to.equal("05-Financial/Taxes/2024");
+      expect(result.file_actions.find((action) => action.file_id === "2")?.new_folder)
+          .to.equal("07-Travel");
+    } else {
+      console.log("Live refined folders:", result.proposed_folders.map((f) => f.folder_path));
+      console.log("Live summary:", result.summary);
+      expect(result.proposed_folders).to.be.an("array").with.length.greaterThan(0);
+      expect(result.file_actions).to.have.length(2);
+      expect(result.summary).to.be.a("string").with.length.greaterThan(0);
+    }
+  });
+
+});
+
+describe("renderFolderTreePlainText", function() {
+  it("DT00u renders a plain-text folder tree with counts", function() {
+    const proposal = makeOrganizeProposal(
+        ["1", "2", "3"],
+        {
+          "1": "01-Personal",
+          "2": "02-Work/Clients",
+          "3": "02-Work/Clients",
+        },
+        ["01-Personal", "02-Work", "02-Work/Clients"],
+    );
+
+    const tree = renderFolderTreePlainText(proposal);
+
+    expect(tree).to.equal(
+        "My Drive\n" +
+        "├── 01-Personal/  (1 files)\n" +
+        "└── 02-Work/  (0 files)\n" +
+        "    └── Clients/  (2 files)",
+    );
+  });
+});
+
+describe("move instruction fast-path", function() {
+  it("DT00v handles explicit move-to-folder phrasing without LLM assistance", async function() {
+    const {interpretMoveInstructions} = await import("../src/agents/drive/llm");
+
+    const result = await interpretMoveInstructions(
+        "Please move this to a folder called Receipts",
+        [{
+          id: "file-1",
+          folderId: "folder-1",
+          folderPath: "01-Inbox",
+          filename: "receipt.pdf",
+          webLink: "https://example.com/file-1",
+        }],
+        [],
+    );
+
+    expect(result.moves).to.deep.equal([{
+      file_index: 0,
+      action: "move",
+      folder_id: "root",
+      folder_path: "Receipts",
+      reason: "Fast-path parser detected an explicit move destination",
+    }]);
+  });
+
+  it("DT00w handles explicit trash requests without LLM assistance", async function() {
+    const {interpretMoveInstructions} = await import("../src/agents/drive/llm");
+
+    const result = await interpretMoveInstructions(
+        "Please delete this",
+        [{
+          id: "file-1",
+          folderId: "folder-1",
+          folderPath: "01-Inbox",
+          filename: "receipt.pdf",
+          webLink: "https://example.com/file-1",
+        }],
+        [],
+    );
+
+    expect(result.moves).to.deep.equal([{
+      file_index: 0,
+      action: "trash",
+      folder_id: "",
+      folder_path: "",
+      reason: "Fast-path parser detected a trash request",
+    }]);
+  });
+});
+
 describe("fwd2cal Drive Agent", function() {
   it("DT01 propose folder and filename for a single PDF attachment", async function() {
     const testMessage = driveEmailWithPDF;
@@ -737,7 +908,7 @@ describe("fwd2cal Drive Agent", function() {
         to: [DRIVE_EMAIL_ADDRESS],
         cc: [] as string[],
         bcc: [] as string[],
-        subject: "Re: Fwd: Conference Registration",
+        subject: "Re: Fwd: Japanese Conference Invitation",
         created_at: new Date().toISOString(),
         attachments: [] as unknown[],
       },
@@ -745,7 +916,7 @@ describe("fwd2cal Drive Agent", function() {
 
     const replyEmailContent = {
       id: replyEmailId,
-      subject: "Re: Fwd: Conference Registration",
+      subject: "Re: Fwd: Japanese Conference Invitation",
       from: TESTER_PRIMARY_GOOGLE_ACCT,
       to: [DRIVE_EMAIL_ADDRESS],
       html: `<p>${moveInstructions}</p><blockquote>${gmailSanitizedHtml}</blockquote>`,
@@ -754,7 +925,7 @@ describe("fwd2cal Drive Agent", function() {
         "authentication-results": `amazonses.com; spf=pass (spfCheck: domain of _spf.${domain} designates 209.85.214.171 as permitted sender) client-ip=209.85.214.171; envelope-from=${TESTER_PRIMARY_GOOGLE_ACCT}; helo=mail.${domain}; dkim=pass header.i=@${domain}; dmarc=pass header.from=${domain};`,
         "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
         "to": DRIVE_EMAIL_ADDRESS,
-        "subject": "Re: Fwd: Conference Registration",
+        "subject": "Re: Fwd: Japanese Conference Invitation",
         "date": new Date().toUTCString(),
         "message-id": replyMessageId,
         "in-reply-to": driveEmailWithPDF.emailContent.headers["message-id"],
@@ -895,7 +1066,7 @@ describe("fwd2cal Drive Agent", function() {
   });
 
   it("DT04c reply to rename file in English", async function() {
-    const japaneseSourceFilename = "医療保険の資格情報（健康保険証情報）_20260402090250.pdf";
+    const japaneseSourceFilename = "日本会議招待状_20260402090250.pdf";
     const uploadRes = await sendDriveProcessUpload(driveEmailWithJapaneseConferenceInvitationPDF);
     expect(uploadRes).to.have.status(200);
     expect(uploadRes.body.data.filesSucceeded).to.equal(1);

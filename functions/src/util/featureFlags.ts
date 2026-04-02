@@ -7,6 +7,20 @@ const DEFAULT_CONFIG = {
 
 let template: ServerTemplate | null = null;
 let loaded = false;
+let overrides: Partial<typeof DEFAULT_CONFIG> | null = null;
+
+function getBooleanFlag(flag: keyof typeof DEFAULT_CONFIG): boolean {
+  const overrideValue = overrides?.[flag];
+  if (typeof overrideValue === "boolean") {
+    return overrideValue;
+  }
+  if (!template) return DEFAULT_CONFIG[flag] as boolean;
+  try {
+    return template.evaluate().getBoolean(flag);
+  } catch {
+    return DEFAULT_CONFIG[flag] as boolean;
+  }
+}
 
 /**
  * Load feature flags from Firebase Remote Config.
@@ -29,10 +43,14 @@ export async function loadFeatureFlags(): Promise<void> {
  * Returns false (disabled) if feature flags haven't been loaded yet.
  */
 export function isOrganizeDriveEnabled(): boolean {
-  if (!template) return DEFAULT_CONFIG.organize_drive_enabled;
-  try {
-    return template.evaluate().getBoolean("organize_drive_enabled");
-  } catch {
-    return DEFAULT_CONFIG.organize_drive_enabled;
-  }
+  return getBooleanFlag("organize_drive_enabled");
 }
+
+
+function setFeatureFlagOverridesForTest(
+    nextOverrides: Partial<typeof DEFAULT_CONFIG> | null,
+): void {
+  overrides = nextOverrides;
+}
+
+export {setFeatureFlagOverridesForTest};

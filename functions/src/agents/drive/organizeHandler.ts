@@ -71,6 +71,7 @@ import {
   normalizeFolderPrefixes,
   mergeRevisedProposal,
   reconcileFileActions,
+  refineOrganizationProposal,
   backfillUncoveredFiles,
   consolidateSummaries,
   proposeFilePlacement,
@@ -1162,7 +1163,7 @@ async function processOrganizeChunk(
     ));
 
     const finalSummary = await consolidateSummaries(state.summaries, uid);
-    const finalProposal: DriveOrganizeProposal = {
+    let finalProposal: DriveOrganizeProposal = {
       proposed_folders: state.accumulatedFolders,
       file_actions: [
         ...state.allFileActions,
@@ -1171,6 +1172,24 @@ async function processOrganizeChunk(
       summary: finalSummary,
     };
     reconcileFileActions(finalProposal);
+    try {
+      finalProposal = await refineOrganizationProposal(finalProposal, uid);
+      logger.info("Drive organize: proposal refinement applied", {
+        proposalId,
+        uid,
+        proposedFolders: finalProposal.proposed_folders.length,
+        fileActions: finalProposal.file_actions.length,
+      });
+    } catch (error) {
+      const refinementErr = error as Error & { status?: number; error?: unknown };
+      logger.warn("Drive organize: proposal refinement failed, using original proposal", {
+        proposalId,
+        uid,
+        error: refinementErr.message || String(error),
+        status: refinementErr.status,
+        errorBody: refinementErr.error,
+      });
+    }
     const cost = calculateOrganizeCost(
         finalProposal,
         state.fileEntries.filter((f) => !f.isFolder),

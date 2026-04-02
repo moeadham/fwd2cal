@@ -15,6 +15,92 @@ import {
 } from "./types";
 import {isInManagedFolder} from "./driveUtils";
 import {ChatMessage, TextContent, ImageURLContent} from "../../util/types";
+import {REFINE_ORGANIZATION_MODEL} from "./config";
+
+const RefineOrganizationResultSchema = z.object({
+  refined_folders: DriveOrganizeProposalSchema.shape.proposed_folders,
+  folder_renames: z.array(z.object({
+    old_path: z.string().describe("Original folder path"),
+    new_path: z.string().describe("New folder path"),
+  })).describe("Folder rename mappings to apply to existing file actions"),
+  summary: z.string(),
+});
+
+function titleCaseFolderSegment(segment: string): string {
+  const trimmed = segment.trim().replace(/^["']|["']$/g, "");
+  const prefixMatch = trimmed.match(/^(\d{2,3}-)(.*)$/);
+  const category = prefixMatch ? prefixMatch[2] : trimmed;
+  const titled = category
+      .split(/[\s-]+/)
+      .filter(Boolean)
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join(" ");
+  return prefixMatch ? `${prefixMatch[1]}${titled}` : titled;
+}
+
+function tryFastParseMoveInstructions(
+    replyText: string,
+    currentFiles: DriveEmbeddedFileData[],
+    agentFolders: {name: string; id: string}[],
+): MoveInstruction | null {
+  const normalizedReply = replyText.trim();
+  if (!normalizedReply) {
+    return null;
+  }
+
+  if (/\b(trash|delete|remove)\b/i.test(normalizedReply)) {
+    return {
+      moves: currentFiles.map((_file, index) => ({
+        file_index: index,
+        action: "trash" as const,
+        folder_id: "",
+        folder_path: "",
+        reason: "Fast-path parser detected a trash request",
+      })),
+    };
+  }
+
+  const movePatterns = [
+    /\bmove\b[\s\S]*?\bto\b\s+(?:a\s+)?(?:folder\s+)?(?:called|named)\s+["']?([^"'.!?<\n]+(?:\/[^"'.!?<\n]+)*)["']?/i,
+    /\bmove\b[\s\S]*?\bto\b\s+["']?([^"'.!?<\n]+(?:\/[^"'.!?<\n]+)*)["']?/i,
+  ];
+
+  let targetPath = "";
+  for (const pattern of movePatterns) {
+    const match = normalizedReply.match(pattern);
+    if (match?.[1]) {
+      targetPath = match[1].trim();
+      break;
+    }
+  }
+
+  if (!targetPath) {
+    return null;
+  }
+
+  const normalizedTargetPath = targetPath
+      .split("/")
+      .map((segment) => titleCaseFolderSegment(segment))
+      .filter(Boolean)
+      .join("/");
+  if (!normalizedTargetPath) {
+    return null;
+  }
+
+  const existingAgentFolder = agentFolders.find((folder) =>
+    folder.name.toLowerCase() === normalizedTargetPath.toLowerCase(),
+  );
+
+  return {
+    moves: currentFiles.map((_file, index) => ({
+      file_index: index,
+      action: "move" as const,
+      folder_id: existingAgentFolder?.id || "root",
+      folder_path: existingAgentFolder?.name || normalizedTargetPath,
+      reason: "Fast-path parser detected an explicit move destination",
+    })),
+  };
+}
 
 /**
  * Propose a folder name (NNN-Category) and filenames before Drive access.
@@ -102,6 +188,20 @@ async function interpretMoveInstructions(
     agentFolders: {name: string; id: string}[],
     uid: string | null = null,
 ): Promise<MoveInstruction> {
+  const fastPath = tryFastParseMoveInstructions(replyText, currentFiles, agentFolders);
+  if (fastPath) {
+    logger.info("Drive move instructions resolved via fast-path parser", {
+      fileCount: currentFiles.length,
+      moves: fastPath.moves.map((move) => ({
+        file_index: move.file_index,
+        action: move.action,
+        folder_id: move.folder_id,
+        folder_path: move.folder_path,
+      })),
+    });
+    return fastPath;
+  }
+
   let userContent = `## User's Instructions\n${replyText}\n\n`;
 
   userContent += `## Current Files\n`;
@@ -230,6 +330,68 @@ function buildChunkUserText(
   }
 
   return userText;
+}
+
+function renderFolderTreePlainText(proposal: DriveOrganizeProposal): string {
+  type TreeNode = {
+    children: Map<string, TreeNode>;
+    fullPath: string;
+  };
+
+  let tree = "My Drive\n";
+  if (proposal.proposed_folders.length === 0) {
+    return tree;
+  }
+
+  const root: TreeNode = {
+    children: new Map<string, TreeNode>(),
+    fullPath: "",
+  };
+  const uniquePaths = new Set<string>();
+
+  for (const folder of proposal.proposed_folders) {
+    const normalizedPath = normalizeFolderPath(folder.folder_path);
+    if (!normalizedPath) {
+      continue;
+    }
+    uniquePaths.add(normalizedPath);
+  }
+
+  for (const folderPath of [...uniquePaths].sort((a, b) => a.localeCompare(b))) {
+    let current = root;
+    let currentPath = "";
+    for (const segment of folderPath.split("/")) {
+      currentPath = currentPath ? `${currentPath}/${segment}` : segment;
+      let child = current.children.get(segment);
+      if (!child) {
+        child = {children: new Map<string, TreeNode>(), fullPath: currentPath};
+        current.children.set(segment, child);
+      }
+      current = child;
+    }
+  }
+
+  const fileCounts = new Map<string, number>();
+  for (const action of proposal.file_actions) {
+    const normalizedFolder = normalizeFolderPath(action.new_folder);
+    fileCounts.set(normalizedFolder, (fileCounts.get(normalizedFolder) || 0) + 1);
+  }
+
+  function renderChildren(node: TreeNode, prefix: string): void {
+    const children = [...node.children.entries()]
+        .sort(([left], [right]) => left.localeCompare(right));
+    for (let i = 0; i < children.length; i++) {
+      const [segment, child] = children[i];
+      const isLast = i === children.length - 1;
+      const branch = isLast ? "└── " : "├── ";
+      const count = fileCounts.get(child.fullPath) || 0;
+      tree += `${prefix}${branch}${segment}/  (${count} files)\n`;
+      renderChildren(child, `${prefix}${isLast ? "    " : "│   "}`);
+    }
+  }
+
+  renderChildren(root, "");
+  return tree.trimEnd();
 }
 
 /**
@@ -496,6 +658,91 @@ function reconcileFileActions(proposal: DriveOrganizeProposal): void {
     keepFoldersAdded,
     unmapped,
   });
+}
+
+async function refineOrganizationProposal(
+    proposal: DriveOrganizeProposal,
+    uid: string | null = null,
+): Promise<DriveOrganizeProposal> {
+  const actionCounts = {
+    move: 0,
+    rename: 0,
+    move_and_rename: 0,
+    keep: 0,
+  };
+
+  for (const action of proposal.file_actions) {
+    actionCounts[action.action] += 1;
+  }
+
+  const userText = [
+    "## Proposed Folder Tree",
+    renderFolderTreePlainText(proposal),
+    "",
+    "## Action Counts",
+    `move: ${actionCounts.move}`,
+    `rename: ${actionCounts.rename}`,
+    `move_and_rename: ${actionCounts.move_and_rename}`,
+    `keep: ${actionCounts.keep}`,
+    "",
+    "## Current Summary",
+    proposal.summary,
+  ].join("\n");
+
+  const refineModel = REFINE_ORGANIZATION_MODEL.value().trim() || prompts.refineOrganization.model;
+
+  logger.info("Drive organize refinement prompt", {
+    model: refineModel,
+    proposedFolders: proposal.proposed_folders.length,
+    fileActions: proposal.file_actions.length,
+    userTextLength: userText.length,
+  });
+
+  const messages: ChatMessage[] = [
+    {role: "system", content: prompts.refineOrganization.prompt},
+    {role: "user", content: userText},
+  ];
+
+  const result = await defaultCompletion<z.infer<typeof RefineOrganizationResultSchema>>(
+      messages,
+      refineModel,
+      DEFAULT_TEMP,
+      RefineOrganizationResultSchema,
+      uid,
+  ) as z.infer<typeof RefineOrganizationResultSchema>;
+
+  const refinedProposal: DriveOrganizeProposal = {
+    proposed_folders: result.refined_folders.map((folder) => ({...folder})),
+    file_actions: proposal.file_actions.map((action) => ({...action})),
+    summary: result.summary,
+  };
+
+  const renameEntries = result.folder_renames
+      .map((r) => [normalizeFolderPath(r.old_path), normalizeFolderPath(r.new_path)] as const)
+      .filter(([from, to]) => from && to)
+      .sort(([left], [right]) => right.length - left.length);
+
+  for (const action of refinedProposal.file_actions) {
+    const normalizedFolder = normalizeFolderPath(action.new_folder);
+    let nextFolder = normalizedFolder;
+
+    for (const [from, to] of renameEntries) {
+      if (nextFolder === from) {
+        nextFolder = to;
+        break;
+      }
+      if (nextFolder.startsWith(`${from}/`)) {
+        nextFolder = `${to}${nextFolder.slice(from.length)}`;
+        break;
+      }
+    }
+
+    action.new_folder = nextFolder;
+  }
+
+  normalizeFolderPrefixes(refinedProposal);
+  reconcileFileActions(refinedProposal);
+  return refinedProposal;
 }
 
 function mergeRevisedProposal(
@@ -824,7 +1071,9 @@ export {
   interpretMoveInstructions,
   proposeOrganization,
   reviseOrganization,
+  refineOrganizationProposal,
   buildChunkUserText,
+  renderFolderTreePlainText,
   normalizeFolderPrefixes,
   mergeRevisedProposal,
   reconcileFileActions,

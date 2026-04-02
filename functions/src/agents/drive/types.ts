@@ -228,6 +228,7 @@ export interface DrivePrompts {
   interpretMoveInstructions: DrivePromptConfig;
   proposeOrganization: DrivePromptConfig;
   reviseOrganization: DrivePromptConfig;
+  refineOrganization: DrivePromptConfig;
   consolidateSummaries: DrivePromptConfig;
 }
 

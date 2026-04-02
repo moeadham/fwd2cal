@@ -48,6 +48,12 @@ export const ORGANIZE_DRIVE_FULL_LISTING_THRESHOLD = defineInt(
 );
 
 
+export const REFINE_ORGANIZATION_MODEL = defineString(
+    "REFINE_ORGANIZATION_MODEL", {
+      default: "openai/gpt-4.1",
+    },
+);
+
 export const ORGANIZE_DRIVE_CHUNK_SIZE = defineInt(
     "ORGANIZE_DRIVE_CHUNK_SIZE", {
       default: 100,

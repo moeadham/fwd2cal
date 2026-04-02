@@ -158,6 +158,14 @@ async function defaultCompletion<T>(
       return completion.choices[0].message.content || "";
     }
   } catch (error) {
+    const apiErr = error as Error & { status?: number; error?: unknown };
+    logger.warn("OpenRouter API call failed", {
+      model,
+      status: apiErr.status,
+      message: apiErr.message,
+      errorBody: apiErr.error,
+    });
+
     // Handle parsing errors - retry immediately
     if (retry && isParsingError(error)) {
       logger.warn("OpenRouter API parsing error (likely malformed response). Retrying immediately.");
@@ -183,4 +191,8 @@ async function defaultCompletion<T>(
   }
 }
 
-export {getOpenAIClient, defaultCompletion, DEFAULT_TEMP, DEFAULT_MAX_TOKENS};
+function setOpenAIClientForTest(client: OpenAI | null): void {
+  openai = client;
+}
+
+export {getOpenAIClient, defaultCompletion, DEFAULT_TEMP, DEFAULT_MAX_TOKENS, setOpenAIClientForTest};

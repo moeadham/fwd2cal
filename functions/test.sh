@@ -40,7 +40,7 @@ LOGS_PID=$!
 sleep 30
 
 echo "running tests"
-./node_modules/.bin/mocha --require ts-node/register test/test.ts --timeout 99999999999 --bail "$@" || TEST_FAILED=true
+./node_modules/.bin/mocha test/test.cjs --timeout 99999999999 --bail "$@" || TEST_FAILED=true
 
 # Stop the logs stream
 kill $LOGS_PID

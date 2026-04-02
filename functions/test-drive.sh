@@ -34,7 +34,7 @@ LOGS_PID=$!
 sleep 30
 
 echo "running drive tests"
-./node_modules/.bin/mocha --require ts-node/register test/drive.test.ts --timeout 99999999999 --bail "$@" || TEST_FAILED=true
+./node_modules/.bin/mocha test/drive.test.cjs --timeout 99999999999 --bail "$@" || TEST_FAILED=true
 
 # Stop the logs stream
 kill $LOGS_PID

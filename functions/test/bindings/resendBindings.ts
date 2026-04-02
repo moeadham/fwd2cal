@@ -965,7 +965,7 @@ const driveEmailWithJapaneseConferenceInvitationPDF: ResendTestData = createRese
       attachments: [
         {
           id: "drive-pdf-japanese-1",
-          filename: "医療保険の資格情報（健康保険証情報）_20260402090250.pdf",
+          filename: "日本会議招待状_20260402090250.pdf",
           content_type: "application/pdf",
           content_disposition: "attachment",
           size: 65905,
@@ -995,7 +995,7 @@ const driveEmailWithJapaneseConferenceInvitationPDF: ResendTestData = createRese
 driveEmailWithJapaneseConferenceInvitationPDF.attachmentsList = [
   {
     id: "drive-pdf-japanese-1",
-    filename: "医療保険の資格情報（健康保険証情報）_20260402090250.pdf",
+    filename: "日本会議招待状_20260402090250.pdf",
     content_type: "application/pdf",
     content_disposition: "attachment",
     size: 65905,
