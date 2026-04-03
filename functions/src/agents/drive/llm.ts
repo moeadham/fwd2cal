@@ -13,7 +13,6 @@ import {
   DriveFileEntry,
   FileInfo,
 } from "./types";
-import {isInManagedFolder} from "./driveUtils";
 import {ChatMessage, TextContent, ImageURLContent} from "../../util/types";
 import {REFINE_ORGANIZATION_MODEL} from "./config";
 
@@ -328,6 +327,7 @@ function buildChunkUserText(
       `(${file.mimeType}, created: ${file.createdTime}, ` +
       `${file.size} bytes)\n`;
   }
+  userText += `\nYou MUST return exactly ${nonFolders.length} file_actions — one per file above.\n`;
 
   return userText;
 }
@@ -802,120 +802,33 @@ function mergeRevisedProposal(
   return merged;
 }
 
-async function backfillUncoveredFiles(
-    driveStructureSummary: string,
+function backfillUncoveredFiles(
     nonFolders: DriveFileEntry[],
-    chunkSize: number,
-    accumulatedFolders: DriveOrganizeProposal["proposed_folders"],
     allFileActions: DriveOrganizeProposal["file_actions"],
-    summaries: string[],
-    uid: string | null = null,
-): Promise<{
-  accumulatedFolders: DriveOrganizeProposal["proposed_folders"];
-  allFileActions: DriveOrganizeProposal["file_actions"];
-  summaries: string[];
-}> {
+): DriveOrganizeProposal["file_actions"] {
   const coveredIds = new Set(allFileActions.map((a) => a.file_id));
-  const uncoveredManaged: DriveFileEntry[] = [];
-  const uncoveredUnmanaged: DriveFileEntry[] = [];
-  for (const file of nonFolders) {
-    if (!coveredIds.has(file.id)) {
-      if (isInManagedFolder(file.parentPath)) {
-        uncoveredManaged.push(file);
-      } else {
-        uncoveredUnmanaged.push(file);
-      }
-    }
-  }
+  const uncoveredFiles = nonFolders.filter((file) => !coveredIds.has(file.id));
 
-  for (const file of uncoveredManaged) {
-    allFileActions.push({
-      file_id: file.id,
-      current_name: file.name,
-      current_path: file.parentPath,
-      new_name: file.name,
-      new_folder: file.parentPath,
-      action: "keep",
-      reason: "Kept in place",
+  if (uncoveredFiles.length > 0) {
+    logger.warn("LLM organize: uncovered files backfilled with keep actions", {
+      uncoveredCount: uncoveredFiles.length,
+      totalFiles: nonFolders.length,
+      coveragePercent: Math.round(((nonFolders.length - uncoveredFiles.length) / Math.max(nonFolders.length, 1)) * 100),
     });
-  }
-
-  if (uncoveredUnmanaged.length > 0) {
-    const retryChunks: DriveFileEntry[][] = [];
-    for (let i = 0; i < uncoveredUnmanaged.length; i += chunkSize) {
-      retryChunks.push(uncoveredUnmanaged.slice(i, i + chunkSize));
-    }
-
-    logger.info("LLM organize: retrying omitted unmanaged files", {
-      count: uncoveredUnmanaged.length,
-      totalChunks: retryChunks.length,
-    });
-
-    for (let i = 0; i < retryChunks.length; i++) {
-      const retryChunk = retryChunks[i];
-      const retryText = buildChunkUserText(
-          driveStructureSummary,
-          accumulatedFolders,
-          retryChunk,
-          i,
-          retryChunks.length,
-          uncoveredUnmanaged.length,
-      );
-      const retryMessages: ChatMessage[] = [
-        {role: "system", content: prompts.proposeOrganization.prompt},
-        {role: "user", content: retryText},
-      ];
-
-      logger.info(`LLM organize retry chunk ${i + 1}/${retryChunks.length}`, {
-        chunkFiles: retryChunk.length,
-        existingFolders: accumulatedFolders.length,
-        userTextLength: retryText.length,
+    for (const file of uncoveredFiles) {
+      allFileActions.push({
+        file_id: file.id,
+        current_name: file.name,
+        current_path: file.parentPath,
+        new_name: file.name,
+        new_folder: file.parentPath,
+        action: "keep",
+        reason: "Safety backfill — not covered by LLM",
       });
-
-      try {
-        const retryResult = await defaultCompletion<DriveOrganizeProposal>(
-            retryMessages,
-            prompts.proposeOrganization.model,
-            DEFAULT_TEMP,
-            DriveOrganizeProposalSchema,
-            uid,
-        );
-        const retryProposal = retryResult as DriveOrganizeProposal;
-        normalizeFolderPrefixes(retryProposal);
-
-        logger.info(`LLM organize retry chunk ${i + 1} result`, {
-          proposedFolders: retryProposal.proposed_folders.length,
-          fileActions: retryProposal.file_actions.length,
-          chunkFiles: retryChunk.length,
-        });
-
-        accumulatedFolders = retryProposal.proposed_folders;
-        allFileActions.push(...retryProposal.file_actions);
-        if (retryProposal.summary) {
-          summaries.push(retryProposal.summary);
-        }
-      } catch (err) {
-        logger.warn(`LLM organize: retry chunk ${i + 1} failed`, err);
-      }
-    }
-
-    const retryCoveredIds = new Set(allFileActions.map((a) => a.file_id));
-    for (const file of uncoveredUnmanaged) {
-      if (!retryCoveredIds.has(file.id)) {
-        allFileActions.push({
-          file_id: file.id,
-          current_name: file.name,
-          current_path: file.parentPath,
-          new_name: file.name,
-          new_folder: file.parentPath,
-          action: "keep",
-          reason: "Kept in place",
-        });
-      }
     }
   }
 
-  return {accumulatedFolders, allFileActions, summaries};
+  return allFileActions;
 }
 
 async function consolidateSummaries(
@@ -983,7 +896,7 @@ async function proposeOrganization(
   // Accumulated state across chunks — start with seed folders from existing Drive structure
   let accumulatedFolders: DriveOrganizeProposal["proposed_folders"] = [...seedFolders];
   let allFileActions: DriveOrganizeProposal["file_actions"] = [];
-  let summaries: string[] = [];
+  const summaries: string[] = [];
 
   for (let i = 0; i < chunks.length; i++) {
     const chunk = chunks[i];
@@ -1035,19 +948,7 @@ async function proposeOrganization(
     }
   }
 
-  ({
-    accumulatedFolders,
-    allFileActions,
-    summaries,
-  } = await backfillUncoveredFiles(
-      driveStructureSummary,
-      nonFolders,
-      chunkSize,
-      accumulatedFolders,
-      allFileActions,
-      summaries,
-      uid,
-  ));
+  allFileActions = backfillUncoveredFiles(nonFolders, allFileActions);
 
   const keptCount = allFileActions.filter((a) => a.action === "keep").length;
   logger.info("LLM organize: chunked processing complete", {

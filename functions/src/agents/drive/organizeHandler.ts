@@ -1148,19 +1148,7 @@ async function processOrganizeChunk(
       return;
     }
 
-    ({
-      accumulatedFolders: state.accumulatedFolders,
-      allFileActions: state.allFileActions,
-      summaries: state.summaries,
-    } = await backfillUncoveredFiles(
-        state.driveStructureSummary,
-        nonFolders,
-        state.chunkSize,
-        state.accumulatedFolders,
-        state.allFileActions,
-        state.summaries,
-        uid,
-    ));
+    state.allFileActions = backfillUncoveredFiles(nonFolders, state.allFileActions);
 
     const finalSummary = await consolidateSummaries(state.summaries, uid);
     let finalProposal: DriveOrganizeProposal = {

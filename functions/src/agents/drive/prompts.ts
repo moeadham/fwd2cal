@@ -99,16 +99,17 @@ You will receive:
 - Preserve the original file extension
 
 ## Output rules:
-- file_actions: Include ONLY files that need changes (move, rename, or move_and_rename)
-- Do NOT include files that are already well-organized — omitting a file means it stays in place
-- Be aggressive: most files in a messy drive need reorganizing. Propose changes for as many files as possible.
+- file_actions: You MUST return exactly one entry for EVERY file in the batch. No file may be omitted.
+- Use action "keep" ONLY when ALL: (1) file is inside a numbered category folder (NN-Name), (2) filename follows YYYY.MM.DD convention, (3) no better folder exists. Keep should be rare.
+- If a file is in the root of My Drive or an unstructured folder, it MUST get move, rename, or move_and_rename — never keep.
+- Be aggressive: most files need reorganizing. When in doubt, propose a change.
 - Google Docs, Sheets, and Slides should be treated as regular files
-- Hidden/system files (starting with ".") should be left alone (do NOT include them)
-- proposed_folders: Return a flat list of ALL folder paths at every level (existing + new). Include both parent and child paths (e.g., both "01-Work" AND "01-Work/Clients")
+- Hidden/system files (starting with ".") should be included with action "keep" and reason "System/hidden file"
+- proposed_folders: Return a flat list of ALL folder paths at every level (existing + new). Include both parent and child paths.
 
 ## Output:
 1. proposed_folders: Flat list of all folder paths at every depth level
-2. file_actions: ONLY files that need changes. Do NOT include "keep" entries.
+2. file_actions: Exactly one action per file — keep should be rare
 3. summary: Brief summary of changes proposed in THIS batch`,
   },
 
