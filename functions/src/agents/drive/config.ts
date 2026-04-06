@@ -23,6 +23,8 @@ export const MAX_DRIVE_UPLOAD_BYTES = defineInt("MAX_DRIVE_UPLOAD_BYTES", {
 
 export const DRIVE_ACTION_SIGNING_KEY = defineString("DRIVE_ACTION_SIGNING_KEY");
 
+export const DRIVE_ADMIN_API_KEY = defineString("DRIVE_ADMIN_API_KEY");
+
 export const ORGANIZE_DRIVE_TEXT_MAX_TOKENS = defineInt(
     "ORGANIZE_DRIVE_TEXT_MAX_TOKENS", {
       default: 1600, // max input tokens for a 2-page text document

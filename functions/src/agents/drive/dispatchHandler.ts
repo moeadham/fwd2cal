@@ -13,6 +13,7 @@ import {
 } from "./organizeHandler";
 import {driveSignupUrl} from "./mailTemplates";
 import {ENVIRONMENT_NAME, RESEND_API_KEY} from "../../util/config";
+import {AGENT_EMAIL_ADDRESS} from "./config";
 import {sendEvent} from "../../util/analytics";
 import {
   TaskRequest,
@@ -53,6 +54,23 @@ export function parseOAuthState(
   const json = Buffer.from(state, "base64url").toString();
   const parsed = JSON.parse(json);
   return {emailId: parsed.emailId, proposal: parsed.proposal, organize: parsed.organize};
+}
+
+function isAdminEmailId(emailId: string): boolean {
+  return emailId.startsWith("admin-organize-");
+}
+
+function buildAdminSyntheticEmail(senderEmail: string): TransformedEmail {
+  return {
+    subject: "Admin: Organize Drive",
+    text: "",
+    html: "",
+    from: senderEmail,
+    to: [AGENT_EMAIL_ADDRESS.value()],
+    headers: {},
+    SPF: "pass",
+    dkim: "pass",
+  };
 }
 
 /**
@@ -236,7 +254,14 @@ export async function dispatchOrganizeChunkTask(
   const isLocal = ENVIRONMENT_NAME.value() === "local" ||
     ENVIRONMENT_NAME.value() === "test";
   if (isLocal) {
-    const {transformedEmail} = await fetchEmailById(data.emailId);
+    let transformedEmail: TransformedEmail;
+    if (isAdminEmailId(data.emailId)) {
+      const proposal = await getOrganizeProposal(data.proposalId);
+      const senderEmail = (proposal as unknown as OrganizeProposalDoc)?.senderEmail || "";
+      transformedEmail = buildAdminSyntheticEmail(senderEmail);
+    } else {
+      ({transformedEmail} = await fetchEmailById(data.emailId));
+    }
     await processOrganizeChunk(transformedEmail, data);
     return;
   }
@@ -550,7 +575,14 @@ export async function handleOrganizeChunkTask(
   const {proposalId, emailId, chunkIndex} = data;
   logger.info("Drive organize chunk task: Starting", {proposalId, chunkIndex});
 
-  const {transformedEmail} = await fetchEmailById(emailId);
+  let transformedEmail: TransformedEmail;
+  if (isAdminEmailId(emailId)) {
+    const proposal = await getOrganizeProposal(proposalId);
+    const senderEmail = (proposal as unknown as OrganizeProposalDoc)?.senderEmail || "";
+    transformedEmail = buildAdminSyntheticEmail(senderEmail);
+  } else {
+    ({transformedEmail} = await fetchEmailById(emailId));
+  }
   await processOrganizeChunk(transformedEmail, data);
 
   logger.info("Drive organize chunk task: Complete", {proposalId, chunkIndex});

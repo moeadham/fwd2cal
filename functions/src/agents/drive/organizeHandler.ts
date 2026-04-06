@@ -2090,6 +2090,8 @@ async function undoOrganizeActions(
 export {
   handleOrganizeDrive,
   hasFullDriveScope,
+  findGeneratingProposal,
+  scanAndPropose,
   handleOrganizeApproval,
   processOrganizeChunk,
   cleanupStuckOrganizeProposals,
