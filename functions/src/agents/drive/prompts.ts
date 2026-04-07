@@ -105,10 +105,10 @@ You will receive:
 - Be aggressive: most files need reorganizing. When in doubt, propose a change.
 - Google Docs, Sheets, and Slides should be treated as regular files
 - Hidden/system files (starting with ".") should be included with action "keep" and reason "System/hidden file"
-- proposed_folders: Return a flat list of ALL folder paths at every level (existing + new). Include both parent and child paths.
+- proposed_folders: Return ONLY folders that are NEW in this batch. Do NOT repeat previously proposed folders. Include new parent paths only if they did not appear in the previously proposed folders list.
 
 ## Output:
-1. proposed_folders: Flat list of all folder paths at every depth level
+1. proposed_folders: Only NEW folder paths added by this batch (empty array if no new folders needed)
 2. file_actions: Exactly one action per file — keep should be rare
 3. summary: Brief summary of changes proposed in THIS batch`,
   },

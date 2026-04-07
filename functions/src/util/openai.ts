@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import {LengthFinishReasonError} from "openai/core/error";
 import {zodResponseFormat} from "openai/helpers/zod";
 import {logger} from "firebase-functions/v2";
 import tokenHelper from "./tokenHelper";
@@ -85,6 +86,7 @@ async function defaultCompletion<T>(
     zodSchema: z.ZodType<T> | null = null,
     uid: string | null = null,
     retry: boolean = true,
+    maxTokens?: number,
 ): Promise<T | string> {
   logger.debug(
       `OpenAI request with ${tokenHelper.countTokens(JSON.stringify(messages))} prompt tokens`,
@@ -94,25 +96,17 @@ async function defaultCompletion<T>(
     messages: messages as OpenAI.ChatCompletionMessageParam[],
     model: model,
     temperature: temperature,
-    max_tokens: DEFAULT_MAX_TOKENS,
+    max_tokens: maxTokens ?? DEFAULT_MAX_TOKENS,
   };
 
   try {
     if (zodSchema) {
-      // Use structured output with Zod schema
+      // Use structured output with Zod schema via raw create + manual parse
       (requestOptions as OpenAI.ChatCompletionCreateParams).response_format =
         zodResponseFormat(zodSchema, "response") as OpenAI.ResponseFormatJSONSchema;
-      const completion = await (
-        getOpenAIClient().chat.completions as OpenAI.Chat.Completions & {
-          parse: (params: OpenAI.ChatCompletionCreateParams) => Promise<{
-            choices: Array<{
-              message: { parsed: T };
-              finish_reason: string;
-            }>;
-            usage: { total_tokens: number };
-          }>;
-        }
-      ).parse(requestOptions);
+      const completion = await getOpenAIClient().chat.completions.create(
+          requestOptions,
+      );
 
       if (!completion) {
         logger.error("Completion is null");
@@ -133,9 +127,28 @@ async function defaultCompletion<T>(
         }
         throw new Error("No choices in completion");
       }
-      if (completion.choices[0].finish_reason !== "stop") {
+
+      const choice = completion.choices[0];
+      const rawContent = choice.message?.content || "";
+
+      if (choice.finish_reason === "length") {
+        logger.error("Response truncated (finish_reason=length)", {
+          model,
+          contentLength: rawContent.length,
+          contentPreview: rawContent.substring(0, 2000),
+          usage: completion.usage,
+        });
+        if (uid) {
+          sendEvent(uid, "aiError", "system", {
+            reason: "length_limit",
+          });
+        }
+        throw new LengthFinishReasonError();
+      }
+
+      if (choice.finish_reason !== "stop") {
         logger.error(
-            `Unexpected finish reason: ${completion.choices[0].finish_reason}`,
+            `Unexpected finish reason: ${choice.finish_reason}`,
         );
         logger.error(JSON.stringify(completion, null, 2));
         if (uid) {
@@ -144,12 +157,14 @@ async function defaultCompletion<T>(
           });
         }
         throw new Error(
-            `Unexpected finish reason: ${completion.choices[0].finish_reason}`,
+            `Unexpected finish reason: ${choice.finish_reason}`,
         );
       }
 
-      logger.debug(`OpenAI tokens used: ${completion.usage.total_tokens}`);
-      return completion.choices[0].message.parsed;
+      // Parse the raw JSON content with the Zod schema
+      const parsed = zodSchema.parse(JSON.parse(rawContent));
+      logger.debug(`OpenAI tokens used: ${completion.usage?.total_tokens}`);
+      return parsed;
     } else {
       // Regular text completion without structured output
       const completion = await getOpenAIClient().chat.completions.create(
@@ -166,10 +181,16 @@ async function defaultCompletion<T>(
       errorBody: apiErr.error,
     });
 
+    // Handle length limit errors — response was truncated, retrying won't help
+    if (error instanceof LengthFinishReasonError) {
+      logger.error("OpenRouter API response hit max token limit (LengthFinishReasonError)");
+      throw error;
+    }
+
     // Handle parsing errors - retry immediately
     if (retry && isParsingError(error)) {
       logger.warn("OpenRouter API parsing error (likely malformed response). Retrying immediately.");
-      return defaultCompletion(messages, model, temperature, zodSchema, uid, false);
+      return defaultCompletion(messages, model, temperature, zodSchema, uid, false, maxTokens);
     }
 
     // Handle retryable errors (network, 429, 5xx, transient 404) - retry after delay
@@ -183,7 +204,7 @@ async function defaultCompletion<T>(
       const waitSecs = DEFAULT_RETRY_DELAY_MS / 1000;
       logger.warn(`OpenRouter API error (${errorType}). Waiting ${waitSecs}s before retrying.`);
       await delay(DEFAULT_RETRY_DELAY_MS);
-      return defaultCompletion(messages, model, temperature, zodSchema, uid, false);
+      return defaultCompletion(messages, model, temperature, zodSchema, uid, false, maxTokens);
     }
 
     // Non-retryable error - rethrow

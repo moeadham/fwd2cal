@@ -13,7 +13,7 @@ import {
 } from "./organizeHandler";
 import {driveSignupUrl} from "./mailTemplates";
 import {ENVIRONMENT_NAME, RESEND_API_KEY} from "../../util/config";
-import {AGENT_EMAIL_ADDRESS} from "./config";
+import {AGENT_EMAIL_ADDRESS, DRIVE_ADMIN_API_KEY} from "./config";
 import {sendEvent} from "../../util/analytics";
 import {
   TaskRequest,
@@ -205,7 +205,13 @@ export async function dispatchPostAuthTask(data: PostAuthTaskData): Promise<void
   if (isLocal) {
     // In local/test mode, run synchronously (task queues not available)
     if (data.organize) {
-      const {transformedEmail} = await fetchEmailById(data.emailId);
+      let transformedEmail: TransformedEmail;
+      if (isAdminEmailId(data.emailId)) {
+        const user = await getUserFromUID(data.uid, DRIVE_USERS_COLLECTION);
+        transformedEmail = buildAdminSyntheticEmail(user.email);
+      } else {
+        ({transformedEmail} = await fetchEmailById(data.emailId));
+      }
       await handleOrganizeDrive(transformedEmail, data.emailId);
     } else {
       const {resend, transformedEmail} = await fetchEmailById(data.emailId);
@@ -469,6 +475,12 @@ export async function handleRetryOrganizeProposal(
     req: Request,
     res: Response,
 ): Promise<void> {
+  const adminKey = req.get("x-admin-key");
+  if (!adminKey || adminKey !== DRIVE_ADMIN_API_KEY.value()) {
+    res.status(401).json({error: "Unauthorized"});
+    return;
+  }
+
   const proposalId = req.query.proposalId as string;
   if (!proposalId) {
     res.status(400).json({error: "Missing proposalId"});
@@ -547,7 +559,13 @@ export async function handlePostAuthTask(
   const {emailId, uid, organize, proposal} = data;
   if (organize) {
     logger.info("Drive post-auth: Starting organize", {emailId});
-    const {transformedEmail} = await fetchEmailById(emailId);
+    let transformedEmail: TransformedEmail;
+    if (isAdminEmailId(emailId)) {
+      const user = await getUserFromUID(uid, DRIVE_USERS_COLLECTION);
+      transformedEmail = buildAdminSyntheticEmail(user.email);
+    } else {
+      ({transformedEmail} = await fetchEmailById(emailId));
+    }
     await handleOrganizeDrive(transformedEmail, emailId);
   } else {
     logger.info("Drive post-auth: Starting upload", {emailId, uid});

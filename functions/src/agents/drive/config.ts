@@ -58,7 +58,7 @@ export const REFINE_ORGANIZATION_MODEL = defineString(
 
 export const ORGANIZE_DRIVE_CHUNK_SIZE = defineInt(
     "ORGANIZE_DRIVE_CHUNK_SIZE", {
-      default: 100,
+      default: 30,
     },
 );
 

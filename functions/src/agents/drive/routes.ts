@@ -14,6 +14,7 @@ import {
   handleOrganizeChunkTask,
   handleRetryOrganizeProposal,
   dispatchPostAuthTask,
+  dispatchOrganizeChunkTask,
 } from "./dispatchHandler";
 import {signupCallbackHandler, hasRequiredScopes, oauthCronJob} from "../../auth/authHandler";
 import {processInboundWebhook} from "../../resend/webhookUtils";
@@ -30,8 +31,11 @@ import {TaskRequest, TransformedEmail} from "../../util/types";
 import {
   cleanupExpiredDriveFileData,
   DRIVE_USERS_COLLECTION,
+  getOrganizeProposal,
+  getResumableOrganizeProposals,
   getUserFromEmail,
   getUserFromUID,
+  updateOrganizeProposalStatus,
 } from "../../util/firestoreHandler";
 import {withErrorTracking} from "../../util/analytics";
 import {
@@ -45,6 +49,7 @@ import {
   PostAuthTaskData,
   OrganizeActionTaskData,
   OrganizeChunkTaskData,
+  OrganizeProposalDoc,
 } from "./types";
 
 // Global configuration for onRequest functions
@@ -286,7 +291,7 @@ export const v2driveAdminOrganize = onRequest(
       font-family: system-ui, -apple-system, sans-serif; 
       background-color: var(--bg);
       color: var(--text);
-      max-width: 600px; 
+      max-width: 900px; 
       margin: 60px auto; 
       padding: 0 20px; 
       line-height: 1.5;
@@ -336,6 +341,9 @@ export const v2driveAdminOrganize = onRequest(
     }
     button:hover:not(:disabled) { background: var(--primary-hover); }
     button:disabled { opacity: 0.7; cursor: not-allowed; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 16px; }
+    th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border); }
+    th { color: var(--text-muted); font-weight: 500; }
     h2 { font-size: 1.1rem; margin-top: 32px; margin-bottom: 12px; font-weight: 600; }
     pre { 
       background: #1f2937; 
@@ -371,6 +379,12 @@ export const v2driveAdminOrganize = onRequest(
       <h2>Response</h2>
       <pre id="responseArea"></pre>
     </div>
+  </div>
+
+  <div class="card" style="margin-top: 24px">
+    <h1>Failed/Stuck Proposals</h1>
+    <button id="loadBtn">Load Proposals</button>
+    <div id="proposalsContainer"></div>
   </div>
 
   <script>
@@ -417,6 +431,140 @@ export const v2driveAdminOrganize = onRequest(
         submitBtn.textContent = 'Run Organization';
       }
     });
+
+    document.getElementById('loadBtn').addEventListener('click', async () => {
+      const apiKey = document.getElementById('apiKey').value;
+      if (!apiKey) {
+        alert('Please enter API Key');
+        return;
+      }
+      
+      const loadBtn = document.getElementById('loadBtn');
+      const container = document.getElementById('proposalsContainer');
+      
+      loadBtn.disabled = true;
+      loadBtn.textContent = 'Loading...';
+      
+      try {
+        const res = await fetch('', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-admin-key': apiKey
+          },
+          body: JSON.stringify({ action: 'list' })
+        });
+        
+        let data;
+        try {
+          data = await res.json();
+        } catch (err) {
+          throw new Error('Failed to parse response: ' + res.statusText);
+        }
+        
+        if (!Array.isArray(data) || data.length === 0) {
+          container.innerHTML = '<p style="margin-top: 16px; color: var(--text-muted);">' +
+            'No failed or stuck proposals found</p>';
+          return;
+        }
+        
+        let tableHtml = '<table>' +
+          '<thead>' +
+            '<tr>' +
+              '<th>Email</th>' +
+              '<th>Status</th>' +
+              '<th>Progress</th>' +
+              '<th>Error</th>' +
+              '<th>Attempts</th>' +
+              '<th>Created</th>' +
+              '<th>Action</th>' +
+            '</tr>' +
+          '</thead>' +
+          '<tbody>';
+        
+        data.forEach(p => {
+          const progress = (p.currentChunk !== undefined && p.totalChunks !== undefined) 
+            ? p.currentChunk + '/' + p.totalChunks 
+            : 'N/A';
+          const errText = p.lastError 
+            ? (p.lastError.length > 80 ? p.lastError.substring(0, 80) + '...' : p.lastError) 
+            : '';
+          const createdText = p.createdAt ? new Date(p.createdAt).toLocaleString() : '';
+          
+          tableHtml += '<tr>' +
+            '<td>' + (p.senderEmail || p.emailId || '') + '</td>' +
+            '<td>' + (p.status || '') + '</td>' +
+            '<td>' + progress + '</td>' +
+            '<td>' + errText + '</td>' +
+            '<td>' + (p.attemptCount || 0) + '</td>' +
+            '<td>' + createdText + '</td>' +
+            '<td>' +
+              '<button class="resume-btn" data-id="' + p.id + '" ' + 
+              'style="width: auto; padding: 6px 12px; font-size: 0.8rem">Resume</button>' +
+            '</td>' +
+          '</tr>';
+        });
+        
+        tableHtml += '</tbody></table>';
+        container.innerHTML = tableHtml;
+        
+      } catch (err) {
+        container.innerHTML = '<p style="margin-top: 16px; color: #ef4444;">Error: ' + err.message + '</p>';
+      } finally {
+        loadBtn.disabled = false;
+        loadBtn.textContent = 'Load Proposals';
+      }
+    });
+
+    document.getElementById('proposalsContainer').addEventListener('click', async (e) => {
+      if (e.target && e.target.classList.contains('resume-btn')) {
+        const apiKey = document.getElementById('apiKey').value;
+        if (!apiKey) {
+          alert('Please enter API Key');
+          return;
+        }
+        
+        const btn = e.target;
+        const proposalId = btn.getAttribute('data-id');
+        const originalText = btn.textContent;
+        
+        btn.disabled = true;
+        btn.textContent = 'Resuming...';
+        
+        const responseContainer = document.getElementById('responseContainer');
+        const responseArea = document.getElementById('responseArea');
+        responseContainer.classList.remove('hidden');
+        responseArea.textContent = 'Resuming proposal ' + proposalId + '...';
+        
+        try {
+          const res = await fetch('', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-admin-key': apiKey
+            },
+            body: JSON.stringify({ action: 'retry', proposalId: proposalId })
+          });
+          
+          let data;
+          try {
+            data = await res.json();
+          } catch (err) {
+            data = await res.text();
+          }
+          
+          responseArea.textContent = JSON.stringify(data, null, 2);
+          if (!res.ok) {
+            responseArea.textContent += '\\n\\nStatus: ' + res.status;
+          }
+        } catch (err) {
+          responseArea.textContent = 'Error: ' + err.message;
+        } finally {
+          btn.disabled = false;
+          btn.textContent = originalText;
+        }
+      }
+    });
   </script>
 </body>
 </html>`;
@@ -437,7 +585,69 @@ export const v2driveAdminOrganize = onRequest(
         return;
       }
 
-      const body = req.body as {email?: string; uid?: string} | undefined;
+      const body = req.body as {
+        action?: string;
+        proposalId?: string;
+        email?: string;
+        uid?: string;
+      } | undefined;
+
+      if (body?.action === "list") {
+        const proposals = await getResumableOrganizeProposals();
+        res.status(200).json(proposals);
+        return;
+      }
+
+      if (body?.action === "retry") {
+        const proposalId = body.proposalId?.trim();
+        if (!proposalId) {
+          res.status(400).json({error: "Missing proposalId"});
+          return;
+        }
+
+        const rawProposal = await getOrganizeProposal(proposalId);
+        if (!rawProposal) {
+          res.status(404).json({error: "Proposal not found"});
+          return;
+        }
+
+        const proposal = rawProposal as unknown as OrganizeProposalDoc;
+        if (proposal.status !== "generating" && proposal.status !== "failed") {
+          res.status(400).json({
+            error: `Proposal status is ${proposal.status}`,
+          });
+          return;
+        }
+
+        if (!proposal.emailId || !proposal.uid) {
+          res.status(500).json({error: "missing retry metadata"});
+          return;
+        }
+
+        const chunkIndex = proposal.currentChunk || 0;
+        if (proposal.status === "failed") {
+          await updateOrganizeProposalStatus(proposalId, "generating", {
+            attemptCount: 1,
+            generationStartedAt: new Date().toISOString(),
+            lastError: null,
+          });
+        }
+
+        await dispatchOrganizeChunkTask({
+          proposalId,
+          emailId: proposal.emailId,
+          uid: proposal.uid,
+          chunkIndex,
+        });
+
+        res.status(200).json({
+          proposalId,
+          chunkIndex,
+          message: "Retry dispatched",
+        });
+        return;
+      }
+
       const requestedEmail = body?.email?.trim();
       let uid = body?.uid?.trim();
 

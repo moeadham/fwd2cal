@@ -1,4 +1,5 @@
 import {createHmac} from "crypto";
+import {LengthFinishReasonError} from "openai/core/error";
 import {logger} from "firebase-functions/v2";
 import {
   getUserFromEmail,
@@ -624,6 +625,36 @@ function seedFoldersFromDrive(
 }
 
 /**
+ * Merge newly proposed folders from a chunk into the accumulated set while
+ * preserving prefix normalization context for new folder numbering.
+ */
+function mergeChunkProposalFolders(
+    accumulatedFolders: DriveOrganizeProposal["proposed_folders"],
+    chunkProposal: DriveOrganizeProposal,
+): DriveOrganizeProposal["proposed_folders"] {
+  const existingPaths = new Set(accumulatedFolders.map((folder) => folder.folder_path));
+  chunkProposal.proposed_folders = [
+    ...accumulatedFolders,
+    ...chunkProposal.proposed_folders,
+  ];
+
+  normalizeFolderPrefixes(chunkProposal);
+
+  const mergedFolders = [...accumulatedFolders];
+  const mergedPaths = new Set(existingPaths);
+  for (const folder of chunkProposal.proposed_folders) {
+    if (mergedPaths.has(folder.folder_path)) {
+      continue;
+    }
+    mergedFolders.push(folder);
+    mergedPaths.add(folder.folder_path);
+  }
+
+  chunkProposal.proposed_folders = mergedFolders;
+  return mergedFolders;
+}
+
+/**
  * Build an empty OrganizeProcessingResult with an optional error.
  */
 function emptyResult(
@@ -1114,11 +1145,14 @@ async function processOrganizeChunk(
         DEFAULT_TEMP,
         DriveOrganizeProposalSchema,
         uid,
+        true,
+        32768,
     );
     const chunkProposal = result as DriveOrganizeProposal;
-    normalizeFolderPrefixes(chunkProposal);
-
-    state.accumulatedFolders = chunkProposal.proposed_folders;
+    state.accumulatedFolders = mergeChunkProposalFolders(
+        state.accumulatedFolders,
+        chunkProposal,
+    );
     state.allFileActions.push(...chunkProposal.file_actions);
     if (chunkProposal.summary) {
       state.summaries.push(chunkProposal.summary);
@@ -1223,9 +1257,12 @@ async function processOrganizeChunk(
       error: errMsg,
     });
     if (proposalDoc?.status === "generating") {
-      await updateOrganizeProposalStatus(proposalId, "generating", {
-        lastError: errMsg,
-      }).catch((updateError) => {
+      const isFatal = error instanceof LengthFinishReasonError;
+      await updateOrganizeProposalStatus(
+          proposalId,
+          isFatal ? "failed" : "generating",
+          {lastError: errMsg},
+      ).catch((updateError) => {
         logger.error("Drive organize chunk: Failed to persist error", {
           proposalId,
           error: updateError instanceof Error ? updateError.message : String(updateError),
@@ -2096,4 +2133,5 @@ export {
   processOrganizeChunk,
   cleanupStuckOrganizeProposals,
   signActionToken,
+  mergeChunkProposalFolders,
 };

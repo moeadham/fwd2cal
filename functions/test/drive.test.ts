@@ -30,8 +30,11 @@ import {
   refineOrganizationProposal,
   renderFolderTreePlainText,
 } from "../src/agents/drive/llm";
+import {ORGANIZE_DRIVE_CHUNK_SIZE} from "../src/agents/drive/config";
 import {DriveOrganizeProposal, MoveInstructionSchema} from "../src/agents/drive/types";
-import {setOpenAIClientForTest} from "../src/util/openai";
+import {mergeChunkProposalFolders} from "../src/agents/drive/organizeHandler";
+import {defaultCompletion, setOpenAIClientForTest} from "../src/util/openai";
+import {getResumableOrganizeProposals} from "../src/util/firestoreHandler";
 
 
 chai.use(chaiHttp);
@@ -46,6 +49,7 @@ const DISPATCH_REGION = "us-central1";
 const APP_ID = process.env.GCLOUD_PROJECT || "fwd2cal-dev-2578e";
 
 process.env.FIRESTORE_EMULATOR_HOST = "127.0.0.1:8080";
+initializeApp({projectId: APP_ID});
 const testApp = initializeApp({projectId: APP_ID}, "drive-test");
 const db = getFirestore(testApp);
 
@@ -586,6 +590,42 @@ describe("reconcileFileActions", function() {
   });
 });
 
+describe("mergeChunkProposalFolders", function() {
+  it("DT00ta merges only new chunk folders and normalizes prefixes against accumulated folders", function() {
+    const accumulatedFolders = [
+      {
+        folder_path: "01-Personal",
+        description: "Existing personal folder",
+      },
+    ];
+    const chunkProposal = makeOrganizeProposal(
+        ["1", "2"],
+        {
+          "1": "Work/Client",
+          "2": "01-Personal",
+        },
+        ["01-Personal", "Work", "Work/Client"],
+    );
+
+    const mergedFolders = mergeChunkProposalFolders(accumulatedFolders, chunkProposal);
+
+    expect(mergedFolders.map((folder) => folder.folder_path)).to.deep.equal([
+      "01-Personal",
+      "02-Work",
+      "02-Work/Client",
+    ]);
+    expect(chunkProposal.proposed_folders.map((folder) => folder.folder_path)).to.deep.equal([
+      "01-Personal",
+      "02-Work",
+      "02-Work/Client",
+    ]);
+    expect(chunkProposal.file_actions.find((action) => action.file_id === "1")?.new_folder)
+        .to.equal("02-Work/Client");
+    expect(chunkProposal.file_actions.find((action) => action.file_id === "2")?.new_folder)
+        .to.equal("01-Personal");
+  });
+});
+
 describe("MoveInstructionSchema", function() {
   it("DT00t accepts optional new_filename and still allows omission", function() {
     const withRename = MoveInstructionSchema.parse({
@@ -623,6 +663,54 @@ describe("MoveInstructionSchema", function() {
     expect(withRename.moves[0].new_filename).to.equal("Conference Registration.pdf");
     expect(withoutRename.moves[0]).to.not.have.property("new_filename");
     expect(withNullRename.moves[0].new_filename).to.equal(null);
+  });
+});
+
+describe("defaultCompletion", function() {
+  afterEach(function() {
+    setOpenAIClientForTest(null);
+  });
+
+  it("DT00ta1 forwards an explicit max token override to the OpenRouter request", async function() {
+    let capturedRequest: {max_tokens?: number} | null = null;
+    const fakeClient = {
+      chat: {
+        completions: {
+          create: async (request: {max_tokens?: number}) => {
+            capturedRequest = request;
+            return {
+              choices: [{
+                message: {
+                  content: "ok",
+                },
+                finish_reason: "stop",
+              }],
+              usage: {total_tokens: 1},
+            };
+          },
+        },
+      },
+    } as unknown as OpenAI;
+    setOpenAIClientForTest(fakeClient);
+
+    const result = await defaultCompletion(
+        [{role: "user", content: "hello"}],
+        "openai/gpt-4.1",
+        undefined,
+        null,
+        null,
+        true,
+        32768,
+    );
+
+    expect(result).to.equal("ok");
+    expect(capturedRequest?.max_tokens).to.equal(32768);
+  });
+});
+
+describe("drive config", function() {
+  it("DT00ta2 defaults organize chunk size to 30 files", function() {
+    expect(ORGANIZE_DRIVE_CHUNK_SIZE.options.default).to.equal(30);
   });
 });
 
@@ -673,6 +761,7 @@ describe("refineOrganizationProposal", function() {
                 message: {
                   content: JSON.stringify(refinedResult),
                 },
+                finish_reason: "stop",
               }],
               usage: {total_tokens: 21},
             }),
@@ -738,6 +827,38 @@ describe("renderFolderTreePlainText", function() {
   });
 });
 
+describe("admin resume helpers", function() {
+  it("DT00ua lists resumable organize proposals sorted by createdAt desc", async function() {
+    const baseId = `resume-list-${Date.now()}`;
+    await db.collection("OrganizeProposals").doc(`${baseId}-failed`).set({
+      status: "failed",
+      createdAt: "2099-01-02T00:00:00.000Z",
+      emailId: "email-failed",
+      uid: "uid-failed",
+    });
+    await db.collection("OrganizeProposals").doc(`${baseId}-generating`).set({
+      status: "generating",
+      createdAt: "2099-01-01T00:00:00.000Z",
+      emailId: "email-generating",
+      uid: "uid-generating",
+    });
+    await db.collection("OrganizeProposals").doc(`${baseId}-pending`).set({
+      status: "pending",
+      createdAt: "2099-01-03T00:00:00.000Z",
+      emailId: "email-pending",
+      uid: "uid-pending",
+    });
+
+    const proposals = await getResumableOrganizeProposals();
+    const seeded = proposals.filter((proposal) => String(proposal.id).startsWith(baseId));
+
+    expect(seeded.map((proposal) => proposal.id)).to.deep.equal([
+      `${baseId}-failed`,
+      `${baseId}-generating`,
+    ]);
+  });
+});
+
 describe("move instruction fast-path", function() {
   it("DT00v handles explicit move-to-folder phrasing without LLM assistance", async function() {
     const {interpretMoveInstructions} = await import("../src/agents/drive/llm");
@@ -785,6 +906,68 @@ describe("move instruction fast-path", function() {
       folder_path: "",
       reason: "Fast-path parser detected a trash request",
     }]);
+  });
+});
+
+describe("admin resume routes", function() {
+  it("DT00ub rejects admin list without x-admin-key", async function() {
+    const res = await chaiWithHttp
+      .request(`${DISPATCH_URL}/${APP_ID}/${DISPATCH_REGION}`)
+      .post("/v2driveAdminOrganize")
+      .set("Content-Type", "application/json")
+      .send({action: "list"});
+
+    expect(res).to.have.status(401);
+    expect(res.body).to.deep.equal({error: "Unauthorized"});
+  });
+
+  it("DT00uc rejects standalone retry without x-admin-key", async function() {
+    const res = await chaiWithHttp
+      .request(`${DISPATCH_URL}/${APP_ID}/${DISPATCH_REGION}`)
+      .get("/v2driveRetryOrganizeProposal")
+      .query({proposalId: "missing-proposal"})
+      .set("Content-Type", "application/json");
+
+    expect(res).to.have.status(401);
+    expect(res.body).to.deep.equal({error: "Unauthorized"});
+  });
+
+  it("DT00ud returns resumable proposals from admin list", async function() {
+    const baseId = `admin-list-${Date.now()}`;
+    await db.collection("OrganizeProposals").doc(`${baseId}-failed`).set({
+      status: "failed",
+      createdAt: "2099-02-02T00:00:00.000Z",
+      emailId: "email-failed",
+      uid: "uid-failed",
+    });
+    await db.collection("OrganizeProposals").doc(`${baseId}-generating`).set({
+      status: "generating",
+      createdAt: "2099-02-01T00:00:00.000Z",
+      emailId: "email-generating",
+      uid: "uid-generating",
+    });
+    await db.collection("OrganizeProposals").doc(`${baseId}-completed`).set({
+      status: "completed",
+      createdAt: "2099-02-03T00:00:00.000Z",
+      emailId: "email-completed",
+      uid: "uid-completed",
+    });
+
+    const res = await chaiWithHttp
+      .request(`${DISPATCH_URL}/${APP_ID}/${DISPATCH_REGION}`)
+      .post("/v2driveAdminOrganize")
+      .set("Content-Type", "application/json")
+      .set("x-admin-key", "test-admin-key")
+      .send({action: "list"});
+
+    expect(res).to.have.status(200);
+    const seeded = (res.body as Array<{id: string}>)
+      .filter((proposal) => proposal.id.startsWith(baseId))
+      .map((proposal) => proposal.id);
+    expect(seeded).to.deep.equal([
+      `${baseId}-failed`,
+      `${baseId}-generating`,
+    ]);
   });
 });
 
