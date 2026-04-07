@@ -1,7 +1,7 @@
 import {z} from "zod";
 import {logger} from "firebase-functions/v2";
 import {defaultCompletion, DEFAULT_TEMP} from "../../util/openai";
-import {prompts} from "./prompts";
+import {getPrompts} from "./prompts/index";
 import {
   FileProposalSchema,
   FileProposal,
@@ -114,6 +114,7 @@ async function proposeFilePlacement(
     uid: string | null = null,
     imageUrls: string[] = [],
 ): Promise<FileProposal> {
+  const {prompts, versions} = getPrompts();
   let userText = `## Existing Agent-Managed Folders\n`;
   if (agentFolderNames.length > 0) {
     userText += agentFolderNames.map((f) => `- ${f}`).join("\n") + "\n";
@@ -173,6 +174,7 @@ async function proposeFilePlacement(
       DEFAULT_TEMP,
       FileProposalSchema,
       uid,
+      {promptVersion: versions.PROMPT_PROPOSE_FILE_PLACEMENT_VERSION},
   );
 
   return result as FileProposal;
@@ -200,6 +202,7 @@ async function interpretMoveInstructions(
     });
     return fastPath;
   }
+  const {prompts, versions} = getPrompts();
 
   let userContent = `## User's Instructions\n${replyText}\n\n`;
 
@@ -236,6 +239,7 @@ async function interpretMoveInstructions(
       DEFAULT_TEMP,
       MoveInstructionSchema,
       uid,
+      {promptVersion: versions.PROMPT_INTERPRET_MOVE_INSTRUCTIONS_VERSION},
   );
 
   return result as MoveInstruction;
@@ -249,6 +253,7 @@ async function reviseOrganization(
     userInstructions: string,
     uid: string | null = null,
 ): Promise<DriveOrganizeProposal> {
+  const {prompts, versions} = getPrompts();
   let userText = `## User Requested Changes\n${userInstructions}\n\n`;
 
   userText += `## Current Proposed Folders\n`;
@@ -290,6 +295,7 @@ async function reviseOrganization(
       DEFAULT_TEMP,
       DriveOrganizeProposalSchema,
       uid,
+      {promptVersion: versions.PROMPT_REVISE_ORGANIZATION_VERSION},
   );
 
   const revisedProposal = result as DriveOrganizeProposal;
@@ -664,6 +670,7 @@ async function refineOrganizationProposal(
     proposal: DriveOrganizeProposal,
     uid: string | null = null,
 ): Promise<DriveOrganizeProposal> {
+  const {prompts, versions} = getPrompts();
   const actionCounts = {
     move: 0,
     rename: 0,
@@ -709,6 +716,7 @@ async function refineOrganizationProposal(
       DEFAULT_TEMP,
       RefineOrganizationResultSchema,
       uid,
+      {promptVersion: versions.PROMPT_REFINE_ORGANIZATION_VERSION},
   ) as z.infer<typeof RefineOrganizationResultSchema>;
 
   const refinedProposal: DriveOrganizeProposal = {
@@ -835,6 +843,7 @@ async function consolidateSummaries(
     summaries: string[],
     uid: string | null = null,
 ): Promise<string> {
+  const {prompts, versions} = getPrompts();
   let finalSummary = summaries[0] ?? "";
   if (summaries.length <= 1) {
     return finalSummary;
@@ -858,6 +867,7 @@ async function consolidateSummaries(
         DEFAULT_TEMP,
         z.object({summary: z.string()}),
         uid,
+        {promptVersion: versions.PROMPT_CONSOLIDATE_SUMMARIES_VERSION},
     );
     finalSummary = (result as {summary: string}).summary;
   } catch (err) {
@@ -877,6 +887,7 @@ async function proposeOrganization(
     uid: string | null = null,
     seedFolders: DriveOrganizeProposal["proposed_folders"] = [],
 ): Promise<DriveOrganizeProposal> {
+  const {prompts, versions} = getPrompts();
   const nonFolders = fileEntries.filter((f) => !f.isFolder);
   const totalFiles = nonFolders.length;
 
@@ -926,6 +937,7 @@ async function proposeOrganization(
         DEFAULT_TEMP,
         DriveOrganizeProposalSchema,
         uid,
+        {promptVersion: versions.PROMPT_PROPOSE_ORGANIZATION_VERSION},
     );
 
     const chunkProposal = result as DriveOrganizeProposal;

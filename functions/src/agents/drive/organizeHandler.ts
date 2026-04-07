@@ -88,7 +88,7 @@ import {extractContentSummary, extractDocumentImageUrls} from "./fileProcessor";
 import {getNextFolderPrefix, toTitleCase} from "./driveUtils";
 import {dispatchOrganizeChunkTask, fetchEmailById} from "./dispatchHandler";
 import {defaultCompletion, DEFAULT_TEMP} from "../../util/openai";
-import {prompts} from "./prompts";
+import {getPrompts} from "./prompts/index";
 
 // ============================================================================
 // HELPERS
@@ -1233,6 +1233,7 @@ async function processOrganizeChunk(
     const [chunkResultExists] = await chunkResultFile.exists();
 
     if (!chunkResultExists) {
+      const {prompts, versions} = getPrompts();
       const userText = buildChunkUserText(
           state.driveStructureSummary,
           state.seedFolders,
@@ -1259,8 +1260,10 @@ async function processOrganizeChunk(
           DEFAULT_TEMP,
           DriveOrganizeProposalSchema,
           uid,
-          true,
-          32768,
+          {
+            maxTokens: 32768,
+            promptVersion: versions.PROMPT_PROPOSE_ORGANIZATION_VERSION,
+          },
       );
       const chunkProposal = result as DriveOrganizeProposal;
       await saveOrganizeChunkResult(proposalId, chunkIndex, {

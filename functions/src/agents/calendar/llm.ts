@@ -1,6 +1,6 @@
 import {logger} from "firebase-functions/v2";
 import {defaultCompletion, DEFAULT_TEMP} from "../../util/openai";
-import {prompts} from "./prompts";
+import {getPrompts} from "./prompts/index";
 import {
   EventDataSchema,
   TimezoneSchema,
@@ -27,6 +27,7 @@ async function processEmail(
     calendars: CalendarForLLM[] = [],
     documents: ParsedDocument[] = [],
 ): Promise<EventData> {
+  const {prompts, versions} = getPrompts();
   // Prepend calendar list if provided
   let calendarText = "";
   if (calendars && calendars.length > 0) {
@@ -100,6 +101,7 @@ async function processEmail(
         DEFAULT_TEMP,
         EventDataSchema,
         uid,
+        {promptVersion: versions.PROMPT_GET_EVENT_DATA_VERSION},
     ),
     defaultCompletion<Timezone>(
         timezoneMessages,
@@ -107,6 +109,7 @@ async function processEmail(
         DEFAULT_TEMP,
         TimezoneSchema,
         uid,
+        {promptVersion: versions.PROMPT_GET_EVENT_TIMEZONE_VERSION},
     ),
   ]);
 
@@ -164,6 +167,7 @@ async function processEmail(
 }
 
 async function parseICS(ics: string): Promise<ICSParsedEvent> {
+  const {prompts, versions} = getPrompts();
   const messages: ChatMessage[] = [
     {
       role: "system",
@@ -176,6 +180,8 @@ async function parseICS(ics: string): Promise<ICSParsedEvent> {
       prompts.parseICS.model,
       DEFAULT_TEMP,
       ICSParserSchema,
+      null,
+      {promptVersion: versions.PROMPT_PARSE_ICS_VERSION},
   )) as ICSParsedEvent;
 }
 
@@ -185,6 +191,7 @@ async function selectSkill(
     skillsContext: string,
     uid: string | null = null,
 ): Promise<SkillSelection> {
+  const {prompts, versions} = getPrompts();
   // Replace placeholder in prompt with actual skills context
   const systemPrompt = prompts.selectSkill.prompt.replace(
       "{skills_context}",
@@ -207,6 +214,7 @@ async function selectSkill(
       DEFAULT_TEMP,
       SkillSelectionSchema,
       uid,
+      {promptVersion: versions.PROMPT_SELECT_SKILL_VERSION},
   )) as SkillSelection;
 }
 

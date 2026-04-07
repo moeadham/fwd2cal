@@ -12,6 +12,12 @@ const DEFAULT_TEMP = 0.1;
 const DEFAULT_MAX_TOKENS = 16384;
 const DEFAULT_RETRY_DELAY_MS = 10000;
 
+export interface CompletionOptions {
+  retry?: boolean;
+  maxTokens?: number;
+  promptVersion?: string;
+}
+
 /**
  * Check if an error is a network-related error
  */
@@ -85,18 +91,20 @@ async function defaultCompletion<T>(
     temperature: number = DEFAULT_TEMP,
     zodSchema: z.ZodType<T> | null = null,
     uid: string | null = null,
-    retry: boolean = true,
-    maxTokens?: number,
+    options?: CompletionOptions,
 ): Promise<T | string> {
   logger.debug(
       `OpenAI request with ${tokenHelper.countTokens(JSON.stringify(messages))} prompt tokens`,
+      {
+        promptVersion: options?.promptVersion,
+      },
   );
 
   const requestOptions: OpenAI.ChatCompletionCreateParams = {
     messages: messages as OpenAI.ChatCompletionMessageParam[],
     model: model,
     temperature: temperature,
-    max_tokens: maxTokens ?? DEFAULT_MAX_TOKENS,
+    max_tokens: options?.maxTokens ?? DEFAULT_MAX_TOKENS,
   };
 
   try {
@@ -163,7 +171,9 @@ async function defaultCompletion<T>(
 
       // Parse the raw JSON content with the Zod schema
       const parsed = zodSchema.parse(JSON.parse(rawContent));
-      logger.debug(`OpenAI tokens used: ${completion.usage?.total_tokens}`);
+      logger.debug(`OpenAI tokens used: ${completion.usage?.total_tokens}`, {
+        promptVersion: options?.promptVersion,
+      });
       return parsed;
     } else {
       // Regular text completion without structured output
@@ -188,13 +198,16 @@ async function defaultCompletion<T>(
     }
 
     // Handle parsing errors - retry immediately
-    if (retry && isParsingError(error)) {
+    if ((options?.retry ?? true) && isParsingError(error)) {
       logger.warn("OpenRouter API parsing error (likely malformed response). Retrying immediately.");
-      return defaultCompletion(messages, model, temperature, zodSchema, uid, false, maxTokens);
+      return defaultCompletion(messages, model, temperature, zodSchema, uid, {
+        ...options,
+        retry: false,
+      });
     }
 
     // Handle retryable errors (network, 429, 5xx, transient 404) - retry after delay
-    if (retry && isRetryableError(error)) {
+    if ((options?.retry ?? true) && isRetryableError(error)) {
       const err = error as Error & { status?: number };
       const errorType = isNetworkError(error) ?
         "network/socket error" :
@@ -204,7 +217,10 @@ async function defaultCompletion<T>(
       const waitSecs = DEFAULT_RETRY_DELAY_MS / 1000;
       logger.warn(`OpenRouter API error (${errorType}). Waiting ${waitSecs}s before retrying.`);
       await delay(DEFAULT_RETRY_DELAY_MS);
-      return defaultCompletion(messages, model, temperature, zodSchema, uid, false, maxTokens);
+      return defaultCompletion(messages, model, temperature, zodSchema, uid, {
+        ...options,
+        retry: false,
+      });
     }
 
     // Non-retryable error - rethrow

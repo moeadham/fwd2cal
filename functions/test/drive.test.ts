@@ -705,8 +705,7 @@ describe("defaultCompletion", function() {
         undefined,
         null,
         null,
-        true,
-        32768,
+        {maxTokens: 32768},
     );
 
     expect(result).to.equal("ok");

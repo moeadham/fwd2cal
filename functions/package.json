@@ -20,7 +20,7 @@
   "engines": {
     "node": "22"
   },
-  "main": "lib/index.js",
+  "main": "lib/agents/calendar/index.js",
   "dependencies": {
     "axios": "1.13.2",
     "firebase-admin": "^13.6.0",
