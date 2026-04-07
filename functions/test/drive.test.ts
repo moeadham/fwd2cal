@@ -32,9 +32,15 @@ import {
 } from "../src/agents/drive/llm";
 import {ORGANIZE_DRIVE_CHUNK_SIZE} from "../src/agents/drive/config";
 import {DriveOrganizeProposal, MoveInstructionSchema} from "../src/agents/drive/types";
-import {mergeChunkProposalFolders} from "../src/agents/drive/organizeHandler";
+import {
+  mergeChunkProposalFolders,
+  getParallelBatchChunkIndexes,
+} from "../src/agents/drive/organizeHandler";
 import {defaultCompletion, setOpenAIClientForTest} from "../src/util/openai";
-import {getResumableOrganizeProposals} from "../src/util/firestoreHandler";
+import {
+  getResumableOrganizeProposals,
+  incrementOrganizeCompletedChunks,
+} from "../src/util/firestoreHandler";
 
 
 chai.use(chaiHttp);
@@ -856,6 +862,36 @@ describe("admin resume helpers", function() {
       `${baseId}-failed`,
       `${baseId}-generating`,
     ]);
+  });
+});
+
+describe("organize chunk helpers", function() {
+  it("DT00uab increments completed chunk count once per chunk index", async function() {
+    const proposalId = `chunk-counter-${Date.now()}`;
+    await db.collection("OrganizeProposals").doc(proposalId).set({
+      status: "generating",
+      completedChunks: 0,
+      completedChunkIndices: [],
+    });
+
+    const first = await incrementOrganizeCompletedChunks(proposalId, 0);
+    const duplicate = await incrementOrganizeCompletedChunks(proposalId, 0);
+    const second = await incrementOrganizeCompletedChunks(proposalId, 1);
+    const storedDoc = await db.collection("OrganizeProposals").doc(proposalId).get();
+
+    expect(first).to.equal(1);
+    expect(duplicate).to.equal(1);
+    expect(second).to.equal(2);
+    expect(storedDoc.data()?.completedChunks).to.equal(2);
+    expect(storedDoc.data()?.completedChunkIndices).to.deep.equal([0, 1]);
+  });
+
+  it("DT00uac dispatches the next chunk batch only at batch boundaries", function() {
+    expect(getParallelBatchChunkIndexes(1, 12, 10)).to.deep.equal([]);
+    expect(getParallelBatchChunkIndexes(10, 12, 10)).to.deep.equal([10, 11]);
+    expect(getParallelBatchChunkIndexes(12, 12, 10)).to.deep.equal([]);
+    expect(getParallelBatchChunkIndexes(11, 25, 10)).to.deep.equal([]);
+    expect(getParallelBatchChunkIndexes(20, 25, 10)).to.deep.equal([20, 21, 22, 23, 24]);
   });
 });
 

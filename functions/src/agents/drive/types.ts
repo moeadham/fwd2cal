@@ -148,6 +148,13 @@ export const DriveOrganizeProposalSchema = z.object({
 
 export type DriveOrganizeProposal = z.infer<typeof DriveOrganizeProposalSchema>;
 
+export interface OrganizeChunkResult {
+  chunkIndex: number;
+  proposed_folders: DriveOrganizeProposal["proposed_folders"];
+  file_actions: DriveOrganizeProposal["file_actions"];
+  summary: string;
+}
+
 // Organize processing result
 export interface OrganizeProcessingResult {
   totalFiles: number;
@@ -189,6 +196,7 @@ export interface OrganizeProposalDoc {
   attemptCount?: number;
   lastError?: string;
   currentChunk?: number;
+  completedChunkIndices?: number[];
   totalChunks?: number;
 }
 
@@ -334,10 +342,8 @@ export interface OrganizeIntermediateState {
   chunkSize: number;
   seedFolders: DriveOrganizeProposal["proposed_folders"];
   folderRenameActions: DriveOrganizeProposal["file_actions"];
-  accumulatedFolders: DriveOrganizeProposal["proposed_folders"];
-  allFileActions: DriveOrganizeProposal["file_actions"];
-  summaries: string[];
   completedChunks: number;
   totalChunks: number;
+  parallelChunkLimit: number;
   senderEmail: string;
 }

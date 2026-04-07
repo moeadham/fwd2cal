@@ -243,6 +243,8 @@ async function deleteUser(uid: string): Promise<void> {
 // ============================================================================
 
 const getProposalPath = (id: string) => `organize-proposals/${id}.json`;
+const getChunkResultPath = (proposalId: string, chunkIndex: number) =>
+  `organize-proposals/${proposalId}-chunk-${chunkIndex}.json`;
 
 async function saveOrganizeProposal(
     data: Record<string, unknown>,
@@ -312,6 +314,79 @@ async function getOrganizeIntermediateState(
     return JSON.parse(contents.toString()) as Record<string, unknown>;
   } catch (error) {
     logger.error("Database error in getOrganizeIntermediateState:", error);
+    throw error;
+  }
+}
+
+async function saveOrganizeChunkResult(
+    proposalId: string,
+    chunkIndex: number,
+    result: Record<string, unknown>,
+): Promise<void> {
+  try {
+    const bucket = getStorage().bucket();
+    await bucket.file(getChunkResultPath(proposalId, chunkIndex)).save(
+        JSON.stringify(result),
+        {contentType: "application/json"},
+    );
+  } catch (error) {
+    logger.error("Database error in saveOrganizeChunkResult:", error);
+    throw error;
+  }
+}
+
+async function getOrganizeChunkResults(
+    proposalId: string,
+    totalChunks: number,
+): Promise<Record<string, unknown>[]> {
+  try {
+    const bucket = getStorage().bucket();
+    const chunkResults = await Promise.all(
+        Array.from({length: totalChunks}, async (_value, chunkIndex) => {
+          const [contents] = await bucket
+              .file(getChunkResultPath(proposalId, chunkIndex))
+              .download();
+          return JSON.parse(contents.toString()) as Record<string, unknown>;
+        }),
+    );
+    return chunkResults;
+  } catch (error) {
+    logger.error("Database error in getOrganizeChunkResults:", error);
+    throw error;
+  }
+}
+
+async function incrementOrganizeCompletedChunks(
+    proposalId: string,
+    chunkIndex: number,
+): Promise<number> {
+  try {
+    const docRef = getFirestore()
+        .collection("OrganizeProposals")
+        .doc(proposalId);
+    const newCount = await getFirestore().runTransaction(async (transaction) => {
+      const doc = await transaction.get(docRef);
+      if (!doc.exists) {
+        throw new Error("Organize proposal not found");
+      }
+
+      const completedChunkIndices = Array.isArray(doc.data()?.completedChunkIndices) ?
+        doc.data()?.completedChunkIndices as number[] :
+        [];
+      if (completedChunkIndices.includes(chunkIndex)) {
+        return completedChunkIndices.length;
+      }
+
+      const nextCompletedChunkIndices = [...completedChunkIndices, chunkIndex].sort((a, b) => a - b);
+      transaction.update(docRef, {
+        completedChunkIndices: nextCompletedChunkIndices,
+        completedChunks: nextCompletedChunkIndices.length,
+      });
+      return nextCompletedChunkIndices.length;
+    });
+    return newCount;
+  } catch (error) {
+    logger.error("Database error in incrementOrganizeCompletedChunks:", error);
     throw error;
   }
 }
@@ -565,6 +640,10 @@ export {
   saveOrganizeProposal,
   saveOrganizeIntermediateState,
   getOrganizeIntermediateState,
+  getChunkResultPath,
+  saveOrganizeChunkResult,
+  getOrganizeChunkResults,
+  incrementOrganizeCompletedChunks,
   finalizeOrganizeProposal,
   getOrganizeProposal,
   findGeneratingProposal,

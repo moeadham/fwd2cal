@@ -1,6 +1,7 @@
 import {createHmac} from "crypto";
 import {LengthFinishReasonError} from "openai/core/error";
 import {logger} from "firebase-functions/v2";
+import {getStorage} from "firebase-admin/storage";
 import {
   getUserFromEmail,
   getUserFromUID,
@@ -8,6 +9,10 @@ import {
   saveOrganizeProposal,
   saveOrganizeIntermediateState,
   getOrganizeIntermediateState,
+  getChunkResultPath,
+  saveOrganizeChunkResult,
+  getOrganizeChunkResults,
+  incrementOrganizeCompletedChunks,
   finalizeOrganizeProposal,
   getOrganizeProposal,
   findGeneratingProposal,
@@ -40,6 +45,7 @@ import {
   DriveFileEntry,
   DriveOrganizeProposalSchema,
   DriveOrganizeProposal,
+  OrganizeChunkResult,
   OrganizeCostBreakdown,
   OrganizeProcessingResult,
   OrganizeEmbeddedData,
@@ -654,6 +660,123 @@ function mergeChunkProposalFolders(
   return mergedFolders;
 }
 
+function getParallelBatchChunkIndexes(
+    completedChunks: number,
+    totalChunks: number,
+    parallelChunkLimit: number,
+): number[] {
+  if (completedChunks <= 0 || completedChunks > totalChunks) {
+    return [];
+  }
+
+  const currentBatchEnd = Math.min(
+      totalChunks,
+      Math.ceil(completedChunks / parallelChunkLimit) * parallelChunkLimit,
+  );
+  if (completedChunks !== currentBatchEnd || currentBatchEnd >= totalChunks) {
+    return [];
+  }
+
+  const nextBatchEnd = Math.min(currentBatchEnd + parallelChunkLimit, totalChunks);
+  return Array.from(
+      {length: nextBatchEnd - currentBatchEnd},
+      (_value, index) => currentBatchEnd + index,
+  );
+}
+
+async function finalizeChunkedProposal(
+    email: TransformedEmail,
+    proposalId: string,
+    proposalDoc: OrganizeProposalDoc,
+    state: OrganizeIntermediateState,
+): Promise<void> {
+  const chunkResults = (await getOrganizeChunkResults(
+      proposalId,
+      state.totalChunks,
+  ) as unknown as OrganizeChunkResult[]).sort((a, b) => a.chunkIndex - b.chunkIndex);
+  const nonFolders = state.fileEntries.filter((f) => !f.isFolder);
+
+  let accumulatedFolders = [...state.seedFolders];
+  const allFileActions: DriveOrganizeProposal["file_actions"] = [];
+  const summaries: string[] = [];
+
+  for (const chunkResult of chunkResults) {
+    accumulatedFolders = mergeChunkProposalFolders(accumulatedFolders, {
+      proposed_folders: chunkResult.proposed_folders,
+      file_actions: chunkResult.file_actions,
+      summary: chunkResult.summary,
+    });
+    allFileActions.push(...chunkResult.file_actions);
+    if (chunkResult.summary) {
+      summaries.push(chunkResult.summary);
+    }
+  }
+
+  const backfilledFileActions = backfillUncoveredFiles(nonFolders, allFileActions);
+  const finalSummary = await consolidateSummaries(summaries, proposalDoc.uid);
+  let finalProposal: DriveOrganizeProposal = {
+    proposed_folders: accumulatedFolders,
+    file_actions: [
+      ...backfilledFileActions,
+      ...state.folderRenameActions,
+    ],
+    summary: finalSummary,
+  };
+  reconcileFileActions(finalProposal);
+
+  try {
+    finalProposal = await refineOrganizationProposal(finalProposal, proposalDoc.uid);
+    logger.info("Drive organize: proposal refinement applied", {
+      proposalId,
+      uid: proposalDoc.uid,
+      proposedFolders: finalProposal.proposed_folders.length,
+      fileActions: finalProposal.file_actions.length,
+    });
+  } catch (error) {
+    const refinementErr = error as Error & { status?: number; error?: unknown };
+    logger.warn("Drive organize: proposal refinement failed, using original proposal", {
+      proposalId,
+      uid: proposalDoc.uid,
+      error: refinementErr.message || String(error),
+      status: refinementErr.status,
+      errorBody: refinementErr.error,
+    });
+  }
+
+  const cost = calculateOrganizeCost(finalProposal, nonFolders);
+  const mimeMap = Object.fromEntries(
+      nonFolders.map((file) => [file.id, file.mimeType]),
+  );
+
+  await sendOrganizeProposalEmail(
+      state.senderEmail || proposalDoc.senderEmail || getSenderFromRawEmail(email) || "",
+      email,
+      proposalId,
+      finalProposal,
+      cost,
+  );
+  await finalizeOrganizeProposal(
+      proposalId,
+      finalProposal as unknown as Record<string, unknown>,
+      cost as unknown as Record<string, unknown>,
+      mimeMap as Record<string, unknown>,
+  );
+
+  sendEvent(proposalDoc.uid, "driveOrganizeProposed", "drive", {
+    totalFiles: String(cost.totalFiles),
+    filesToChange: String(cost.totalFiles - cost.filesToKeep),
+    totalCost: cost.totalCost.toFixed(2),
+  });
+
+  logger.info("Drive organize: Chunked proposal finalized", {
+    proposalId,
+    uid: proposalDoc.uid,
+    totalFiles: cost.totalFiles,
+    filesToChange: cost.totalFiles - cost.filesToKeep,
+    totalCost: cost.totalCost,
+  });
+}
+
 /**
  * Build an empty OrganizeProcessingResult with an optional error.
  */
@@ -854,6 +977,7 @@ async function scanAndPropose(
     emailId: string,
     uid: string,
 ): Promise<OrganizeProcessingResult> {
+  const PARALLEL_CHUNK_LIMIT = 10;
   let oauth2Client;
   try {
     oauth2Client = await getOauthClient(uid, AGENT_NAME);
@@ -1010,6 +1134,8 @@ async function scanAndPropose(
       generationStartedAt: now.toISOString(),
       attemptCount: 1,
       currentChunk: 0,
+      completedChunks: 0,
+      completedChunkIndices: [],
       totalChunks,
     });
 
@@ -1019,11 +1145,9 @@ async function scanAndPropose(
       chunkSize,
       seedFolders,
       folderRenameActions,
-      accumulatedFolders: [...seedFolders],
-      allFileActions: [],
-      summaries: [],
       completedChunks: 0,
       totalChunks,
+      parallelChunkLimit: PARALLEL_CHUNK_LIMIT,
       senderEmail: sender,
     };
     await saveOrganizeIntermediateState(
@@ -1042,12 +1166,15 @@ async function scanAndPropose(
       totalChunks,
     });
 
-    await dispatchOrganizeChunkTask({
-      proposalId,
-      emailId,
-      uid,
-      chunkIndex: 0,
-    });
+    const firstBatchSize = Math.min(totalChunks, PARALLEL_CHUNK_LIMIT);
+    for (let nextChunkIndex = 0; nextChunkIndex < firstBatchSize; nextChunkIndex++) {
+      await dispatchOrganizeChunkTask({
+        proposalId,
+        emailId,
+        uid,
+        chunkIndex: nextChunkIndex,
+      });
+    }
 
     return emptyResult(undefined, nonFolderFiles.length);
   } catch (error) {
@@ -1066,7 +1193,6 @@ async function processOrganizeChunk(
     data: OrganizeChunkTaskData,
 ): Promise<void> {
   const {proposalId, uid, chunkIndex} = data;
-  const sender = getSenderFromRawEmail(email) || "";
 
   let proposalDoc: OrganizeProposalDoc | null = null;
   try {
@@ -1091,24 +1217,6 @@ async function processOrganizeChunk(
       chunks.push(nonFolders.slice(i, i + state.chunkSize));
     }
 
-    if (chunkIndex < state.completedChunks) {
-      logger.info("Drive organize chunk: Already completed", {
-        proposalId,
-        chunkIndex,
-        completedChunks: state.completedChunks,
-      });
-      return;
-    }
-
-    if (chunkIndex > state.completedChunks) {
-      logger.warn("Drive organize chunk: Out-of-order dispatch", {
-        proposalId,
-        chunkIndex,
-        completedChunks: state.completedChunks,
-      });
-      return;
-    }
-
     const chunk = chunks[chunkIndex];
     if (!chunk) {
       logger.warn("Drive organize chunk: Missing chunk", {
@@ -1119,136 +1227,106 @@ async function processOrganizeChunk(
       return;
     }
 
-    const userText = buildChunkUserText(
-        state.driveStructureSummary,
-        state.accumulatedFolders,
-        chunk,
-        chunkIndex,
-        chunks.length,
-        nonFolders.length,
-    );
-    const messages: ChatMessage[] = [
-      {role: "system", content: prompts.proposeOrganization.prompt},
-      {role: "user", content: userText},
-    ];
+    const chunkResultFile = getStorage()
+        .bucket()
+        .file(getChunkResultPath(proposalId, chunkIndex));
+    const [chunkResultExists] = await chunkResultFile.exists();
 
-    logger.info(`LLM organize chunk ${chunkIndex + 1}/${chunks.length}`, {
-      proposalId,
-      chunkFiles: chunk.length,
-      existingFolders: state.accumulatedFolders.length,
-      userTextLength: userText.length,
-    });
-
-    const result = await defaultCompletion<DriveOrganizeProposal>(
-        messages,
-        prompts.proposeOrganization.model,
-        DEFAULT_TEMP,
-        DriveOrganizeProposalSchema,
-        uid,
-        true,
-        32768,
-    );
-    const chunkProposal = result as DriveOrganizeProposal;
-    state.accumulatedFolders = mergeChunkProposalFolders(
-        state.accumulatedFolders,
-        chunkProposal,
-    );
-    state.allFileActions.push(...chunkProposal.file_actions);
-    if (chunkProposal.summary) {
-      state.summaries.push(chunkProposal.summary);
-    }
-    state.completedChunks = chunkIndex + 1;
-
-    const heartbeat = new Date().toISOString();
-
-    if (state.completedChunks < state.totalChunks) {
-      await saveOrganizeIntermediateState(
-          proposalId,
-          state as unknown as Record<string, unknown>,
+    if (!chunkResultExists) {
+      const userText = buildChunkUserText(
+          state.driveStructureSummary,
+          state.seedFolders,
+          chunk,
+          chunkIndex,
+          chunks.length,
+          nonFolders.length,
       );
-      await updateOrganizeProposalStatus(proposalId, "generating", {
-        currentChunk: state.completedChunks,
-        totalChunks: state.totalChunks,
-        generationStartedAt: heartbeat,
-        lastError: null,
+      const messages: ChatMessage[] = [
+        {role: "system", content: prompts.proposeOrganization.prompt},
+        {role: "user", content: userText},
+      ];
+
+      logger.info(`LLM organize chunk ${chunkIndex + 1}/${chunks.length}`, {
+        proposalId,
+        chunkFiles: chunk.length,
+        existingFolders: state.seedFolders.length,
+        userTextLength: userText.length,
       });
 
-      await dispatchOrganizeChunkTask({
+      const result = await defaultCompletion<DriveOrganizeProposal>(
+          messages,
+          prompts.proposeOrganization.model,
+          DEFAULT_TEMP,
+          DriveOrganizeProposalSchema,
+          uid,
+          true,
+          32768,
+      );
+      const chunkProposal = result as DriveOrganizeProposal;
+      await saveOrganizeChunkResult(proposalId, chunkIndex, {
+        chunkIndex,
+        proposed_folders: chunkProposal.proposed_folders,
+        file_actions: chunkProposal.file_actions,
+        summary: chunkProposal.summary,
+      } as unknown as Record<string, unknown>);
+    } else {
+      logger.info("Drive organize chunk: Reusing existing chunk result", {
         proposalId,
-        emailId: proposalDoc.emailId,
-        uid,
-        chunkIndex: state.completedChunks,
+        chunkIndex,
+      });
+    }
+
+    const newCompletedCount = await incrementOrganizeCompletedChunks(proposalId, chunkIndex);
+    if (newCompletedCount > state.totalChunks) {
+      logger.warn("Drive organize chunk: Completed chunk count exceeded total", {
+        proposalId,
+        chunkIndex,
+        newCompletedCount,
+        totalChunks: state.totalChunks,
       });
       return;
     }
 
-    state.allFileActions = backfillUncoveredFiles(nonFolders, state.allFileActions);
-
-    const finalSummary = await consolidateSummaries(state.summaries, uid);
-    let finalProposal: DriveOrganizeProposal = {
-      proposed_folders: state.accumulatedFolders,
-      file_actions: [
-        ...state.allFileActions,
-        ...state.folderRenameActions,
-      ],
-      summary: finalSummary,
-    };
-    reconcileFileActions(finalProposal);
-    try {
-      finalProposal = await refineOrganizationProposal(finalProposal, uid);
-      logger.info("Drive organize: proposal refinement applied", {
+    const latestProposal = await getOrganizeProposal(proposalId);
+    if (!latestProposal || latestProposal.status !== "generating") {
+      logger.info("Drive organize chunk: Proposal finalized while chunk was running", {
         proposalId,
-        uid,
-        proposedFolders: finalProposal.proposed_folders.length,
-        fileActions: finalProposal.file_actions.length,
+        chunkIndex,
+        status: latestProposal?.status,
       });
-    } catch (error) {
-      const refinementErr = error as Error & { status?: number; error?: unknown };
-      logger.warn("Drive organize: proposal refinement failed, using original proposal", {
-        proposalId,
-        uid,
-        error: refinementErr.message || String(error),
-        status: refinementErr.status,
-        errorBody: refinementErr.error,
-      });
+      return;
     }
-    const cost = calculateOrganizeCost(
-        finalProposal,
-        state.fileEntries.filter((f) => !f.isFolder),
-    );
-    const mimeMap = Object.fromEntries(
-        state.fileEntries
-            .filter((f) => !f.isFolder)
-            .map((file) => [file.id, file.mimeType]),
-    );
 
-    await sendOrganizeProposalEmail(
-        state.senderEmail || sender,
-        email,
-        proposalId,
-        finalProposal,
-        cost,
-    );
-    await finalizeOrganizeProposal(
-        proposalId,
-        finalProposal as unknown as Record<string, unknown>,
-        cost as unknown as Record<string, unknown>,
-        mimeMap as Record<string, unknown>,
-    );
+    const heartbeat = new Date().toISOString();
 
-    sendEvent(uid, "driveOrganizeProposed", "drive", {
-      totalFiles: String(cost.totalFiles),
-      filesToChange: String(cost.totalFiles - cost.filesToKeep),
-      totalCost: cost.totalCost.toFixed(2),
+    await updateOrganizeProposalStatus(proposalId, "generating", {
+      currentChunk: newCompletedCount,
+      totalChunks: state.totalChunks,
+      generationStartedAt: heartbeat,
+      lastError: null,
     });
 
-    logger.info("Drive organize: Chunked proposal finalized", {
-      proposalId,
-      uid,
-      totalFiles: cost.totalFiles,
-      filesToChange: cost.totalFiles - cost.filesToKeep,
-      totalCost: cost.totalCost,
-    });
+    const nextBatchChunkIndexes = getParallelBatchChunkIndexes(
+        newCompletedCount,
+        state.totalChunks,
+        state.parallelChunkLimit,
+    );
+    if (nextBatchChunkIndexes.length > 0) {
+      for (const nextChunkIndex of nextBatchChunkIndexes) {
+        await dispatchOrganizeChunkTask({
+          proposalId,
+          emailId: proposalDoc.emailId,
+          uid,
+          chunkIndex: nextChunkIndex,
+        });
+      }
+    }
+
+    if (newCompletedCount === state.totalChunks) {
+      await finalizeChunkedProposal(email, proposalId, proposalDoc, state);
+      return;
+    }
+    return;
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     logger.error("Drive organize chunk: Failed", {
@@ -1261,7 +1339,10 @@ async function processOrganizeChunk(
       await updateOrganizeProposalStatus(
           proposalId,
           isFatal ? "failed" : "generating",
-          {lastError: errMsg},
+          {
+            currentChunk: chunkIndex,
+            lastError: errMsg,
+          },
       ).catch((updateError) => {
         logger.error("Drive organize chunk: Failed to persist error", {
           proposalId,
@@ -2134,4 +2215,5 @@ export {
   cleanupStuckOrganizeProposals,
   signActionToken,
   mergeChunkProposalFolders,
+  getParallelBatchChunkIndexes,
 };
