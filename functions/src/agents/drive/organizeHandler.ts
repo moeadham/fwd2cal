@@ -1257,7 +1257,7 @@ async function processOrganizeChunk(
       const result = await defaultCompletion<DriveOrganizeProposal>(
           messages,
           prompts.proposeOrganization.model,
-          DEFAULT_TEMP,
+          prompts.proposeOrganization.temperature ?? DEFAULT_TEMP,
           DriveOrganizeProposalSchema,
           uid,
           {

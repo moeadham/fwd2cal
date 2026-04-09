@@ -98,7 +98,7 @@ async function processEmail(
     defaultCompletion<EventData>(
         eventMessages,
         prompts.getEventData.model,
-        DEFAULT_TEMP,
+        prompts.getEventData.temperature ?? DEFAULT_TEMP,
         EventDataSchema,
         uid,
         {promptVersion: versions.PROMPT_GET_EVENT_DATA_VERSION},
@@ -106,7 +106,7 @@ async function processEmail(
     defaultCompletion<Timezone>(
         timezoneMessages,
         prompts.getEventTimezone.model,
-        DEFAULT_TEMP,
+        prompts.getEventTimezone.temperature ?? DEFAULT_TEMP,
         TimezoneSchema,
         uid,
         {promptVersion: versions.PROMPT_GET_EVENT_TIMEZONE_VERSION},
@@ -178,7 +178,7 @@ async function parseICS(ics: string): Promise<ICSParsedEvent> {
   return (await defaultCompletion<ICSParsedEvent>(
       messages,
       prompts.parseICS.model,
-      DEFAULT_TEMP,
+      prompts.parseICS.temperature ?? DEFAULT_TEMP,
       ICSParserSchema,
       null,
       {promptVersion: versions.PROMPT_PARSE_ICS_VERSION},
@@ -211,7 +211,7 @@ async function selectSkill(
   return (await defaultCompletion<SkillSelection>(
       messages,
       prompts.selectSkill.model,
-      DEFAULT_TEMP,
+      prompts.selectSkill.temperature ?? DEFAULT_TEMP,
       SkillSelectionSchema,
       uid,
       {promptVersion: versions.PROMPT_SELECT_SKILL_VERSION},

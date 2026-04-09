@@ -171,7 +171,7 @@ async function proposeFilePlacement(
   const result = await defaultCompletion<FileProposal>(
       messages,
       prompts.proposeFilePlacement.model,
-      DEFAULT_TEMP,
+      prompts.proposeFilePlacement.temperature ?? DEFAULT_TEMP,
       FileProposalSchema,
       uid,
       {promptVersion: versions.PROMPT_PROPOSE_FILE_PLACEMENT_VERSION},
@@ -236,7 +236,7 @@ async function interpretMoveInstructions(
   const result = await defaultCompletion<MoveInstruction>(
       messages,
       prompts.interpretMoveInstructions.model,
-      DEFAULT_TEMP,
+      prompts.interpretMoveInstructions.temperature ?? DEFAULT_TEMP,
       MoveInstructionSchema,
       uid,
       {promptVersion: versions.PROMPT_INTERPRET_MOVE_INSTRUCTIONS_VERSION},
@@ -292,7 +292,7 @@ async function reviseOrganization(
   const result = await defaultCompletion<DriveOrganizeProposal>(
       messages,
       prompts.reviseOrganization.model,
-      DEFAULT_TEMP,
+      prompts.reviseOrganization.temperature ?? DEFAULT_TEMP,
       DriveOrganizeProposalSchema,
       uid,
       {promptVersion: versions.PROMPT_REVISE_ORGANIZATION_VERSION},
@@ -713,7 +713,7 @@ async function refineOrganizationProposal(
   const result = await defaultCompletion<z.infer<typeof RefineOrganizationResultSchema>>(
       messages,
       refineModel,
-      DEFAULT_TEMP,
+      prompts.refineOrganization.temperature ?? DEFAULT_TEMP,
       RefineOrganizationResultSchema,
       uid,
       {promptVersion: versions.PROMPT_REFINE_ORGANIZATION_VERSION},
@@ -864,7 +864,7 @@ async function consolidateSummaries(
     const result = await defaultCompletion<{summary: string}>(
         consolidateMessages,
         prompts.consolidateSummaries.model,
-        DEFAULT_TEMP,
+        prompts.consolidateSummaries.temperature ?? DEFAULT_TEMP,
         z.object({summary: z.string()}),
         uid,
         {promptVersion: versions.PROMPT_CONSOLIDATE_SUMMARIES_VERSION},
@@ -934,7 +934,7 @@ async function proposeOrganization(
     const result = await defaultCompletion<DriveOrganizeProposal>(
         messages,
         prompts.proposeOrganization.model,
-        DEFAULT_TEMP,
+        prompts.proposeOrganization.temperature ?? DEFAULT_TEMP,
         DriveOrganizeProposalSchema,
         uid,
         {promptVersion: versions.PROMPT_PROPOSE_ORGANIZATION_VERSION},

@@ -229,6 +229,7 @@ export interface OrganizeEmbeddedData {
 export interface DrivePromptConfig {
   model: string;
   prompt: string;
+  temperature?: number;
 }
 
 export interface DrivePrompts {

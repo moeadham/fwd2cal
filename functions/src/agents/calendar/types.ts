@@ -458,6 +458,7 @@ export interface HeadersForProcessing {
 export interface PromptConfig {
   model: string;
   prompt: string;
+  temperature?: number;
 }
 
 // Prompts object
