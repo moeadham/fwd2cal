@@ -35,6 +35,7 @@ import {DriveOrganizeProposal, MoveInstructionSchema} from "../src/agents/drive/
 import {
   mergeChunkProposalFolders,
   getParallelBatchChunkIndexes,
+  seedFoldersFromDrive,
 } from "../src/agents/drive/organizeHandler";
 import {defaultCompletion, setOpenAIClientForTest} from "../src/util/openai";
 import {
@@ -865,7 +866,158 @@ describe("admin resume helpers", function() {
 });
 
 describe("organize chunk helpers", function() {
-  it("DT00uab increments completed chunk count once per chunk index", async function() {
+  it("DT00uaa seeds canonical roots for an empty drive", function() {
+    const {seedFolders, folderRenameActions} = seedFoldersFromDrive([]);
+
+    expect(seedFolders.map((folder) => folder.folder_path)).to.deep.equal([
+      "01-Documents",
+      "02-Finance",
+      "03-Work",
+      "04-Media",
+      "05-Projects",
+      "06-Personal",
+      "07-Education",
+      "08-Travel",
+      "09-Archive",
+    ]);
+    expect(folderRenameActions).to.deep.equal([]);
+  });
+
+  it("DT00uab maps matching folders, preserves unmatched folders, merges duplicates, and keeps canonical names", function() {
+    const {seedFolders, folderRenameActions} = seedFoldersFromDrive([
+      {
+        id: "folder-docs",
+        name: "Medical Insurance",
+        mimeType: "application/vnd.google-apps.folder",
+        parentId: "root",
+        parentPath: "My Drive",
+        createdTime: "2026-01-01T00:00:00.000Z",
+        size: 0,
+        webViewLink: "",
+        isFolder: true,
+      },
+      {
+        id: "folder-taxes",
+        name: "taxes",
+        mimeType: "application/vnd.google-apps.folder",
+        parentId: "root",
+        parentPath: "My Drive",
+        createdTime: "2026-01-02T00:00:00.000Z",
+        size: 0,
+        webViewLink: "",
+        isFolder: true,
+      },
+      {
+        id: "folder-random",
+        name: "Random",
+        mimeType: "application/vnd.google-apps.folder",
+        parentId: "root",
+        parentPath: "My Drive",
+        createdTime: "2026-01-03T00:00:00.000Z",
+        size: 0,
+        webViewLink: "",
+        isFolder: true,
+      },
+      {
+        id: "folder-random-dup",
+        name: "random",
+        mimeType: "application/vnd.google-apps.folder",
+        parentId: "root",
+        parentPath: "My Drive",
+        createdTime: "2026-01-04T00:00:00.000Z",
+        size: 0,
+        webViewLink: "",
+        isFolder: true,
+      },
+      {
+        id: "folder-finance-canonical",
+        name: "02-Finance",
+        mimeType: "application/vnd.google-apps.folder",
+        parentId: "root",
+        parentPath: "My Drive",
+        createdTime: "2026-01-05T00:00:00.000Z",
+        size: 0,
+        webViewLink: "",
+        isFolder: true,
+      },
+      {
+        id: "folder-finance-wrong-prefix",
+        name: "05-Finance",
+        mimeType: "application/vnd.google-apps.folder",
+        parentId: "root",
+        parentPath: "My Drive",
+        createdTime: "2026-01-06T00:00:00.000Z",
+        size: 0,
+        webViewLink: "",
+        isFolder: true,
+      },
+    ]);
+
+    expect(seedFolders.map((folder) => folder.folder_path)).to.include.members([
+      "01-Documents",
+      "02-Finance",
+      "09-Archive",
+      "10-Random",
+    ]);
+    expect(seedFolders).to.have.length(10);
+
+    expect(folderRenameActions).to.deep.include({
+      file_id: "folder-docs",
+      current_name: "Medical Insurance",
+      current_path: "My Drive",
+      new_name: "01-Documents",
+      new_folder: "My Drive",
+      action: "rename",
+      reason: "Mapped to canonical category 01-Documents",
+    });
+    expect(folderRenameActions).to.deep.include({
+      file_id: "folder-taxes",
+      current_name: "taxes",
+      current_path: "My Drive",
+      new_name: "02-Finance",
+      new_folder: "My Drive",
+      action: "rename",
+      reason: "Mapped to canonical category 02-Finance",
+    });
+    expect(folderRenameActions).to.deep.include({
+      file_id: "folder-random-dup",
+      current_name: "random",
+      current_path: "My Drive",
+      new_name: "10-Random",
+      new_folder: "My Drive",
+      action: "rename",
+      reason: "Renamed unmatched folder with custom prefix 10-Random",
+    });
+    expect(folderRenameActions).to.deep.include({
+      file_id: "folder-random",
+      current_name: "Random",
+      current_path: "My Drive",
+      new_name: "10-Random",
+      new_folder: "My Drive",
+      action: "rename",
+      reason: 'Merged duplicate folder into "10-Random"',
+    });
+    expect(folderRenameActions).to.deep.include({
+      file_id: "folder-finance-canonical",
+      current_name: "02-Finance",
+      current_path: "My Drive",
+      new_name: "02-Finance",
+      new_folder: "My Drive",
+      action: "keep",
+      reason: "Already using canonical root category",
+    });
+    expect(folderRenameActions).to.deep.include({
+      file_id: "folder-finance-wrong-prefix",
+      current_name: "05-Finance",
+      current_path: "My Drive",
+      new_name: "02-Finance",
+      new_folder: "My Drive",
+      action: "rename",
+      reason: 'Merged duplicate folder into "02-Finance"',
+    });
+  });
+
+  it("DT00uac increments completed chunk count once per chunk index", async function() {
     const proposalId = `chunk-counter-${Date.now()}`;
     await db.collection("OrganizeProposals").doc(proposalId).set({
       status: "generating",
@@ -885,7 +1037,7 @@ describe("organize chunk helpers", function() {
     expect(storedDoc.data()?.completedChunkIndices).to.deep.equal([0, 1]);
   });
 
-  it("DT00uac dispatches the next chunk batch only at batch boundaries", function() {
+  it("DT00uad dispatches the next chunk batch only at batch boundaries", function() {
     expect(getParallelBatchChunkIndexes(1, 12, 10)).to.deep.equal([]);
     expect(getParallelBatchChunkIndexes(10, 12, 10)).to.deep.equal([10, 11]);
     expect(getParallelBatchChunkIndexes(12, 12, 10)).to.deep.equal([]);

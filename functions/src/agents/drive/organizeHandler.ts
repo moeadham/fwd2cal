@@ -511,6 +511,96 @@ function buildOrganizeEmbeddedData(data: OrganizeEmbeddedData): string {
   return link;
 }
 
+type CanonicalRootFolder = {
+  prefix: string;
+  name: string;
+  description: string;
+  patterns: RegExp[];
+};
+
+const CANONICAL_ROOT_FOLDERS: CanonicalRootFolder[] = [
+  {
+    prefix: "01",
+    name: "Documents",
+    description: "Contracts, legal, medical, insurance, housing, vehicles",
+    patterns: [
+      /document|contract|legal|medical|health|insurance|policy/i,
+      /housing|home|property|lease|mortgage|vehicle|car|auto|registration/i,
+    ],
+  },
+  {
+    prefix: "02",
+    name: "Finance",
+    description: "Tax returns, invoices, receipts, bank statements, budgets",
+    patterns: [
+      /financ|tax|invoice|receipt|bank|budget|accounting|bill|payment/i,
+    ],
+  },
+  {
+    prefix: "03",
+    name: "Work",
+    description: "Employment, pay stubs, resumes, work projects, clients",
+    patterns: [/work|job|employ|career|resume|cv|pay.?stub|client|business|office/i],
+  },
+  {
+    prefix: "04",
+    name: "Media",
+    description: "Photos, videos, screenshots, creative assets",
+    patterns: [/photo|picture|image|video|camera|screenshot|media|film|movie/i],
+  },
+  {
+    prefix: "05",
+    name: "Projects",
+    description: "Side projects, hobbies, volunteer, creative work",
+    patterns: [/project|hobby|creative|volunteer|side|craft/i],
+  },
+  {
+    prefix: "06",
+    name: "Personal",
+    description: "Identity docs, vital records, family, correspondence",
+    patterns: [/personal|family|identity|passport|birth|vital|correspondence|letter/i],
+  },
+  {
+    prefix: "07",
+    name: "Education",
+    description: "Transcripts, diplomas, coursework, certifications, training",
+    patterns: [/educat|school|university|college|course|class|diploma|transcript|certif|training|learn/i],
+  },
+  {
+    prefix: "08",
+    name: "Travel",
+    description: "Itineraries, bookings, passport copies, visa docs",
+    patterns: [/travel|trip|vacation|flight|booking|itinerar|visa|hotel/i],
+  },
+  {
+    prefix: "09",
+    name: "Archive",
+    description: "Old/inactive files, completed projects, historical records",
+    patterns: [/archive|old|backup|legacy|completed|inactive/i],
+  },
+];
+
+function normalizeFolderNameForMatching(name: string): string {
+  return name
+      .replace(/^\d{2,3}\s*-\s*/, "")
+      .replace(/[_-]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+}
+
+function canonicalFolderPath(folder: CanonicalRootFolder): string {
+  return `${folder.prefix}-${folder.name}`;
+}
+
+function matchCanonicalRootFolder(name: string): CanonicalRootFolder | undefined {
+  const normalizedName = normalizeFolderNameForMatching(name);
+  return CANONICAL_ROOT_FOLDERS.find((folder) =>
+    normalizedName === folder.name.toLowerCase() ||
+    folder.patterns.some((matcher) => matcher.test(normalizedName)),
+  );
+}
+
 async function sendOrganizeProposalEmail(
     sender: string,
     email: TransformedEmail,
@@ -558,9 +648,9 @@ async function failOrganizeGeneration(
 }
 
 /**
- * Extract root-level folders from Drive, deduplicate by base name
- * (case-insensitive), normalize NNN prefix format, and assign
- * sequential prefixes.
+ * Seed the proposal with canonical root folders, map recognizable
+ * existing root folders into them, and preserve unmatched roots as
+ * numbered custom categories starting at 10.
  */
 function seedFoldersFromDrive(
     fileEntries: DriveFileEntry[],
@@ -573,57 +663,73 @@ function seedFoldersFromDrive(
       (f) => f.isFolder && f.parentPath === "My Drive",
   );
 
-  // Sort alphabetically for deterministic NNN assignment
   rootFolders.sort((a, b) => a.name.localeCompare(b.name));
 
-  const seedFolders: DriveOrganizeProposal["proposed_folders"] = [];
+  const seedFolders: DriveOrganizeProposal["proposed_folders"] = CANONICAL_ROOT_FOLDERS.map((folder) => ({
+    folder_path: canonicalFolderPath(folder),
+    description: folder.description,
+  }));
   const folderRenameActions: DriveOrganizeProposal["file_actions"] = [];
-
-  // Track seen base names (case-insensitive) to merge duplicates
-  const seenNames = new Map<string, string>(); // normalized → seed folder_path
-  let nextPrefix = 1;
+  const seededPaths = new Set(seedFolders.map((folder) => folder.folder_path));
+  const seenNames = new Map<string, string>();
+  let nextCustomPrefix = 10;
 
   for (const folder of rootFolders) {
-    // Strip any existing NNN prefix to get the base name
     const baseName = folder.name.replace(/^\d{2,3}\s*-\s*/, "").trim();
-    const normalizedName = baseName.toLowerCase();
-
-    // Duplicate (case-insensitive) — merge into the first occurrence
-    if (seenNames.has(normalizedName)) {
-      const targetFolderName = seenNames.get(normalizedName)!;
+    const normalizedFolderName = normalizeFolderNameForMatching(folder.name);
+    if (seenNames.has(normalizedFolderName)) {
+      const targetFolderName = seenNames.get(normalizedFolderName)!;
       folderRenameActions.push({
         file_id: folder.id,
         current_name: folder.name,
         current_path: "My Drive",
         new_name: targetFolderName,
         new_folder: "My Drive",
-        action: "rename",
+        action: targetFolderName === folder.name ? "keep" : "rename",
         reason: `Merged duplicate folder into "${targetFolderName}"`,
       });
       continue;
     }
 
-    const prefix = String(nextPrefix).padStart(2, "0");
-    nextPrefix++;
-    const newName = `${prefix}-${baseName}`;
+    const canonicalFolder = matchCanonicalRootFolder(folder.name);
+    if (canonicalFolder) {
+      const targetFolderPath = canonicalFolderPath(canonicalFolder);
+      seenNames.set(normalizedFolderName, targetFolderPath);
+      folderRenameActions.push({
+        file_id: folder.id,
+        current_name: folder.name,
+        current_path: "My Drive",
+        new_name: targetFolderPath,
+        new_folder: "My Drive",
+        action: folder.name === targetFolderPath ? "keep" : "rename",
+        reason: folder.name === targetFolderPath ?
+          "Already using canonical root category" :
+          `Mapped to canonical category ${targetFolderPath}`,
+      });
+      continue;
+    }
 
-    seenNames.set(normalizedName, newName);
-
-    seedFolders.push({
-      folder_path: newName,
-      description: `Existing folder "${folder.name}"`,
-    });
-
+    const customFolderPath =
+      `${String(nextCustomPrefix).padStart(2, "0")}-${toTitleCase(baseName)}`;
+    nextCustomPrefix++;
+    seenNames.set(normalizedFolderName, customFolderPath);
+    if (!seededPaths.has(customFolderPath)) {
+      seedFolders.push({
+        folder_path: customFolderPath,
+        description: `Existing folder "${folder.name}"`,
+      });
+      seededPaths.add(customFolderPath);
+    }
     folderRenameActions.push({
       file_id: folder.id,
       current_name: folder.name,
       current_path: "My Drive",
-      new_name: newName,
+      new_name: customFolderPath,
       new_folder: "My Drive",
-      action: folder.name === newName ? "keep" : "rename",
-      reason: folder.name === newName ?
+      action: folder.name === customFolderPath ? "keep" : "rename",
+      reason: folder.name === customFolderPath ?
         "Already correctly named" :
-        "Renamed with numerical prefix for consistency",
+        `Renamed unmatched folder with custom prefix ${customFolderPath}`,
     });
   }
 
@@ -1198,7 +1304,11 @@ async function processOrganizeChunk(
   try {
     const rawProposal = await getOrganizeProposal(proposalId);
     if (!rawProposal) {
-      throw new Error("Proposal not found");
+      logger.warn("Drive organize chunk: Proposal not found (likely deleted or expired)", {
+        proposalId,
+        chunkIndex,
+      });
+      return;
     }
     proposalDoc = rawProposal as unknown as OrganizeProposalDoc;
     if (proposalDoc.status !== "generating") {
@@ -1211,6 +1321,15 @@ async function processOrganizeChunk(
 
     const state = await getOrganizeIntermediateState(proposalId) as
       unknown as OrganizeIntermediateState;
+
+    if (!state.fileEntries) {
+      logger.warn("Drive organize chunk: Intermediate state missing fileEntries (proposal likely finalized)", {
+        proposalId,
+        chunkIndex,
+      });
+      return;
+    }
+
     const nonFolders = state.fileEntries.filter((f) => !f.isFolder);
     const chunks: DriveFileEntry[][] = [];
     for (let i = 0; i < nonFolders.length; i += state.chunkSize) {
@@ -2219,4 +2338,5 @@ export {
   signActionToken,
   mergeChunkProposalFolders,
   getParallelBatchChunkIndexes,
+  seedFoldersFromDrive,
 };
