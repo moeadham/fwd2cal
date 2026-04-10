@@ -77,6 +77,7 @@ import {
   buildChunkUserText,
   normalizeFolderPrefixes,
   mergeRevisedProposal,
+  renumberFoldersContiguously,
   reconcileFileActions,
   refineOrganizationProposal,
   backfillUncoveredFiles,
@@ -918,6 +919,7 @@ async function handleOrganizeRevision(
         proposalDoc.proposal!,
         revisedProposal,
     );
+    renumberFoldersContiguously(mergedProposal);
     const newCost = calculateOrganizeCostFromMimeMap(
         mergedProposal,
         proposalDoc.mimeMap || {},

@@ -488,6 +488,94 @@ function getFolderSegments(folderPath: string): string[] {
       .filter(Boolean);
 }
 
+function renumberFoldersContiguously(
+    proposal: DriveOrganizeProposal,
+): void {
+  const prefixedFolderPattern = /^(\d{2,3})-/;
+  const renameMap = new Map<string, string>();
+  const rootSegments = [...new Set(
+      proposal.proposed_folders
+          .map((folder) => getFolderSegments(folder.folder_path)[0])
+          .filter((segment): segment is string => Boolean(segment)),
+  )];
+  const prefixed = rootSegments
+      .filter((segment) => prefixedFolderPattern.test(segment))
+      .sort((left, right) => {
+        const leftPrefix = Number.parseInt(left.match(prefixedFolderPattern)![1], 10);
+        const rightPrefix = Number.parseInt(right.match(prefixedFolderPattern)![1], 10);
+        if (leftPrefix !== rightPrefix) {
+          return leftPrefix - rightPrefix;
+        }
+        return left.localeCompare(right);
+      });
+  const unprefixed = rootSegments
+      .filter((segment) => !prefixedFolderPattern.test(segment))
+      .sort((left, right) =>
+        left.localeCompare(right, undefined, {sensitivity: "base"}),
+      );
+  const orderedSegments = [...prefixed, ...unprefixed];
+
+  for (let index = 0; index < orderedSegments.length; index++) {
+    const segment = orderedSegments[index];
+    const newPrefix = String(index + 1).padStart(2, "0");
+    const renamed = `${newPrefix}-${segment.replace(prefixedFolderPattern, "")}`;
+    if (renamed !== segment) {
+      renameMap.set(segment, renamed);
+    }
+  }
+
+  if (renameMap.size === 0) {
+    const seenFolderPaths = new Set<string>();
+    proposal.proposed_folders = proposal.proposed_folders.filter((folder) => {
+      const normalizedPath = normalizeFolderPath(folder.folder_path);
+      if (!normalizedPath || seenFolderPaths.has(normalizedPath)) {
+        return false;
+      }
+      folder.folder_path = normalizedPath;
+      seenFolderPaths.add(normalizedPath);
+      return true;
+    });
+    return;
+  }
+
+  for (const folder of proposal.proposed_folders) {
+    const segments = getFolderSegments(folder.folder_path);
+    if (segments.length === 0) {
+      continue;
+    }
+
+    const renamedRoot = renameMap.get(segments[0]);
+    if (renamedRoot) {
+      segments[0] = renamedRoot;
+    }
+    folder.folder_path = segments.join("/");
+  }
+
+  for (const action of proposal.file_actions) {
+    const segments = getFolderSegments(action.new_folder);
+    if (segments.length === 0) {
+      continue;
+    }
+
+    const renamedRoot = renameMap.get(segments[0]);
+    if (renamedRoot) {
+      segments[0] = renamedRoot;
+      action.new_folder = segments.join("/");
+    }
+  }
+
+  const seenFolderPaths = new Set<string>();
+  proposal.proposed_folders = proposal.proposed_folders.filter((folder) => {
+    const normalizedPath = normalizeFolderPath(folder.folder_path);
+    if (!normalizedPath || seenFolderPaths.has(normalizedPath)) {
+      return false;
+    }
+    folder.folder_path = normalizedPath;
+    seenFolderPaths.add(normalizedPath);
+    return true;
+  });
+}
+
 function getFolderSemanticSegments(folderPath: string): string[] {
   return getFolderSegments(folderPath).map((segment) => stripFolderPrefix(segment));
 }
@@ -988,6 +1076,7 @@ export {
   buildChunkUserText,
   renderFolderTreePlainText,
   normalizeFolderPrefixes,
+  renumberFoldersContiguously,
   mergeRevisedProposal,
   reconcileFileActions,
   backfillUncoveredFiles,

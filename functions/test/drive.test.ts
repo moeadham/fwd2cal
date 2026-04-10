@@ -26,6 +26,7 @@ import {
 import {extractDocumentImages} from "../src/util/documentParser";
 import {
   mergeRevisedProposal,
+  renumberFoldersContiguously,
   reconcileFileActions,
   refineOrganizationProposal,
   renderFolderTreePlainText,
@@ -225,6 +226,122 @@ describe("Webhook filtering", function() {
 
     expect(res).to.have.status(200);
     expect(res.body.message).to.equal("Automated reply, skipping");
+  });
+});
+
+describe("renumberFoldersContiguously", function() {
+  it("DT00r1 renumbers prefixed top-level folders without gaps", function() {
+    const proposal = makeOrganizeProposal(
+        ["1", "2", "3", "4"],
+        {
+          "1": "05-Projects",
+          "2": "06-Personal",
+          "3": "12-Important",
+          "4": "16-Trading",
+        },
+        ["05-Projects", "06-Personal", "12-Important", "16-Trading"],
+    );
+
+    renumberFoldersContiguously(proposal);
+
+    expect(proposal.proposed_folders.map((folder) => folder.folder_path))
+        .to.deep.equal(["01-Projects", "02-Personal", "03-Important", "04-Trading"]);
+    expect(proposal.file_actions.map((action) => action.new_folder))
+        .to.deep.equal(["01-Projects", "02-Personal", "03-Important", "04-Trading"]);
+  });
+
+  it("DT00r2 appends unprefixed folders alphabetically after prefixed folders", function() {
+    const proposal = makeOrganizeProposal(
+        ["1", "2", "3"],
+        {"1": "02-Foo", "2": "Bar", "3": "Apple"},
+        ["02-Foo", "Bar", "Apple"],
+    );
+
+    renumberFoldersContiguously(proposal);
+
+    expect(proposal.proposed_folders.map((folder) => folder.folder_path))
+        .to.deep.equal(["01-Foo", "02-Apple", "03-Bar"]);
+    expect(proposal.file_actions.map((action) => action.new_folder))
+        .to.deep.equal(["01-Foo", "03-Bar", "02-Apple"]);
+  });
+
+  it("DT00r3 leaves already-contiguous folders unchanged", function() {
+    const proposal = makeOrganizeProposal(
+        ["1", "2", "3"],
+        {"1": "01-A/Sub", "2": "02-B", "3": "03-C/Nested"},
+        ["01-A", "01-A/Sub", "02-B", "03-C", "03-C/Nested"],
+    );
+    const beforeFolders = proposal.proposed_folders.map((folder) => folder.folder_path);
+    const beforeActions = proposal.file_actions.map((action) => action.new_folder);
+
+    renumberFoldersContiguously(proposal);
+
+    expect(proposal.proposed_folders.map((folder) => folder.folder_path)).to.deep.equal(beforeFolders);
+    expect(proposal.file_actions.map((action) => action.new_folder)).to.deep.equal(beforeActions);
+  });
+
+  it("DT00r4 rewrites only the root segment for nested folders and actions", function() {
+    const proposal = makeOrganizeProposal(
+        ["1", "2"],
+        {
+          "1": "12-Important/Sub",
+          "2": "16-Trading/Nested/Deep",
+        },
+        ["12-Important", "12-Important/Sub", "16-Trading", "16-Trading/Nested/Deep"],
+    );
+
+    renumberFoldersContiguously(proposal);
+
+    expect(proposal.proposed_folders.map((folder) => folder.folder_path))
+        .to.deep.equal([
+          "01-Important",
+          "01-Important/Sub",
+          "02-Trading",
+          "02-Trading/Nested/Deep",
+        ]);
+    expect(proposal.file_actions.map((action) => action.new_folder))
+        .to.deep.equal(["01-Important/Sub", "02-Trading/Nested/Deep"]);
+  });
+
+  it("DT00r5 keeps distinct folders when prefixed and unprefixed names converge", function() {
+    const proposal = makeOrganizeProposal(
+        ["1", "2"],
+        {"1": "Documents", "2": "01-Documents"},
+        ["Documents", "01-Documents"],
+    );
+
+    renumberFoldersContiguously(proposal);
+
+    expect(proposal.proposed_folders.map((folder) => folder.folder_path))
+        .to.deep.equal(["01-Documents", "02-Documents"]);
+    expect(proposal.file_actions.map((action) => action.new_folder))
+        .to.deep.equal(["02-Documents", "01-Documents"]);
+  });
+
+  it("DT00r6 leaves unrelated file action folders unchanged", function() {
+    const proposal = makeOrganizeProposal(
+        ["1"],
+        {"1": "05-Projects"},
+        ["05-Projects"],
+    );
+    proposal.file_actions.push({
+      file_id: "2",
+      current_name: "unknown.pdf",
+      current_path: "Inbox",
+      new_name: "unknown.pdf",
+      new_folder: "99-Unknown",
+      action: "move",
+      reason: "Reason 2",
+    });
+
+    renumberFoldersContiguously(proposal);
+
+    expect(proposal.proposed_folders.map((folder) => folder.folder_path))
+        .to.deep.equal(["01-Projects"]);
+    expect(proposal.file_actions.find((action) => action.file_id === "1")?.new_folder)
+        .to.equal("01-Projects");
+    expect(proposal.file_actions.find((action) => action.file_id === "2")?.new_folder)
+        .to.equal("99-Unknown");
   });
 });
 
@@ -480,6 +597,7 @@ describe("mergeRevisedProposal", function() {
     expect(result.proposed_folders.map((folder) => folder.folder_path))
         .to.deep.equal([]);
   });
+
 });
 
 describe("reconcileFileActions", function() {

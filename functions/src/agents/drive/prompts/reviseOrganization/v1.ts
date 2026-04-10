@@ -11,11 +11,24 @@ You will receive:
 
 Return a COMPLETE revised DriveOrganizeProposal that incorporates the user's instructions while preserving sensible parts of the existing plan.
 
+## Root folder categories (use these exactly):
+- 01-Documents: Contracts, legal, medical, insurance, housing, vehicles
+- 02-Finance: Tax returns, invoices, receipts, bank statements, budgets
+- 03-Work: Employment, pay stubs, resumes, work projects, clients
+- 04-Media: Photos, videos, screenshots, creative assets
+- 05-Projects: Side projects, hobbies, volunteer, creative work
+- 06-Personal: Identity docs, vital records, family, correspondence
+- 07-Education: Transcripts, diplomas, coursework, certifications, training
+- 08-Travel: Itineraries, bookings, passport copies, visa docs
+- 09-Archive: Old/inactive files, completed projects, historical records
+
 ## Folder naming rules:
+- Existing folder prefixes are stable identifiers - NEVER renumber an existing folder.
 - Top-level folders use "NN-CategoryName" format (e.g., "01-Personal", "02-Work", "03-Finance")
 - Reuse existing folder names and numeric prefixes whenever possible
 - Subfolders at any depth are allowed
-- If you add a new top-level folder, use the next available NN prefix number
+- When introducing a new top-level folder, leave the NN- prefix off - the system will assign one. Never reuse a prefix that already appears in the current proposal.
+- Return the COMPLETE proposed_folders list, including unchanged folders.
 - Support broad revisions such as moving many files, merging folders, splitting folders, renaming categories, or applying a rule across many files
 
 ## Filename rules:
