@@ -439,7 +439,10 @@ function formatSummaryHtml(summary: string): string {
 /**
  * Render proposed folder tree as monospace HTML.
  */
-function renderFolderTree(proposal: DriveOrganizeProposal): string {
+function renderFolderTree(
+    proposal: DriveOrganizeProposal,
+    preservedRootPaths?: Set<string>,
+): string {
   type TreeNode = {
     children: Map<string, TreeNode>;
     fullPath: string;
@@ -487,16 +490,32 @@ function renderFolderTree(proposal: DriveOrganizeProposal): string {
     fileCounts.set(action.new_folder, (fileCounts.get(action.new_folder) || 0) + 1);
   }
 
-  function renderChildren(node: TreeNode, prefix: string): void {
+  function renderChildren(node: TreeNode, prefix: string, depth = 0): void {
     const children = [...node.children.entries()]
         .sort(([left], [right]) => left.localeCompare(right));
     for (let i = 0; i < children.length; i++) {
       const [segment, child] = children[i];
       const isLast = i === children.length - 1;
       const branch = isLast ? "└── " : "├── ";
+
+      if (depth === 0 && preservedRootPaths?.has(segment)) {
+        let totalCount = 0;
+        for (const [folderPath, count] of fileCounts.entries()) {
+          if (folderPath === child.fullPath || folderPath.startsWith(`${child.fullPath}/`)) {
+            totalCount += count;
+          }
+        }
+        tree += `${prefix}${branch}${segment}/&nbsp;&nbsp;(${totalCount} files, preserved)<br>`;
+        continue;
+      }
+
       const count = fileCounts.get(child.fullPath) || 0;
       tree += `${prefix}${branch}${segment}/&nbsp;&nbsp;(${count} files)<br>`;
-      renderChildren(child, `${prefix}${isLast ? "&nbsp;&nbsp;&nbsp;&nbsp;" : "│&nbsp;&nbsp;&nbsp;"}`);
+      renderChildren(
+          child,
+          `${prefix}${isLast ? "&nbsp;&nbsp;&nbsp;&nbsp;" : "│&nbsp;&nbsp;&nbsp;"}`,
+          depth + 1,
+      );
     }
   }
 
@@ -611,10 +630,11 @@ async function sendOrganizeProposalEmail(
     proposalId: string,
     proposal: DriveOrganizeProposal,
     cost: OrganizeCostBreakdown,
+    preservedRootPaths?: Set<string>,
 ): Promise<void> {
   const embeddedData: OrganizeEmbeddedData = {proposalId};
   const embeddedHtml = buildOrganizeEmbeddedData(embeddedData);
-  const folderTreeHtml = renderFolderTree(proposal);
+  const folderTreeHtml = renderFolderTree(proposal, preservedRootPaths);
 
   const approveToken = signActionToken(proposalId, "approve");
   const approveLink = `${driveOrganizeActionUrl()}?proposalId=${proposalId}&action=approve&token=${approveToken}`;
@@ -922,7 +942,7 @@ async function handleOrganizeRevision(
     userInstructions: string,
 ): Promise<OrganizeProcessingResult> {
   try {
-    const revisedProposal = await reviseOrganization(
+    const {proposal: revisedProposal, preservedRootPaths} = await reviseOrganization(
         proposalDoc.proposal!,
         userInstructions,
         uid,
@@ -931,7 +951,7 @@ async function handleOrganizeRevision(
         proposalDoc.proposal!,
         revisedProposal,
     );
-    renumberFoldersContiguously(mergedProposal);
+    renumberFoldersContiguously(mergedProposal, preservedRootPaths);
     const newCost = calculateOrganizeCostFromMimeMap(
         mergedProposal,
         proposalDoc.mimeMap || {},
@@ -949,6 +969,7 @@ async function handleOrganizeRevision(
         proposalId,
         mergedProposal,
         newCost,
+        preservedRootPaths,
     );
 
     sendEvent(uid, "driveOrganizeRevised", "drive", {

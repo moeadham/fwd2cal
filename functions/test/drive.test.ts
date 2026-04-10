@@ -25,14 +25,16 @@ import {
 } from "./bindings/resendBindings";
 import {extractDocumentImages} from "../src/util/documentParser";
 import {
+  applyFolderOperations,
   mergeRevisedProposal,
+  normalizeFolderPrefixes,
   renumberFoldersContiguously,
   reconcileFileActions,
   refineOrganizationProposal,
   renderFolderTreePlainText,
 } from "../src/agents/drive/llm";
 import {ORGANIZE_DRIVE_CHUNK_SIZE} from "../src/agents/drive/config";
-import {DriveOrganizeProposal, MoveInstructionSchema} from "../src/agents/drive/types";
+import {DriveOrganizeProposal, FolderOperation, MoveInstructionSchema} from "../src/agents/drive/types";
 import {
   mergeChunkProposalFolders,
   getParallelBatchChunkIndexes,
@@ -601,6 +603,283 @@ describe("mergeRevisedProposal", function() {
         .to.deep.equal([]);
   });
 
+});
+
+describe("applyFolderOperations", function() {
+  function runOps(
+      proposal: DriveOrganizeProposal,
+      operations: FolderOperation[],
+      summary = "revised summary",
+  ): { proposal: DriveOrganizeProposal; preservedRootPaths: Set<string> } {
+    return applyFolderOperations(proposal, operations, summary);
+  }
+
+  it("DT00k rename cascades to file_actions and descendants", function() {
+    const proposal = makeOrganizeProposal(
+        ["1", "2"],
+        {"1": "03-Work", "2": "03-Work/Clients"},
+        ["03-Work", "03-Work/Clients"],
+    );
+    proposal.file_actions[0].action = "keep";
+    proposal.file_actions[1].action = "rename";
+
+    const result = runOps(proposal, [{
+      action: "rename",
+      path: null,
+      from: "03-Work",
+      to: "Business",
+      description: "Client and business documents",
+      into: null,
+      source_path: null,
+    }]);
+
+    expect(result.proposal.proposed_folders.map((folder) => folder.folder_path))
+        .to.deep.equal(["Business", "Business/Clients"]);
+    expect(result.proposal.proposed_folders[0].description).to.equal("Client and business documents");
+    expect(result.proposal.file_actions.map((action) => action.new_folder))
+        .to.deep.equal(["Business", "Business/Clients"]);
+    expect(result.proposal.file_actions.map((action) => action.action))
+        .to.deep.equal(["move", "move_and_rename"]);
+  });
+
+  it("DT00l merge moves files and prunes source", function() {
+    const proposal = makeOrganizeProposal(
+        ["1", "2"],
+        {"1": "07-Old", "2": "07-Old"},
+        ["07-Old", "09-Archive"],
+    );
+    proposal.file_actions.forEach((action) => {
+      action.action = "keep";
+    });
+
+    const result = runOps(proposal, [{
+      action: "merge",
+      path: null,
+      description: null,
+      from: "07-Old",
+      to: null,
+      into: "09-Archive",
+      source_path: null,
+    }]);
+
+    expect(result.proposal.file_actions.map((action) => action.new_folder))
+        .to.deep.equal(["09-Archive", "09-Archive"]);
+    expect(result.proposal.proposed_folders.map((folder) => folder.folder_path))
+        .to.deep.equal(["09-Archive"]);
+  });
+
+  it("DT00m merge preserves subpath", function() {
+    const proposal = makeOrganizeProposal(
+        ["1"],
+        {"1": "03-Work/Taxes"},
+        ["03-Work", "03-Work/Taxes", "09-Archive"],
+    );
+
+    const result = runOps(proposal, [{
+      action: "merge",
+      path: null,
+      description: null,
+      from: "03-Work",
+      to: null,
+      into: "09-Archive",
+      source_path: null,
+    }]);
+
+    expect(result.proposal.file_actions[0].new_folder).to.equal("09-Archive/Taxes");
+  });
+
+  it("DT00n create adds folder", function() {
+    const proposal = makeOrganizeProposal(["1"], {"1": "03-Work"}, ["03-Work"]);
+
+    const result = runOps(proposal, [{
+      action: "create",
+      path: "Travel",
+      description: "Trips and itineraries",
+      from: null,
+      to: null,
+      into: null,
+      source_path: null,
+    }]);
+
+    expect(result.proposal.proposed_folders.some((folder) => folder.folder_path === "Travel")).to.equal(true);
+  });
+
+  it("DT00o delete reverts files in non-empty folder", function() {
+    const proposal = makeOrganizeProposal(["1"], {"1": "04-Media"}, ["04-Media"]);
+
+    const result = runOps(proposal, [{
+      action: "delete",
+      path: "04-Media",
+      description: null,
+      from: null,
+      to: null,
+      into: null,
+      source_path: null,
+    }]);
+
+    expect(result.proposal.file_actions[0].action).to.equal("keep");
+    expect(result.proposal.file_actions[0].new_folder).to.equal("Inbox");
+    expect(result.proposal.file_actions[0].new_name).to.equal("file-1.pdf");
+    expect(result.proposal.proposed_folders.some((folder) => folder.folder_path === "04-Media")).to.equal(false);
+    expect(result.proposal.proposed_folders.some((folder) => folder.folder_path === "Inbox")).to.equal(true);
+  });
+
+  it("DT00p delete removes empty folder", function() {
+    const proposal = makeOrganizeProposal(["1"], {"1": "03-Work"}, ["03-Work", "04-Media"]);
+
+    const result = runOps(proposal, [{
+      action: "delete",
+      path: "04-Media",
+      description: null,
+      from: null,
+      to: null,
+      into: null,
+      source_path: null,
+    }]);
+
+    expect(result.proposal.proposed_folders.some((folder) => folder.folder_path === "04-Media")).to.equal(false);
+  });
+
+  it("DT00oa delete non-empty folder reverted folders not prefixed", function() {
+    const proposal = makeOrganizeProposal(["1"], {"1": "Others"}, ["Others"]);
+
+    const result = runOps(proposal, [{
+      action: "delete",
+      path: "Others",
+      description: null,
+      from: null,
+      to: null,
+      into: null,
+      source_path: null,
+    }]);
+
+    normalizeFolderPrefixes(result.proposal, result.preservedRootPaths);
+
+    expect(result.proposal.proposed_folders.some((folder) => folder.folder_path === "Inbox")).to.equal(true);
+    expect(result.proposal.proposed_folders.some((folder) => /^(\d{2,3})-Inbox$/.test(folder.folder_path))).to.equal(false);
+  });
+
+  it("DT00q preserve_source resets files to original location", function() {
+    const proposal = makeOrganizeProposal(
+        ["1", "2"],
+        {"1": "04-Media", "2": "04-Media"},
+        ["04-Media"],
+    );
+    proposal.file_actions[0].current_path = "VAULT/Sub";
+    proposal.file_actions[0].current_name = "original-a.pdf";
+    proposal.file_actions[0].new_name = "renamed-a.pdf";
+    proposal.file_actions[0].action = "move_and_rename";
+    proposal.file_actions[1].current_path = "Other";
+
+    const result = runOps(proposal, [{
+      action: "preserve_source",
+      path: null,
+      description: null,
+      from: null,
+      to: null,
+      into: null,
+      source_path: "VAULT",
+    }]);
+
+    expect(result.proposal.file_actions[0].new_folder).to.equal("VAULT/Sub");
+    expect(result.proposal.file_actions[0].new_name).to.equal("original-a.pdf");
+    expect(result.proposal.file_actions[0].action).to.equal("keep");
+    expect(result.proposal.proposed_folders.some((folder) => folder.folder_path === "VAULT")).to.equal(true);
+    expect(result.proposal.proposed_folders.some((folder) => folder.folder_path === "VAULT/Sub")).to.equal(true);
+  });
+
+  it("DT00qa preserve_source preserved folders not prefixed", function() {
+    const proposal = makeOrganizeProposal(
+        ["1"],
+        {"1": "04-Media"},
+        ["04-Media"],
+    );
+    proposal.file_actions[0].current_path = "VAULT/Sub";
+
+    const result = runOps(proposal, [{
+      action: "preserve_source",
+      path: null,
+      description: null,
+      from: null,
+      to: null,
+      into: null,
+      source_path: "VAULT",
+    }]);
+
+    normalizeFolderPrefixes(result.proposal, result.preservedRootPaths);
+
+    expect(result.proposal.proposed_folders.some((folder) => folder.folder_path === "VAULT")).to.equal(true);
+    expect(result.proposal.proposed_folders.some((folder) => folder.folder_path === "VAULT/Sub")).to.equal(true);
+    expect(result.proposal.proposed_folders.some((folder) => /^(\d{2,3})-VAULT$/.test(folder.folder_path))).to.equal(false);
+  });
+
+  it("DT00r operation ordering matters", function() {
+    const proposal = makeOrganizeProposal(
+        ["1", "2"],
+        {"1": "03-Work/Clients", "2": "06-Personal"},
+        ["03-Work", "03-Work/Clients", "06-Personal"],
+    );
+
+    const result = runOps(proposal, [
+      {action: "rename", path: null, from: "03-Work", to: "Business", description: null, into: null, source_path: null},
+      {action: "merge", path: null, description: null, from: "06-Personal", to: null, into: "Business", source_path: null},
+    ]);
+
+    expect(result.proposal.file_actions.find((action) => action.file_id === "1")?.new_folder)
+        .to.equal("Business/Clients");
+    expect(result.proposal.file_actions.find((action) => action.file_id === "2")?.new_folder)
+        .to.equal("Business");
+  });
+
+  it("DT00s prune removes unreferenced folders", function() {
+    const proposal = makeOrganizeProposal(
+        ["1"],
+        {"1": "09-Archive"},
+        ["03-Work", "09-Archive", "13-Pavonis"],
+    );
+
+    const result = runOps(proposal, [{
+      action: "merge",
+      path: null,
+      description: null,
+      from: "03-Work",
+      to: null,
+      into: "09-Archive",
+      source_path: null,
+    }]);
+
+    expect(result.proposal.proposed_folders.some((folder) => folder.folder_path === "13-Pavonis")).to.equal(false);
+  });
+
+  it("DT00ka rename description only updates target folder", function() {
+    const proposal = makeOrganizeProposal(
+        ["1", "2", "3"],
+        {"1": "03-Work", "2": "03-Work/Clients", "3": "09-Archive"},
+        ["03-Work", "03-Work/Clients", "09-Archive"],
+    );
+    proposal.proposed_folders = [
+      {folder_path: "03-Work", description: "Work root"},
+      {folder_path: "03-Work/Clients", description: "Client folders"},
+      {folder_path: "09-Archive", description: "Archive root"},
+    ];
+
+    const result = runOps(proposal, [{
+      action: "rename",
+      path: null,
+      from: "03-Work",
+      to: "Business",
+      description: "Biz docs",
+      into: null,
+      source_path: null,
+    }]);
+
+    expect(result.proposal.proposed_folders.find((folder) => folder.folder_path === "Business")?.description)
+        .to.equal("Biz docs");
+    expect(result.proposal.proposed_folders.find((folder) => folder.folder_path === "Business/Clients")?.description)
+        .to.equal("Client folders");
+    expect(result.proposal.proposed_folders.find((folder) => folder.folder_path === "09-Archive")?.description)
+        .to.equal("Archive root");
+  });
 });
 
 describe("reconcileFileActions", function() {

@@ -10,7 +10,10 @@ import {
   DriveEmbeddedFileData,
   DriveOrganizeProposalSchema,
   DriveOrganizeProposal,
+  DriveOrganizeRevisionSchema,
+  DriveOrganizeRevision,
   DriveFileEntry,
+  FolderOperation,
   FileInfo,
 } from "./types";
 import {ChatMessage, TextContent, ImageURLContent} from "../../util/types";
@@ -252,31 +255,13 @@ async function reviseOrganization(
     currentProposal: DriveOrganizeProposal,
     userInstructions: string,
     uid: string | null = null,
-): Promise<DriveOrganizeProposal> {
+): Promise<{ proposal: DriveOrganizeProposal; preservedRootPaths: Set<string> }> {
   const {prompts, versions} = getPrompts();
-  let userText = `## User Requested Changes\n${userInstructions}\n\n`;
-
-  userText += `## Current Proposed Folders\n`;
-  if (currentProposal.proposed_folders.length > 0) {
-    for (const folder of currentProposal.proposed_folders) {
-      userText += `- ${folder.folder_path}: ${folder.description}\n`;
-    }
-  } else {
-    userText += "(none)\n";
-  }
-
-  userText += `\n## Current File Actions\n`;
-  if (currentProposal.file_actions.length > 0) {
-    for (const action of currentProposal.file_actions) {
-      userText += `- [${action.file_id}] "${action.current_name}" from "${action.current_path}"` +
-        ` -> "${action.new_folder}/${action.new_name}" (${action.action})` +
-        ` reason: ${action.reason}\n`;
-    }
-  } else {
-    userText += "(none)\n";
-  }
-
-  userText += `\n## Current Summary\n${currentProposal.summary}\n`;
+  const proposedTree = renderFolderTreePlainText(currentProposal);
+  const originalTree = renderOriginalFolderTree(currentProposal);
+  const userText = `## User Requested Changes\n${userInstructions}\n\n` +
+    `## Current Proposed Folder Tree\n${proposedTree}\n\n` +
+    `## Original Drive Folder Tree\n${originalTree}\n`;
 
   const messages: ChatMessage[] = [
     {role: "system", content: prompts.reviseOrganization.prompt},
@@ -289,18 +274,29 @@ async function reviseOrganization(
     userTextLength: userText.length,
   });
 
-  const result = await defaultCompletion<DriveOrganizeProposal>(
+  const result = await defaultCompletion<DriveOrganizeRevision>(
       messages,
       prompts.reviseOrganization.model,
       prompts.reviseOrganization.temperature ?? DEFAULT_TEMP,
-      DriveOrganizeProposalSchema,
+      DriveOrganizeRevisionSchema,
       uid,
       {promptVersion: versions.PROMPT_REVISE_ORGANIZATION_VERSION},
-  );
+  ) as DriveOrganizeRevision;
 
-  const revisedProposal = result as DriveOrganizeProposal;
-  normalizeFolderPrefixes(revisedProposal);
-  return revisedProposal;
+  logger.info("Drive organize revision result", {
+    fileActions: currentProposal.file_actions.length,
+    proposedFolders: currentProposal.proposed_folders.length,
+    userTextLength: userText.length,
+    operationsCount: result.folder_operations.length,
+  });
+
+  const {proposal: revisedProposal, preservedRootPaths} = applyFolderOperations(
+      currentProposal,
+      result.folder_operations,
+      result.summary,
+  );
+  normalizeFolderPrefixes(revisedProposal, preservedRootPaths);
+  return {proposal: revisedProposal, preservedRootPaths};
 }
 
 /**
@@ -400,11 +396,70 @@ function renderFolderTreePlainText(proposal: DriveOrganizeProposal): string {
   return tree.trimEnd();
 }
 
+function renderOriginalFolderTree(proposal: DriveOrganizeProposal): string {
+  type TreeNode = {
+    children: Map<string, TreeNode>;
+    fullPath: string;
+  };
+
+  let tree = "My Drive\n";
+  const root: TreeNode = {
+    children: new Map<string, TreeNode>(),
+    fullPath: "",
+  };
+  const fileCounts = new Map<string, number>();
+
+  for (const action of proposal.file_actions) {
+    const normalizedFolder = normalizeFolderPath(action.current_path || "My Drive") || "My Drive";
+    fileCounts.set(normalizedFolder, (fileCounts.get(normalizedFolder) || 0) + 1);
+  }
+
+  const uniquePaths = [...fileCounts.keys()]
+      .filter((folderPath) => folderPath && folderPath !== "My Drive")
+      .sort((a, b) => a.localeCompare(b));
+  if (uniquePaths.length === 0) {
+    return tree.trimEnd();
+  }
+
+  for (const folderPath of uniquePaths) {
+    let current = root;
+    let currentPath = "";
+    for (const segment of folderPath.split("/")) {
+      currentPath = currentPath ? `${currentPath}/${segment}` : segment;
+      let child = current.children.get(segment);
+      if (!child) {
+        child = {children: new Map<string, TreeNode>(), fullPath: currentPath};
+        current.children.set(segment, child);
+      }
+      current = child;
+    }
+  }
+
+  function renderChildren(node: TreeNode, prefix: string): void {
+    const children = [...node.children.entries()]
+        .sort(([left], [right]) => left.localeCompare(right));
+    for (let i = 0; i < children.length; i++) {
+      const [segment, child] = children[i];
+      const isLast = i === children.length - 1;
+      const branch = isLast ? "└── " : "├── ";
+      const count = fileCounts.get(child.fullPath) || 0;
+      tree += `${prefix}${branch}${segment}/  (${count} files)\n`;
+      renderChildren(child, `${prefix}${isLast ? "    " : "│   "}`);
+    }
+  }
+
+  renderChildren(root, "");
+  return tree.trimEnd();
+}
+
 /**
  * Ensure every top-level proposed folder has an NN-/NNN- prefix and
  * update any file action paths that reference renamed folders.
  */
-function normalizeFolderPrefixes(proposal: DriveOrganizeProposal): void {
+function normalizeFolderPrefixes(
+    proposal: DriveOrganizeProposal,
+    skipPaths?: Set<string>,
+): void {
   let maxPrefix = 0;
   const prefixedFolderPattern = /^(\d{2,3})-/;
 
@@ -425,6 +480,10 @@ function normalizeFolderPrefixes(proposal: DriveOrganizeProposal): void {
     }
 
     if (prefixedFolderPattern.test(folder.folder_path)) {
+      continue;
+    }
+
+    if (skipPaths?.has(folder.folder_path)) {
       continue;
     }
 
@@ -488,8 +547,275 @@ function getFolderSegments(folderPath: string): string[] {
       .filter(Boolean);
 }
 
+function promoteFolderChangeAction(
+    action: DriveOrganizeProposal["file_actions"][number]["action"],
+): DriveOrganizeProposal["file_actions"][number]["action"] {
+  if (action === "keep") {
+    return "move";
+  }
+  if (action === "rename") {
+    return "move_and_rename";
+  }
+  return action;
+}
+
+function applyFolderOperations(
+    original: DriveOrganizeProposal,
+    operations: FolderOperation[],
+    summary: string,
+): { proposal: DriveOrganizeProposal; preservedRootPaths: Set<string> } {
+  let proposedFolders = original.proposed_folders.map((folder) => ({
+    ...folder,
+    folder_path: normalizeFolderPath(folder.folder_path),
+  })).filter((folder) => Boolean(folder.folder_path));
+  const pinnedFolders = new Set<string>();
+  const preservedRootPaths = new Set<string>();
+  const fileActions = original.file_actions.map((action) => ({
+    ...action,
+    current_path: normalizeFolderPath(action.current_path || "My Drive") || "My Drive",
+    new_folder: normalizeFolderPath(action.new_folder),
+  }));
+
+  const folderIndex = new Map<string, DriveOrganizeProposal["proposed_folders"][number]>();
+  for (const folder of proposedFolders) {
+    if (!folderIndex.has(folder.folder_path)) {
+      folderIndex.set(folder.folder_path, folder);
+    }
+  }
+  proposedFolders = [...folderIndex.values()];
+
+  const rebuildFolderIndex = (): void => {
+    folderIndex.clear();
+    for (const folder of proposedFolders) {
+      folderIndex.set(folder.folder_path, folder);
+    }
+  };
+
+  const replaceFolderPaths = (
+      matcher: (folderPath: string) => string | null,
+  ): void => {
+    const nextFolders: typeof proposedFolders = [];
+    const seen = new Set<string>();
+    for (const folder of proposedFolders) {
+      const nextPath = matcher(folder.folder_path);
+      if (!nextPath) {
+        continue;
+      }
+      const normalizedPath = normalizeFolderPath(nextPath);
+      if (!normalizedPath || seen.has(normalizedPath)) {
+        continue;
+      }
+      const nextFolder = {
+        ...folder,
+        folder_path: normalizedPath,
+      };
+      nextFolders.push(nextFolder);
+      seen.add(normalizedPath);
+    }
+    proposedFolders = nextFolders;
+    rebuildFolderIndex();
+  };
+
+  const ensureFolder = (folderPath: string, description: string): void => {
+    const normalizedPath = normalizeFolderPath(folderPath);
+    if (!normalizedPath || folderIndex.has(normalizedPath)) {
+      return;
+    }
+    const folder = {
+      folder_path: normalizedPath,
+      description,
+    };
+    proposedFolders.push(folder);
+    folderIndex.set(normalizedPath, folder);
+  };
+
+  for (const operation of operations) {
+    if (operation.action === "create") {
+      const createdPath = normalizeFolderPath(operation.path || "");
+      ensureFolder(createdPath, operation.description || "");
+      if (createdPath) {
+        let currentPath = "";
+        for (const segment of getFolderSegments(createdPath)) {
+          currentPath = currentPath ? `${currentPath}/${segment}` : segment;
+          pinnedFolders.add(currentPath);
+        }
+      }
+      continue;
+    }
+
+    if (operation.action === "rename") {
+      const from = normalizeFolderPath(operation.from || "");
+      const to = normalizeFolderPath(operation.to || "");
+      if (!from || !to || from === to) {
+        continue;
+      }
+      if (!folderIndex.has(from)) {
+        logger.warn("Drive organize revision: rename source folder missing", {from, to});
+        continue;
+      }
+
+      replaceFolderPaths((folderPath) => {
+        if (folderPath === from) {
+          return to;
+        }
+        if (folderPath.startsWith(`${from}/`)) {
+          return `${to}${folderPath.slice(from.length)}`;
+        }
+        return folderPath;
+      });
+
+      for (const action of fileActions) {
+        if (action.new_folder === from) {
+          action.new_folder = to;
+        } else if (action.new_folder.startsWith(`${from}/`)) {
+          action.new_folder = `${to}${action.new_folder.slice(from.length)}`;
+        } else {
+          continue;
+        }
+        action.action = promoteFolderChangeAction(action.action);
+        action.reason = `Folder renamed: ${from} → ${to}`;
+      }
+      if (operation.description) {
+        const renamedFolder = folderIndex.get(to);
+        if (renamedFolder) {
+          renamedFolder.description = operation.description;
+        }
+      }
+      continue;
+    }
+
+    if (operation.action === "merge") {
+      const from = normalizeFolderPath(operation.from || "");
+      const into = normalizeFolderPath(operation.into || "");
+      if (!from || !into || from === into) {
+        logger.warn("Drive organize revision: merge skipped", {from, into});
+        continue;
+      }
+
+      ensureFolder(into, folderIndex.get(into)?.description || `Merged folder ${into}`);
+      replaceFolderPaths((folderPath) => {
+        if (folderPath === from) {
+          return into;
+        }
+        if (folderPath.startsWith(`${from}/`)) {
+          return `${into}${folderPath.slice(from.length)}`;
+        }
+        return folderPath;
+      });
+
+      for (const action of fileActions) {
+        if (action.new_folder === from) {
+          action.new_folder = into;
+        } else if (action.new_folder.startsWith(`${from}/`)) {
+          action.new_folder = `${into}${action.new_folder.slice(from.length)}`;
+        } else {
+          continue;
+        }
+        action.action = promoteFolderChangeAction(action.action);
+        action.reason = `Merged: ${from} → ${into}`;
+      }
+      continue;
+    }
+
+    if (operation.action === "delete") {
+      const folderPath = normalizeFolderPath(operation.path || "");
+      if (!folderPath) {
+        continue;
+      }
+      for (const action of fileActions) {
+        if (action.new_folder !== folderPath && !action.new_folder.startsWith(`${folderPath}/`)) {
+          continue;
+        }
+        action.new_folder = action.current_path;
+        action.new_name = action.current_name;
+        action.action = "keep";
+        action.reason = `Reverted: folder "${folderPath}" deleted by user revision`;
+
+        const segments = getFolderSegments(action.current_path);
+        let currentFolder = "";
+        for (const segment of segments) {
+          currentFolder = currentFolder ? `${currentFolder}/${segment}` : segment;
+          ensureFolder(currentFolder, "Reverted source folder");
+        }
+
+        const preservedRoot = segments[0];
+        if (preservedRoot && preservedRoot !== "My Drive") {
+          preservedRootPaths.add(preservedRoot);
+        }
+      }
+      proposedFolders = proposedFolders.filter((folder) =>
+        folder.folder_path !== folderPath && !folder.folder_path.startsWith(`${folderPath}/`),
+      );
+      rebuildFolderIndex();
+      continue;
+    }
+
+    if (operation.action === "preserve_source") {
+      const sourcePath = normalizeFolderPath(operation.source_path || "My Drive") || "My Drive";
+      const preservedFolders = new Set<string>();
+      for (const action of fileActions) {
+        const currentPath = normalizeFolderPath(action.current_path || "My Drive") || "My Drive";
+        if (currentPath !== sourcePath && !currentPath.startsWith(`${sourcePath}/`)) {
+          continue;
+        }
+        action.new_folder = currentPath;
+        action.new_name = action.current_name;
+        action.action = "keep";
+        action.reason = `Preserved by user: "${sourcePath}" left as-is`;
+        preservedFolders.add(currentPath);
+      }
+
+      for (const folderPath of preservedFolders) {
+        const segments = getFolderSegments(folderPath);
+        let currentFolder = "";
+        for (const segment of segments) {
+          currentFolder = currentFolder ? `${currentFolder}/${segment}` : segment;
+          ensureFolder(currentFolder, "Preserved source folder");
+        }
+      }
+
+      for (const folderPath of preservedFolders) {
+        const preservedRoot = getFolderSegments(folderPath)[0];
+        if (preservedRoot && preservedRoot !== "My Drive") {
+          preservedRootPaths.add(preservedRoot);
+        }
+      }
+    }
+  }
+
+  const referencedFolders = new Set<string>();
+  for (const action of fileActions) {
+    const folderPath = normalizeFolderPath(action.new_folder);
+    if (!folderPath) {
+      continue;
+    }
+    referencedFolders.add(folderPath);
+    let currentPath = "";
+    for (const segment of getFolderSegments(folderPath)) {
+      currentPath = currentPath ? `${currentPath}/${segment}` : segment;
+      referencedFolders.add(currentPath);
+    }
+  }
+
+  proposedFolders = proposedFolders.filter((folder) =>
+    referencedFolders.has(normalizeFolderPath(folder.folder_path)) ||
+    pinnedFolders.has(normalizeFolderPath(folder.folder_path)),
+  );
+  rebuildFolderIndex();
+
+  return {
+    proposal: {
+      proposed_folders: proposedFolders,
+      file_actions: fileActions,
+      summary,
+    },
+    preservedRootPaths,
+  };
+}
+
 function renumberFoldersContiguously(
     proposal: DriveOrganizeProposal,
+    skipPaths?: Set<string>,
 ): void {
   const prefixedFolderPattern = /^(\d{2,3})-/;
   const compareFolderPaths = (left: string, right: string): number => {
@@ -516,7 +842,7 @@ function renumberFoldersContiguously(
   const rootSegments = [...new Set(
       proposal.proposed_folders
           .map((folder) => getFolderSegments(folder.folder_path)[0])
-          .filter((segment): segment is string => Boolean(segment)),
+          .filter((segment): segment is string => Boolean(segment) && !skipPaths?.has(segment)),
   )];
   const prefixed = rootSegments
       .filter((segment) => prefixedFolderPattern.test(segment))
@@ -1102,6 +1428,7 @@ export {
   renumberFoldersContiguously,
   mergeRevisedProposal,
   reconcileFileActions,
+  applyFolderOperations,
   backfillUncoveredFiles,
   consolidateSummaries,
 };

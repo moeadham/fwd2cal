@@ -148,6 +148,28 @@ export const DriveOrganizeProposalSchema = z.object({
 
 export type DriveOrganizeProposal = z.infer<typeof DriveOrganizeProposalSchema>;
 
+export const FolderOperationSchema = z.object({
+  action: z.enum(["create", "rename", "merge", "delete", "preserve_source"]).describe(
+      "Folder operation type",
+  ),
+  path: z.string().nullable().describe("Folder path used by create/delete; otherwise null"),
+  description: z.string().nullable().describe("Folder description used by create/rename; otherwise null"),
+  from: z.string().nullable().describe("Source folder path used by rename/merge; otherwise null"),
+  to: z.string().nullable().describe("Destination folder path used by rename; otherwise null"),
+  into: z.string().nullable().describe("Destination folder path used by merge; otherwise null"),
+  source_path: z.string().nullable().describe("Original Drive folder path used by preserve_source; otherwise null"),
+});
+
+export const DriveOrganizeRevisionSchema = z.object({
+  folder_operations: z.array(FolderOperationSchema).describe(
+      "Ordered folder operations to apply to the current proposal",
+  ),
+  summary: z.string().describe("Brief natural-language summary of the revised changes"),
+});
+
+export type FolderOperation = z.infer<typeof FolderOperationSchema>;
+export type DriveOrganizeRevision = z.infer<typeof DriveOrganizeRevisionSchema>;
+
 export interface OrganizeChunkResult {
   chunkIndex: number;
   proposed_folders: DriveOrganizeProposal["proposed_folders"];
