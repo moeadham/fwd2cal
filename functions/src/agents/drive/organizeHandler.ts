@@ -13,6 +13,9 @@ import {
   saveOrganizeChunkResult,
   getOrganizeChunkResults,
   incrementOrganizeCompletedChunks,
+  claimChunkProcessing,
+  releaseChunkProcessing,
+  claimOrganizeProposalFinalization,
   finalizeOrganizeProposal,
   getOrganizeProposal,
   findGeneratingProposal,
@@ -797,6 +800,15 @@ async function finalizeChunkedProposal(
     proposalDoc: OrganizeProposalDoc,
     state: OrganizeIntermediateState,
 ): Promise<void> {
+  const claimedFinalization = await claimOrganizeProposalFinalization(proposalId);
+  if (!claimedFinalization) {
+    logger.info("Drive organize: Finalization already claimed, skipping", {
+      proposalId,
+      uid: proposalDoc.uid,
+    });
+    return;
+  }
+
   const chunkResults = (await getOrganizeChunkResults(
       proposalId,
       state.totalChunks,
@@ -1321,136 +1333,157 @@ async function processOrganizeChunk(
       return;
     }
 
-    const state = await getOrganizeIntermediateState(proposalId) as
-      unknown as OrganizeIntermediateState;
-
-    if (!state.fileEntries) {
-      logger.warn("Drive organize chunk: Intermediate state missing fileEntries (proposal likely finalized)", {
+    const claimedChunk = await claimChunkProcessing(proposalId, chunkIndex, 15);
+    if (!claimedChunk) {
+      logger.info("Drive organize chunk: Already being processed, skipping duplicate dispatch", {
         proposalId,
         chunkIndex,
       });
       return;
     }
 
-    const nonFolders = state.fileEntries.filter((f) => !f.isFolder);
-    const chunks: DriveFileEntry[][] = [];
-    for (let i = 0; i < nonFolders.length; i += state.chunkSize) {
-      chunks.push(nonFolders.slice(i, i + state.chunkSize));
-    }
+    try {
+      const state = await getOrganizeIntermediateState(proposalId) as
+        unknown as OrganizeIntermediateState;
 
-    const chunk = chunks[chunkIndex];
-    if (!chunk) {
-      logger.warn("Drive organize chunk: Missing chunk", {
-        proposalId,
-        chunkIndex,
-        totalChunks: chunks.length,
-      });
-      return;
-    }
-
-    const chunkResultFile = getStorage()
-        .bucket()
-        .file(getChunkResultPath(proposalId, chunkIndex));
-    const [chunkResultExists] = await chunkResultFile.exists();
-
-    if (!chunkResultExists) {
-      const {prompts, versions} = getPrompts();
-      const userText = buildChunkUserText(
-          state.driveStructureSummary,
-          state.seedFolders,
-          chunk,
-          chunkIndex,
-          chunks.length,
-          nonFolders.length,
-      );
-      const messages: ChatMessage[] = [
-        {role: "system", content: prompts.proposeOrganization.prompt},
-        {role: "user", content: userText},
-      ];
-
-      logger.info(`LLM organize chunk ${chunkIndex + 1}/${chunks.length}`, {
-        proposalId,
-        chunkFiles: chunk.length,
-        existingFolders: state.seedFolders.length,
-        userTextLength: userText.length,
-      });
-
-      const result = await defaultCompletion<DriveOrganizeProposal>(
-          messages,
-          prompts.proposeOrganization.model,
-          prompts.proposeOrganization.temperature ?? DEFAULT_TEMP,
-          DriveOrganizeProposalSchema,
-          uid,
-          {
-            maxTokens: 32768,
-            promptVersion: versions.PROMPT_PROPOSE_ORGANIZATION_VERSION,
-          },
-      );
-      const chunkProposal = result as DriveOrganizeProposal;
-      await saveOrganizeChunkResult(proposalId, chunkIndex, {
-        chunkIndex,
-        proposed_folders: chunkProposal.proposed_folders,
-        file_actions: chunkProposal.file_actions,
-        summary: chunkProposal.summary,
-      } as unknown as Record<string, unknown>);
-    } else {
-      logger.info("Drive organize chunk: Reusing existing chunk result", {
-        proposalId,
-        chunkIndex,
-      });
-    }
-
-    const newCompletedCount = await incrementOrganizeCompletedChunks(proposalId, chunkIndex);
-    if (newCompletedCount > state.totalChunks) {
-      logger.warn("Drive organize chunk: Completed chunk count exceeded total", {
-        proposalId,
-        chunkIndex,
-        newCompletedCount,
-        totalChunks: state.totalChunks,
-      });
-      return;
-    }
-
-    const latestProposal = await getOrganizeProposal(proposalId);
-    if (!latestProposal || latestProposal.status !== "generating") {
-      logger.info("Drive organize chunk: Proposal finalized while chunk was running", {
-        proposalId,
-        chunkIndex,
-        status: latestProposal?.status,
-      });
-      return;
-    }
-
-    const heartbeat = new Date().toISOString();
-
-    await updateOrganizeProposalStatus(proposalId, "generating", {
-      currentChunk: newCompletedCount,
-      totalChunks: state.totalChunks,
-      generationStartedAt: heartbeat,
-      lastError: null,
-    });
-
-    const nextBatchChunkIndexes = getParallelBatchChunkIndexes(
-        newCompletedCount,
-        state.totalChunks,
-        state.parallelChunkLimit,
-    );
-    if (nextBatchChunkIndexes.length > 0) {
-      for (const nextChunkIndex of nextBatchChunkIndexes) {
-        await dispatchOrganizeChunkTask({
+      if (!state.fileEntries) {
+        logger.warn("Drive organize chunk: Intermediate state missing fileEntries (proposal likely finalized)", {
           proposalId,
-          emailId: proposalDoc.emailId,
-          uid,
-          chunkIndex: nextChunkIndex,
+          chunkIndex,
+        });
+        return;
+      }
+
+      const nonFolders = state.fileEntries.filter((f) => !f.isFolder);
+      const chunks: DriveFileEntry[][] = [];
+      for (let i = 0; i < nonFolders.length; i += state.chunkSize) {
+        chunks.push(nonFolders.slice(i, i + state.chunkSize));
+      }
+
+      const chunk = chunks[chunkIndex];
+      if (!chunk) {
+        logger.warn("Drive organize chunk: Missing chunk", {
+          proposalId,
+          chunkIndex,
+          totalChunks: chunks.length,
+        });
+        return;
+      }
+
+      const chunkResultFile = getStorage()
+          .bucket()
+          .file(getChunkResultPath(proposalId, chunkIndex));
+      const [chunkResultExists] = await chunkResultFile.exists();
+
+      if (!chunkResultExists) {
+        const {prompts, versions} = getPrompts();
+        const userText = buildChunkUserText(
+            state.driveStructureSummary,
+            state.seedFolders,
+            chunk,
+            chunkIndex,
+            chunks.length,
+            nonFolders.length,
+        );
+        const messages: ChatMessage[] = [
+          {role: "system", content: prompts.proposeOrganization.prompt},
+          {role: "user", content: userText},
+        ];
+
+        logger.info(`LLM organize chunk ${chunkIndex + 1}/${chunks.length}`, {
+          proposalId,
+          chunkFiles: chunk.length,
+          existingFolders: state.seedFolders.length,
+          userTextLength: userText.length,
+        });
+
+        const result = await defaultCompletion<DriveOrganizeProposal>(
+            messages,
+            prompts.proposeOrganization.model,
+            prompts.proposeOrganization.temperature ?? DEFAULT_TEMP,
+            DriveOrganizeProposalSchema,
+            uid,
+            {
+              maxTokens: 32768,
+              promptVersion: versions.PROMPT_PROPOSE_ORGANIZATION_VERSION,
+            },
+        );
+        const chunkProposal = result as DriveOrganizeProposal;
+        await saveOrganizeChunkResult(proposalId, chunkIndex, {
+          chunkIndex,
+          proposed_folders: chunkProposal.proposed_folders,
+          file_actions: chunkProposal.file_actions,
+          summary: chunkProposal.summary,
+        } as unknown as Record<string, unknown>);
+      } else {
+        logger.info("Drive organize chunk: Reusing existing chunk result", {
+          proposalId,
+          chunkIndex,
         });
       }
-    }
 
-    if (newCompletedCount === state.totalChunks) {
-      await finalizeChunkedProposal(email, proposalId, proposalDoc, state);
+      const {count: newCompletedCount, wasNew} = await incrementOrganizeCompletedChunks(proposalId, chunkIndex);
+      if (newCompletedCount > state.totalChunks) {
+        logger.warn("Drive organize chunk: Completed chunk count exceeded total", {
+          proposalId,
+          chunkIndex,
+          newCompletedCount,
+          totalChunks: state.totalChunks,
+        });
+        return;
+      }
+
+      const latestProposal = await getOrganizeProposal(proposalId);
+      if (!latestProposal || latestProposal.status !== "generating") {
+        logger.info("Drive organize chunk: Proposal finalized while chunk was running", {
+          proposalId,
+          chunkIndex,
+          status: latestProposal?.status,
+        });
+        return;
+      }
+
+      const heartbeat = new Date().toISOString();
+
+      await updateOrganizeProposalStatus(proposalId, "generating", {
+        currentChunk: newCompletedCount,
+        totalChunks: state.totalChunks,
+        generationStartedAt: heartbeat,
+        lastError: null,
+      });
+
+      if (wasNew) {
+        const nextBatchChunkIndexes = getParallelBatchChunkIndexes(
+            newCompletedCount,
+            state.totalChunks,
+            state.parallelChunkLimit,
+        );
+        if (nextBatchChunkIndexes.length > 0) {
+          for (const nextChunkIndex of nextBatchChunkIndexes) {
+            await dispatchOrganizeChunkTask({
+              proposalId,
+              emailId: proposalDoc.emailId,
+              uid,
+              chunkIndex: nextChunkIndex,
+            });
+          }
+        }
+      }
+
+      if (wasNew && newCompletedCount === state.totalChunks) {
+        await finalizeChunkedProposal(email, proposalId, proposalDoc, state);
+        return;
+      }
       return;
+    } finally {
+      await releaseChunkProcessing(proposalId, chunkIndex).catch((err) => {
+        logger.warn("Drive organize chunk: Failed to release lock", {
+          proposalId,
+          chunkIndex,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
     }
-    return;
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     logger.error("Drive organize chunk: Failed", {

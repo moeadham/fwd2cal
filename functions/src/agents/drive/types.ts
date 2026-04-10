@@ -198,6 +198,8 @@ export interface OrganizeProposalDoc {
   currentChunk?: number;
   completedChunkIndices?: number[];
   totalChunks?: number;
+  proposalEmailSentAt?: string;
+  processingChunks?: Record<string, string>;
 }
 
 // Snapshot for undo (stored in Firestore)

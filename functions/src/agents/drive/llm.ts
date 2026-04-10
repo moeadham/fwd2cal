@@ -492,6 +492,26 @@ function renumberFoldersContiguously(
     proposal: DriveOrganizeProposal,
 ): void {
   const prefixedFolderPattern = /^(\d{2,3})-/;
+  const compareFolderPaths = (left: string, right: string): number => {
+    const leftSegments = getFolderSegments(left);
+    const rightSegments = getFolderSegments(right);
+    const leftRoot = leftSegments[0] || "";
+    const rightRoot = rightSegments[0] || "";
+    const leftPrefix = leftRoot.match(prefixedFolderPattern);
+    const rightPrefix = rightRoot.match(prefixedFolderPattern);
+
+    if (leftPrefix && rightPrefix) {
+      const leftValue = Number.parseInt(leftPrefix[1], 10);
+      const rightValue = Number.parseInt(rightPrefix[1], 10);
+      if (leftValue !== rightValue) {
+        return leftValue - rightValue;
+      }
+    } else if (leftPrefix || rightPrefix) {
+      return leftPrefix ? -1 : 1;
+    }
+
+    return left.localeCompare(right, undefined, {sensitivity: "base"});
+  };
   const renameMap = new Map<string, string>();
   const rootSegments = [...new Set(
       proposal.proposed_folders
@@ -574,6 +594,9 @@ function renumberFoldersContiguously(
     seenFolderPaths.add(normalizedPath);
     return true;
   });
+  proposal.proposed_folders.sort((left, right) =>
+    compareFolderPaths(left.folder_path, right.folder_path),
+  );
 }
 
 function getFolderSemanticSegments(folderPath: string): string[] {

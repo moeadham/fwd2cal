@@ -359,12 +359,12 @@ async function getOrganizeChunkResults(
 async function incrementOrganizeCompletedChunks(
     proposalId: string,
     chunkIndex: number,
-): Promise<number> {
+): Promise<{count: number; wasNew: boolean}> {
   try {
     const docRef = getFirestore()
         .collection("OrganizeProposals")
         .doc(proposalId);
-    const newCount = await getFirestore().runTransaction(async (transaction) => {
+    const result = await getFirestore().runTransaction(async (transaction) => {
       const doc = await transaction.get(docRef);
       if (!doc.exists) {
         throw new Error("Organize proposal not found");
@@ -374,7 +374,7 @@ async function incrementOrganizeCompletedChunks(
         doc.data()?.completedChunkIndices as number[] :
         [];
       if (completedChunkIndices.includes(chunkIndex)) {
-        return completedChunkIndices.length;
+        return {count: completedChunkIndices.length, wasNew: false};
       }
 
       const nextCompletedChunkIndices = [...completedChunkIndices, chunkIndex].sort((a, b) => a - b);
@@ -382,11 +382,109 @@ async function incrementOrganizeCompletedChunks(
         completedChunkIndices: nextCompletedChunkIndices,
         completedChunks: nextCompletedChunkIndices.length,
       });
-      return nextCompletedChunkIndices.length;
+      return {count: nextCompletedChunkIndices.length, wasNew: true};
     });
-    return newCount;
+    return result;
   } catch (error) {
     logger.error("Database error in incrementOrganizeCompletedChunks:", error);
+    throw error;
+  }
+}
+
+async function claimChunkProcessing(
+    proposalId: string,
+    chunkIndex: number,
+    ttlMinutes: number,
+): Promise<boolean> {
+  try {
+    const docRef = getFirestore()
+        .collection("OrganizeProposals")
+        .doc(proposalId);
+    return await getFirestore().runTransaction(async (transaction) => {
+      const doc = await transaction.get(docRef);
+      if (!doc.exists) {
+        return false;
+      }
+
+      const processingChunks = doc.data()?.processingChunks &&
+        typeof doc.data()?.processingChunks === "object" ?
+        {...doc.data()?.processingChunks as Record<string, string>} :
+        {};
+      const key = String(chunkIndex);
+      const existingLock = processingChunks[key];
+      const existingLockTime = existingLock ? Date.parse(existingLock) : Number.NaN;
+      if (!Number.isNaN(existingLockTime) && existingLockTime > Date.now()) {
+        return false;
+      }
+
+      processingChunks[key] = new Date(Date.now() + ttlMinutes * 60_000).toISOString();
+      transaction.update(docRef, {processingChunks});
+      return true;
+    });
+  } catch (error) {
+    logger.error("Database error in claimChunkProcessing:", error);
+    throw error;
+  }
+}
+
+async function releaseChunkProcessing(
+    proposalId: string,
+    chunkIndex: number,
+): Promise<void> {
+  try {
+    const docRef = getFirestore()
+        .collection("OrganizeProposals")
+        .doc(proposalId);
+    await getFirestore().runTransaction(async (transaction) => {
+      const doc = await transaction.get(docRef);
+      if (!doc.exists) {
+        return;
+      }
+
+      const processingChunks = doc.data()?.processingChunks &&
+        typeof doc.data()?.processingChunks === "object" ?
+        {...doc.data()?.processingChunks as Record<string, string>} :
+        {};
+      const key = String(chunkIndex);
+      if (!(key in processingChunks)) {
+        return;
+      }
+
+      delete processingChunks[key];
+      transaction.update(docRef, {processingChunks});
+    });
+  } catch (error) {
+    logger.error("Database error in releaseChunkProcessing:", error);
+    throw error;
+  }
+}
+
+async function claimOrganizeProposalFinalization(
+    proposalId: string,
+): Promise<boolean> {
+  try {
+    const docRef = getFirestore()
+        .collection("OrganizeProposals")
+        .doc(proposalId);
+    return await getFirestore().runTransaction(async (transaction) => {
+      const doc = await transaction.get(docRef);
+      if (!doc.exists) {
+        throw new Error("Organize proposal not found");
+      }
+
+      const data = doc.data() || {};
+      if (data.proposalEmailSentAt) {
+        return false;
+      }
+      if (data.status !== "generating") {
+        return false;
+      }
+
+      transaction.update(docRef, {proposalEmailSentAt: new Date().toISOString()});
+      return true;
+    });
+  } catch (error) {
+    logger.error("Database error in claimOrganizeProposalFinalization:", error);
     throw error;
   }
 }
@@ -644,6 +742,9 @@ export {
   saveOrganizeChunkResult,
   getOrganizeChunkResults,
   incrementOrganizeCompletedChunks,
+  claimChunkProcessing,
+  releaseChunkProcessing,
+  claimOrganizeProposalFinalization,
   finalizeOrganizeProposal,
   getOrganizeProposal,
   findGeneratingProposal,

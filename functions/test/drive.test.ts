@@ -41,6 +41,9 @@ import {
 import {defaultCompletion, setOpenAIClientForTest} from "../src/util/openai";
 import {
   getResumableOrganizeProposals,
+  claimChunkProcessing,
+  releaseChunkProcessing,
+  claimOrganizeProposalFinalization,
   incrementOrganizeCompletedChunks,
 } from "../src/util/firestoreHandler";
 
@@ -1148,11 +1151,168 @@ describe("organize chunk helpers", function() {
     const second = await incrementOrganizeCompletedChunks(proposalId, 1);
     const storedDoc = await db.collection("OrganizeProposals").doc(proposalId).get();
 
-    expect(first).to.equal(1);
-    expect(duplicate).to.equal(1);
-    expect(second).to.equal(2);
+    expect(first).to.deep.equal({count: 1, wasNew: true});
+    expect(duplicate).to.deep.equal({count: 1, wasNew: false});
+    expect(second).to.deep.equal({count: 2, wasNew: true});
     expect(storedDoc.data()?.completedChunks).to.equal(2);
     expect(storedDoc.data()?.completedChunkIndices).to.deep.equal([0, 1]);
+  });
+
+  it("DT00uae reports wasNew false when a completed chunk is replayed at totalChunks", async function() {
+    const proposalId = `chunk-counter-final-${Date.now()}`;
+    await db.collection("OrganizeProposals").doc(proposalId).set({
+      status: "generating",
+      completedChunks: 3,
+      completedChunkIndices: [0, 1, 2],
+      totalChunks: 3,
+    });
+
+    const result = await incrementOrganizeCompletedChunks(proposalId, 2);
+
+    expect(result).to.deep.equal({count: 3, wasNew: false});
+  });
+
+  it("DT00uaf claims a chunk lock on first processing attempt", async function() {
+    const proposalId = `chunk-lock-${Date.now()}`;
+    await db.collection("OrganizeProposals").doc(proposalId).set({status: "generating"});
+
+    const claimed = await claimChunkProcessing(proposalId, 5, 15);
+    const storedDoc = await db.collection("OrganizeProposals").doc(proposalId).get();
+    const lockValue = storedDoc.data()?.processingChunks?.["5"];
+
+    expect(claimed).to.equal(true);
+    expect(lockValue).to.be.a("string");
+    expect(Date.parse(lockValue)).to.be.greaterThan(Date.now());
+  });
+
+  it("DT00uag rejects a duplicate chunk lock claim", async function() {
+    const proposalId = `chunk-lock-dup-${Date.now()}`;
+    await db.collection("OrganizeProposals").doc(proposalId).set({status: "generating"});
+
+    await claimChunkProcessing(proposalId, 5, 15);
+    const before = await db.collection("OrganizeProposals").doc(proposalId).get();
+    const duplicate = await claimChunkProcessing(proposalId, 5, 15);
+    const after = await db.collection("OrganizeProposals").doc(proposalId).get();
+
+    expect(duplicate).to.equal(false);
+    expect(after.data()?.processingChunks).to.deep.equal(before.data()?.processingChunks);
+  });
+
+  it("DT00uah allows distinct chunk lock claims to coexist", async function() {
+    const proposalId = `chunk-lock-multi-${Date.now()}`;
+    await db.collection("OrganizeProposals").doc(proposalId).set({status: "generating"});
+
+    const first = await claimChunkProcessing(proposalId, 5, 15);
+    const second = await claimChunkProcessing(proposalId, 6, 15);
+    const storedDoc = await db.collection("OrganizeProposals").doc(proposalId).get();
+
+    expect(first).to.equal(true);
+    expect(second).to.equal(true);
+    expect(storedDoc.data()?.processingChunks).to.have.keys(["5", "6"]);
+  });
+
+  it("DT00uai reclaims an expired chunk lock", async function() {
+    const proposalId = `chunk-lock-expired-${Date.now()}`;
+    await db.collection("OrganizeProposals").doc(proposalId).set({
+      status: "generating",
+      processingChunks: {"5": "2020-01-01T00:00:00.000Z"},
+    });
+
+    const claimed = await claimChunkProcessing(proposalId, 5, 15);
+    const storedDoc = await db.collection("OrganizeProposals").doc(proposalId).get();
+    const lockValue = storedDoc.data()?.processingChunks?.["5"];
+
+    expect(claimed).to.equal(true);
+    expect(lockValue).to.be.a("string");
+    expect(lockValue).to.not.equal("2020-01-01T00:00:00.000Z");
+    expect(Date.parse(lockValue)).to.be.greaterThan(Date.now());
+  });
+
+  it("DT00uaj grants exactly one chunk lock claim under contention", async function() {
+    const proposalId = `chunk-lock-race-${Date.now()}`;
+    await db.collection("OrganizeProposals").doc(proposalId).set({status: "generating"});
+
+    const results = await Promise.all([
+      claimChunkProcessing(proposalId, 5, 15),
+      claimChunkProcessing(proposalId, 5, 15),
+    ]);
+
+    expect(results.filter(Boolean)).to.have.length(1);
+    expect(results.filter((result) => !result)).to.have.length(1);
+  });
+
+  it("DT00uak releases an active chunk lock", async function() {
+    const proposalId = `chunk-lock-release-${Date.now()}`;
+    await db.collection("OrganizeProposals").doc(proposalId).set({
+      status: "generating",
+      processingChunks: {"5": "2099-01-01T00:00:00.000Z"},
+    });
+
+    await releaseChunkProcessing(proposalId, 5);
+    const storedDoc = await db.collection("OrganizeProposals").doc(proposalId).get();
+
+    expect(storedDoc.data()?.processingChunks).to.deep.equal({});
+  });
+
+  it("DT00ual ignores release requests for missing chunk locks", async function() {
+    const proposalId = `chunk-lock-missing-${Date.now()}`;
+    await db.collection("OrganizeProposals").doc(proposalId).set({status: "generating"});
+
+    await releaseChunkProcessing(proposalId, 5);
+    const storedDoc = await db.collection("OrganizeProposals").doc(proposalId).get();
+
+    expect(storedDoc.data()?.processingChunks).to.equal(undefined);
+  });
+
+  it("DT00uam claims finalization once for a generating proposal", async function() {
+    const proposalId = `finalization-claim-${Date.now()}`;
+    await db.collection("OrganizeProposals").doc(proposalId).set({status: "generating"});
+
+    const claimed = await claimOrganizeProposalFinalization(proposalId);
+    const storedDoc = await db.collection("OrganizeProposals").doc(proposalId).get();
+    const sentAt = storedDoc.data()?.proposalEmailSentAt;
+
+    expect(claimed).to.equal(true);
+    expect(sentAt).to.be.a("string");
+    expect(Number.isNaN(Date.parse(sentAt))).to.equal(false);
+  });
+
+  it("DT00uan rejects duplicate finalization claims", async function() {
+    const proposalId = `finalization-dup-${Date.now()}`;
+    await db.collection("OrganizeProposals").doc(proposalId).set({
+      status: "generating",
+      proposalEmailSentAt: "2026-04-10T00:00:00.000Z",
+    });
+
+    const claimed = await claimOrganizeProposalFinalization(proposalId);
+    const storedDoc = await db.collection("OrganizeProposals").doc(proposalId).get();
+
+    expect(claimed).to.equal(false);
+    expect(storedDoc.data()?.proposalEmailSentAt).to.equal("2026-04-10T00:00:00.000Z");
+  });
+
+  it("DT00uao rejects finalization claims when the proposal is not generating", async function() {
+    const proposalId = `finalization-status-${Date.now()}`;
+    await db.collection("OrganizeProposals").doc(proposalId).set({status: "pending"});
+
+    const claimed = await claimOrganizeProposalFinalization(proposalId);
+    const storedDoc = await db.collection("OrganizeProposals").doc(proposalId).get();
+
+    expect(claimed).to.equal(false);
+    expect(storedDoc.data()?.proposalEmailSentAt).to.equal(undefined);
+  });
+
+  it("DT00uap grants exactly one finalization claim under contention", async function() {
+    const proposalId = `finalization-race-${Date.now()}`;
+    await db.collection("OrganizeProposals").doc(proposalId).set({status: "generating"});
+
+    const results = await Promise.all([
+      claimOrganizeProposalFinalization(proposalId),
+      claimOrganizeProposalFinalization(proposalId),
+    ]);
+
+    expect(results.filter(Boolean)).to.have.length(1);
+    expect(results.filter((result) => !result)).to.have.length(1);
   });
 
   it("DT00uad dispatches the next chunk batch only at batch boundaries", function() {
