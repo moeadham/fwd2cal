@@ -67,6 +67,7 @@ async function getDriveFolderTree(
   }
 
   // Compute full paths recursively
+  /** Assigns display paths to Drive folders during tree construction. */
   function computePaths(node: DriveFolder, parentPath: string): void {
     node.path = parentPath ? `${parentPath}/${node.name}` : node.name;
     for (const child of node.children) {

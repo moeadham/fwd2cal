@@ -28,6 +28,7 @@ const RefineOrganizationResultSchema = z.object({
   summary: z.string(),
 });
 
+/** Formats one folder path segment for display. */
 function titleCaseFolderSegment(segment: string): string {
   const trimmed = segment.trim().replace(/^["']|["']$/g, "");
   const prefixMatch = trimmed.match(/^(\d{2,3}-)(.*)$/);
@@ -40,6 +41,7 @@ function titleCaseFolderSegment(segment: string): string {
   return prefixMatch ? `${prefixMatch[1]}${titled}` : titled;
 }
 
+/** Attempts a cheap parse of simple move instructions before using the LLM. */
 function tryFastParseMoveInstructions(
     replyText: string,
     currentFiles: DriveEmbeddedFileData[],
@@ -336,6 +338,7 @@ function buildChunkUserText(
   return userText;
 }
 
+/** Renders a proposal folder tree as plain text for prompt context. */
 function renderFolderTreePlainText(proposal: DriveOrganizeProposal): string {
   type TreeNode = {
     children: Map<string, TreeNode>;
@@ -381,6 +384,7 @@ function renderFolderTreePlainText(proposal: DriveOrganizeProposal): string {
     fileCounts.set(normalizedFolder, (fileCounts.get(normalizedFolder) || 0) + 1);
   }
 
+  /** Renders child tree nodes into the surrounding tree output. */
   function renderChildren(node: TreeNode, prefix: string): void {
     const children = [...node.children.entries()]
         .sort(([left], [right]) => left.localeCompare(right));
@@ -398,6 +402,7 @@ function renderFolderTreePlainText(proposal: DriveOrganizeProposal): string {
   return tree.trimEnd();
 }
 
+/** Renders the original proposal folder tree for revision prompts. */
 function renderOriginalFolderTree(proposal: DriveOrganizeProposal): string {
   type TreeNode = {
     children: Map<string, TreeNode>;
@@ -437,6 +442,7 @@ function renderOriginalFolderTree(proposal: DriveOrganizeProposal): string {
     }
   }
 
+  /** Renders child tree nodes into the surrounding tree output. */
   function renderChildren(node: TreeNode, prefix: string): void {
     const children = [...node.children.entries()]
         .sort(([left], [right]) => left.localeCompare(right));
@@ -531,6 +537,7 @@ function normalizeFolderPrefixes(
   }
 }
 
+/** Normalizes folder paths for comparison. */
 function normalizeFolderPath(folderPath: string): string {
   return folderPath
       .split("/")
@@ -539,16 +546,19 @@ function normalizeFolderPath(folderPath: string): string {
       .join("/");
 }
 
+/** Removes a numeric prefix from a folder path segment. */
 function stripFolderPrefix(segment: string): string {
   return segment.replace(/^\d{2,3}-/, "");
 }
 
+/** Splits a normalized folder path into path segments. */
 function getFolderSegments(folderPath: string): string[] {
   return normalizeFolderPath(folderPath)
       .split("/")
       .filter(Boolean);
 }
 
+/** Promotes folder-level changes into file-action entries. */
 function promoteFolderChangeAction(
     action: DriveOrganizeProposal["file_actions"][number]["action"],
 ): DriveOrganizeProposal["file_actions"][number]["action"] {
@@ -561,6 +571,7 @@ function promoteFolderChangeAction(
   return action;
 }
 
+/** Applies folder-level operations to a proposal before reconciliation. */
 function applyFolderOperations(
     original: DriveOrganizeProposal,
     operations: FolderOperation[],
@@ -829,6 +840,7 @@ function applyFolderOperations(
   };
 }
 
+/** Renumbers proposal folders while preserving requested roots. */
 function renumberFoldersContiguously(
     proposal: DriveOrganizeProposal,
     skipPaths?: Set<string>,
@@ -941,10 +953,12 @@ function renumberFoldersContiguously(
   );
 }
 
+/** Returns folder segments without numeric prefixes for semantic matching. */
 function getFolderSemanticSegments(folderPath: string): string[] {
   return getFolderSegments(folderPath).map((segment) => stripFolderPrefix(segment));
 }
 
+/** Counts matching path segments from the end of two paths. */
 function getSharedSuffixLength(left: string[], right: string[]): number {
   let count = 0;
   while (
@@ -957,6 +971,7 @@ function getSharedSuffixLength(left: string[], right: string[]): number {
   return count;
 }
 
+/** Counts matching path segments from the start of two paths. */
 function getSharedPrefixLength(left: string[], right: string[]): number {
   let count = 0;
   while (count < left.length && count < right.length && left[count] === right[count]) {
@@ -965,6 +980,7 @@ function getSharedPrefixLength(left: string[], right: string[]): number {
   return count;
 }
 
+/** Finds the revised folder path that best matches an original path. */
 function findClosestRevisedFolder(
     originalFolder: string,
     revisedFolders: string[],
@@ -993,6 +1009,27 @@ function findClosestRevisedFolder(
   return bestScore > 0 ? bestMatch : null;
 }
 
+/**
+ * Normalizes file action folder paths against the proposal folder set.
+ * Remaps mismatched folders by base name, numeric prefix, or closest semantic match, and auto-adds folders for keep
+ * actions that reference unknown existing folders.
+ *
+ * @example
+ * ```ts
+ * const proposal = {
+ *   proposed_folders: [{folder_path: "01-Documents", description: "Documents"}],
+ *   file_actions: [
+ *     {new_folder: "Documents", action: "move"},
+ *     {new_folder: "Client Uploads", action: "keep"},
+ *   ],
+ *   summary: "",
+ * };
+ *
+ * reconcileFileActions(proposal);
+ * // proposal.file_actions[0].new_folder === "01-Documents"
+ * // proposal.proposed_folders includes "Client Uploads"
+ * ```
+ */
 function reconcileFileActions(proposal: DriveOrganizeProposal): void {
   const normalizedFolders = new Set<string>();
   const folderDescriptions = new Map<string, string>();
@@ -1119,6 +1156,7 @@ function reconcileFileActions(proposal: DriveOrganizeProposal): void {
   });
 }
 
+/** Runs the refinement LLM over an organization proposal. */
 async function refineOrganizationProposal(
     proposal: DriveOrganizeProposal,
     uid: string | null = null,
@@ -1206,6 +1244,7 @@ async function refineOrganizationProposal(
   return refinedProposal;
 }
 
+/** Merges a revision proposal into the original proposal. */
 function mergeRevisedProposal(
     original: DriveOrganizeProposal,
     revised: DriveOrganizeProposal,
@@ -1263,6 +1302,7 @@ function mergeRevisedProposal(
   return merged;
 }
 
+/** Adds keep actions for files that were not covered by chunk results. */
 function backfillUncoveredFiles(
     nonFolders: DriveFileEntry[],
     allFileActions: DriveOrganizeProposal["file_actions"],
@@ -1292,6 +1332,7 @@ function backfillUncoveredFiles(
   return allFileActions;
 }
 
+/** Combines chunk summaries into a final proposal summary. */
 async function consolidateSummaries(
     summaries: string[],
     uid: string | null = null,

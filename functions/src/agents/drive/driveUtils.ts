@@ -376,6 +376,7 @@ export function findFolderByName(
     targetName: string,
 ): DriveFolder | null {
   const lower = targetName.toLowerCase();
+  /** Searches a Drive folder tree for the best matching folder. */
   function search(nodes: DriveFolder[]): DriveFolder | null {
     for (const node of nodes) {
       if (node.name.toLowerCase() === lower) return node;

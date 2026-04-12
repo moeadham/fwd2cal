@@ -7,6 +7,7 @@ import {Skill} from "../../../util/skills/types";
 let _skills: Skill[] | null = null;
 let _skillsContext: string | null = null;
 
+/** Returns all Drive-specific and shared skill definitions. */
 export function getSkills(): Skill[] {
   if (_skills === null) {
     const agentSkills = loadSkillsFromDir(path.join(__dirname));
@@ -19,6 +20,7 @@ export function getSkills(): Skill[] {
   return _skills;
 }
 
+/** Builds the Drive skill context text used by prompts. */
 export function getSkillsContext(): string {
   if (_skillsContext === null) {
     _skillsContext = generateSkillsContext(getSkills());

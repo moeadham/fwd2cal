@@ -8,6 +8,12 @@ for dir in src/agents/*/auth/; do
   cp "${dir}"*.json "lib/agents/${agent_name}/auth/" 2>/dev/null || true
 done
 
+# Copy admin HTML/CSS templates
+if [ -d "src/admin/templates" ]; then
+  mkdir -p "lib/admin/templates"
+  cp src/admin/templates/*.html src/admin/templates/*.css "lib/admin/templates/" 2>/dev/null || true
+fi
+
 # Copy SKILL.md files
 for dir in src/agents/calendar/skills/*/; do
   skill_name=$(basename "$dir")

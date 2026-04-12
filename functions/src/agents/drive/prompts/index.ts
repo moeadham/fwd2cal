@@ -31,6 +31,7 @@ import {
   VERSION_PARAM as CONSOLIDATE_SUMMARIES_VERSION_PARAM,
 } from "./consolidateSummaries";
 
+/** Returns the active Drive prompt set and version metadata. */
 function getPrompts(): { prompts: DrivePrompts; versions: Record<string, string> } {
   const proposeFilePlacement = resolvePrompt(
       PROPOSE_FILE_PLACEMENT_VERSION_PARAM,
