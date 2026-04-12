@@ -288,6 +288,8 @@ async function reviseOrganization(
     proposedFolders: currentProposal.proposed_folders.length,
     userTextLength: userText.length,
     operationsCount: result.folder_operations.length,
+    operations: result.folder_operations,
+    summary: result.summary,
   });
 
   const {proposal: revisedProposal, preservedRootPaths} = applyFolderOperations(
@@ -779,6 +781,20 @@ function applyFolderOperations(
         if (preservedRoot && preservedRoot !== "My Drive") {
           preservedRootPaths.add(preservedRoot);
         }
+      }
+    }
+  }
+
+  // Auto-detect previously preserved folders from file_actions so that
+  // subsequent revisions inherit preservation even when the LLM does not
+  // re-emit preserve_source or delete operations for them.
+  for (const action of fileActions) {
+    if (action.action === "keep" &&
+        (action.reason?.startsWith("Preserved by user:") ||
+         action.reason?.startsWith("Reverted:"))) {
+      const root = getFolderSegments(action.new_folder)[0];
+      if (root && root !== "My Drive") {
+        preservedRootPaths.add(root);
       }
     }
   }
