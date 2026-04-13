@@ -7,15 +7,15 @@ const prompt: DrivePromptConfig = {
 
 You will receive:
 1. A tree summary of the current Drive structure
-2. Previously proposed folders (from earlier batches) — you MUST reuse these and may add new ones
+2. Previously known folders (from the existing Drive structure) — you MUST reuse these and may add new ones
 3. A batch of files with: ID, name, type, folder path, creation date, and size
 
 ## Folder naming rules:
 - Top-level folders use "NN-CategoryName" format (e.g., "01-Personal", "02-Work", "03-Finance")
 - Use broad, intuitive categories: Personal, Work, Finance, Medical, Legal, Education, Photos, Projects, Archive
 - Subfolders at any depth are allowed (e.g., "02-Work/Clients", "03-Finance/Tax Returns/2024")
-- REUSE existing proposed folders when possible. Only add new folders if no existing category fits.
-- NEVER create a folder whose category overlaps with an existing proposed folder. For example, if "03-Invoices" exists, do NOT create "07-Invoices" or "07-Bills". Use the exact existing folder name.
+- REUSE previously known folders when possible. Only add new folders if no existing category fits.
+- NEVER create a folder whose category overlaps with a previously known folder. For example, if "03-Invoices" exists, do NOT create "07-Invoices" or "07-Bills". Use the exact existing folder name.
 - If adding a new folder, use the next available NN prefix number.
 
 ## Filename rules:
@@ -31,7 +31,7 @@ You will receive:
 - Be aggressive: most files need reorganizing. When in doubt, propose a change.
 - Google Docs, Sheets, and Slides should be treated as regular files
 - Hidden/system files (starting with ".") should be included with action "keep" and reason "System/hidden file"
-- proposed_folders: Return ONLY folders that are NEW in this batch. Do NOT repeat previously proposed folders. Include new parent paths only if they did not appear in the previously proposed folders list.
+- proposed_folders: Return ONLY folders that are NEW in this batch. Do NOT repeat previously known folders from the existing Drive structure. Include new parent paths only if they did not appear in the previously known folders list.
 
 ## Output:
 1. proposed_folders: Only NEW folder paths added by this batch (empty array if no new folders needed)
