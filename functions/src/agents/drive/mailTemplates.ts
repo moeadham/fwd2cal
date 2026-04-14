@@ -150,6 +150,106 @@ Once authorized, you can forward emails with attachments to <a href="mailto:driv
 %EMBEDDED_DATA%
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
   },
+  organizeFolderPreferences: {
+    html: `We scanned your Google Drive. Before proposing the folder structure, please confirm the folder naming style.
+<br><br>
+<b>Detected convention:</b> %DETECTED_CONVENTION%
+<br><br>
+<b>Suggested convention:</b> %SUGGESTED_CONVENTION%
+<br><br>
+<b>Folder examples:</b>
+<br>
+%FOLDER_EXAMPLES%
+<br>
+Reply &quot;approve&quot; to use this style, or reply with your preferred folder naming style.
+%EMBEDDED_DATA%
+<br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
+  },
+  organizePhase1aProposal: {
+    html: `%PHASE1A_HEADER%
+<br><br>
+<b>Convention:</b> %CONVENTION_SUMMARY%
+<br><br>
+<b>Summary:</b> %SUMMARY%
+<br><br>
+<div style="font-family:monospace;background:#f7f7f7;padding:16px;border-radius:8px;font-size:13px;line-height:1.6;">
+%FOLDER_TREE%
+</div>
+<br>
+Reply with changes, or reply &quot;approve&quot; to continue.
+%EMBEDDED_DATA%
+<br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
+  },
+  organizePhase1bProposal: {
+    html: `Here's how your existing folders could fit the proposed structure:
+<br><br>
+<b>Summary:</b> %SUMMARY%
+<br><br>
+<b>Directory moves:</b>
+<br><br>
+%DIRECTORY_MOVES%
+<br>
+Reply with changes, or reply &quot;approve&quot; to continue.
+%EMBEDDED_DATA%
+<br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
+  },
+  organizePhase1cProposal: {
+    html: `Here's the final folder structure:
+<br><br>
+<b>Summary:</b> %SUMMARY%
+<br><br>
+<div style="font-family:monospace;background:#f7f7f7;padding:16px;border-radius:8px;font-size:13px;line-height:1.6;">
+%FOLDER_TREE%
+</div>
+<br>
+<b>Added directories:</b>
+<br><br>
+%ADDED_DIRECTORIES%
+<br>
+Reply with changes, or reply &quot;approve&quot; to approve this final structure.
+%EMBEDDED_DATA%
+<br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
+  },
+  organizePhase2Proposal: {
+    html: `Let's use this filename convention:
+<br><br>
+<b>%FILENAME_CONVENTION%</b>
+<br><br>
+Examples:
+<br>
+%FILENAME_EXAMPLES%
+<br>
+Reply with changes, or reply &quot;approve&quot; to start generating file proposals.
+%EMBEDDED_DATA%
+<br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
+  },
+  organizeCostEstimate: {
+    html: `Here's the final check before organizing your Google Drive:
+<br><br>
+<b>Approved folder structure:</b>
+<br><br>
+<div style="font-family:monospace;background:#f7f7f7;padding:16px;border-radius:8px;font-size:13px;line-height:1.6;">
+%FOLDER_TREE%
+</div>
+<br>
+<b>Filename convention:</b> %FILENAME_CONVENTION%
+<br><br>
+Examples:
+<br>
+%FILENAME_EXAMPLES%
+<br><br>
+<b>%TOTAL_FILES% files scanned</b> &nbsp;|&nbsp; <b>%TEXT_FILES% text/doc files</b> &nbsp;|&nbsp; <b>%IMAGE_FILES% image files</b>
+<br><br>
+<b>Estimated cost:</b> %TOTAL_COST% (%TEXT_COST% text/doc processing | %IMAGE_COST% image processing)
+<br><br>
+<a href="%APPROVE_LINK%" style="display:inline-block; padding:10px 20px; margin:5px 0; background-color:#3498db; color:white; text-align:center; text-decoration:none; font-weight:bold; border-radius:5px; border:none; cursor:pointer;">Approve &amp; Organize</a>
+<br><br>
+<span style="color:#999;font-size:13px;">Or reply &quot;approve&quot; to this email.</span>
+<br>
+<span style="color:#999;font-size:13px;">Want changes? Reply with what you'd like to adjust.</span>
+%EMBEDDED_DATA%
+<br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
+  },
   organizeError: {
     html: `Sorry &mdash; there was an error while scanning your Google Drive. Please try again by sending another &quot;organize my drive&quot; email.
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,

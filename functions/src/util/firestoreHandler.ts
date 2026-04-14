@@ -126,6 +126,45 @@ async function updateUserTokens(
   }
 }
 
+async function saveDriveUserPreferences(
+    uid: string,
+    prefs: Record<string, unknown>,
+): Promise<void> {
+  try {
+    const docRef = getFirestore()
+        .collection(DRIVE_USERS_COLLECTION)
+        .doc(uid);
+    const doc = await docRef.get();
+    const existingPreferences = (doc.data()?.preferences || {}) as Record<string, unknown>;
+    await docRef.set({
+      preferences: {
+        ...existingPreferences,
+        ...prefs,
+      },
+    }, {merge: true});
+  } catch (error) {
+    logger.error(`Database error in saveDriveUserPreferences for uid ${uid}:`, error);
+    sendEvent(uid, "databaseError", "system", {operation: "saveDriveUserPreferences"});
+    throw error;
+  }
+}
+
+async function getDriveUserPreferences(
+    uid: string,
+): Promise<Record<string, unknown>> {
+  try {
+    const doc = await getFirestore()
+        .collection(DRIVE_USERS_COLLECTION)
+        .doc(uid)
+        .get();
+    return (doc.data()?.preferences || {}) as Record<string, unknown>;
+  } catch (error) {
+    logger.error(`Database error in getDriveUserPreferences for uid ${uid}:`, error);
+    sendEvent(uid, "databaseError", "system", {operation: "getDriveUserPreferences"});
+    throw error;
+  }
+}
+
 async function addUserEmailAddress(
     user: FirebaseUserRecord,
     emails: EmailItem[],
@@ -243,8 +282,6 @@ async function deleteUser(uid: string): Promise<void> {
 // ============================================================================
 
 const getProposalPath = (id: string) => `organize-proposals/${id}.json`;
-const getChunkResultPath = (proposalId: string, chunkIndex: number) =>
-  `organize-proposals/${proposalId}-chunk-${chunkIndex}.json`;
 
 async function saveOrganizeProposal(
     data: Record<string, unknown>,
@@ -262,7 +299,6 @@ async function saveOrganizeProposal(
       });
     }
 
-    // Save lightweight metadata to Firestore
     await docRef.set({...metadata, storagePath});
     logger.info("Saved organize proposal", {proposalId: docRef.id});
     return docRef.id;
@@ -318,177 +354,6 @@ async function getOrganizeIntermediateState(
   }
 }
 
-async function saveOrganizeChunkResult(
-    proposalId: string,
-    chunkIndex: number,
-    result: Record<string, unknown>,
-): Promise<void> {
-  try {
-    const bucket = getStorage().bucket();
-    await bucket.file(getChunkResultPath(proposalId, chunkIndex)).save(
-        JSON.stringify(result),
-        {contentType: "application/json"},
-    );
-  } catch (error) {
-    logger.error("Database error in saveOrganizeChunkResult:", error);
-    throw error;
-  }
-}
-
-async function getOrganizeChunkResults(
-    proposalId: string,
-    totalChunks: number,
-): Promise<Record<string, unknown>[]> {
-  try {
-    const bucket = getStorage().bucket();
-    const chunkResults = await Promise.all(
-        Array.from({length: totalChunks}, async (_value, chunkIndex) => {
-          const [contents] = await bucket
-              .file(getChunkResultPath(proposalId, chunkIndex))
-              .download();
-          return JSON.parse(contents.toString()) as Record<string, unknown>;
-        }),
-    );
-    return chunkResults;
-  } catch (error) {
-    logger.error("Database error in getOrganizeChunkResults:", error);
-    throw error;
-  }
-}
-
-async function incrementOrganizeCompletedChunks(
-    proposalId: string,
-    chunkIndex: number,
-): Promise<{count: number; wasNew: boolean}> {
-  try {
-    const docRef = getFirestore()
-        .collection("OrganizeProposals")
-        .doc(proposalId);
-    const result = await getFirestore().runTransaction(async (transaction) => {
-      const doc = await transaction.get(docRef);
-      if (!doc.exists) {
-        throw new Error("Organize proposal not found");
-      }
-
-      const completedChunkIndices = Array.isArray(doc.data()?.completedChunkIndices) ?
-        doc.data()?.completedChunkIndices as number[] :
-        [];
-      if (completedChunkIndices.includes(chunkIndex)) {
-        return {count: completedChunkIndices.length, wasNew: false};
-      }
-
-      const nextCompletedChunkIndices = [...completedChunkIndices, chunkIndex].sort((a, b) => a - b);
-      transaction.update(docRef, {
-        completedChunkIndices: nextCompletedChunkIndices,
-        completedChunks: nextCompletedChunkIndices.length,
-      });
-      return {count: nextCompletedChunkIndices.length, wasNew: true};
-    });
-    return result;
-  } catch (error) {
-    logger.error("Database error in incrementOrganizeCompletedChunks:", error);
-    throw error;
-  }
-}
-
-async function claimChunkProcessing(
-    proposalId: string,
-    chunkIndex: number,
-    ttlMinutes: number,
-): Promise<boolean> {
-  try {
-    const docRef = getFirestore()
-        .collection("OrganizeProposals")
-        .doc(proposalId);
-    return await getFirestore().runTransaction(async (transaction) => {
-      const doc = await transaction.get(docRef);
-      if (!doc.exists) {
-        return false;
-      }
-
-      const processingChunks = doc.data()?.processingChunks &&
-        typeof doc.data()?.processingChunks === "object" ?
-        {...doc.data()?.processingChunks as Record<string, string>} :
-        {};
-      const key = String(chunkIndex);
-      const existingLock = processingChunks[key];
-      const existingLockTime = existingLock ? Date.parse(existingLock) : Number.NaN;
-      if (!Number.isNaN(existingLockTime) && existingLockTime > Date.now()) {
-        return false;
-      }
-
-      processingChunks[key] = new Date(Date.now() + ttlMinutes * 60_000).toISOString();
-      transaction.update(docRef, {processingChunks});
-      return true;
-    });
-  } catch (error) {
-    logger.error("Database error in claimChunkProcessing:", error);
-    throw error;
-  }
-}
-
-async function releaseChunkProcessing(
-    proposalId: string,
-    chunkIndex: number,
-): Promise<void> {
-  try {
-    const docRef = getFirestore()
-        .collection("OrganizeProposals")
-        .doc(proposalId);
-    await getFirestore().runTransaction(async (transaction) => {
-      const doc = await transaction.get(docRef);
-      if (!doc.exists) {
-        return;
-      }
-
-      const processingChunks = doc.data()?.processingChunks &&
-        typeof doc.data()?.processingChunks === "object" ?
-        {...doc.data()?.processingChunks as Record<string, string>} :
-        {};
-      const key = String(chunkIndex);
-      if (!(key in processingChunks)) {
-        return;
-      }
-
-      delete processingChunks[key];
-      transaction.update(docRef, {processingChunks});
-    });
-  } catch (error) {
-    logger.error("Database error in releaseChunkProcessing:", error);
-    throw error;
-  }
-}
-
-async function claimOrganizeProposalFinalization(
-    proposalId: string,
-): Promise<boolean> {
-  try {
-    const docRef = getFirestore()
-        .collection("OrganizeProposals")
-        .doc(proposalId);
-    return await getFirestore().runTransaction(async (transaction) => {
-      const doc = await transaction.get(docRef);
-      if (!doc.exists) {
-        throw new Error("Organize proposal not found");
-      }
-
-      const data = doc.data() || {};
-      if (data.proposalEmailSentAt) {
-        return false;
-      }
-      if (data.status !== "generating") {
-        return false;
-      }
-
-      transaction.update(docRef, {proposalEmailSentAt: new Date().toISOString()});
-      return true;
-    });
-  } catch (error) {
-    logger.error("Database error in claimOrganizeProposalFinalization:", error);
-    throw error;
-  }
-}
-
 async function finalizeOrganizeProposal(
     proposalId: string,
     proposal: Record<string, unknown>,
@@ -513,8 +378,6 @@ async function finalizeOrganizeProposal(
     await docRef.update({
       status: "pending",
       generationStartedAt: null,
-      currentChunk: null,
-      totalChunks: null,
       lastError: null,
     });
   } catch (error) {
@@ -569,24 +432,6 @@ async function findGeneratingProposal(
   }
 }
 
-async function getStuckOrganizeProposals(
-    staleMinutes: number,
-): Promise<Array<{id: string; [key: string]: unknown}>> {
-  try {
-    const cutoff = new Date(Date.now() - staleMinutes * 60 * 1000).toISOString();
-    const snapshot = await getFirestore()
-        .collection("OrganizeProposals")
-        .where("status", "==", "generating")
-        .where("generationStartedAt", "<", cutoff)
-        .get();
-
-    return snapshot.docs.map((doc) => ({id: doc.id, ...doc.data()}));
-  } catch (error) {
-    logger.error("Database error in getStuckOrganizeProposals:", error);
-    throw error;
-  }
-}
-
 async function getResumableOrganizeProposals():
 Promise<Array<{id: string; [key: string]: unknown}>> {
   try {
@@ -628,8 +473,13 @@ async function updateOrganizeProposalStatus(
   try {
     const firestoreExtra = extra ? {...extra} : undefined;
 
-    // If snapshot provided, append to GCS object instead of Firestore
-    if (firestoreExtra?.snapshot) {
+    const gcsFields: string[] = [];
+
+    // Move large data to GCS instead of Firestore
+    if (firestoreExtra?.snapshot) gcsFields.push("snapshot");
+    if (firestoreExtra?.phaseData) gcsFields.push("phaseData");
+
+    if (gcsFields.length > 0) {
       const doc = await getFirestore()
           .collection("OrganizeProposals")
           .doc(proposalId)
@@ -637,13 +487,20 @@ async function updateOrganizeProposalStatus(
       const storagePath = doc.data()?.storagePath as string;
       const bucket = getStorage().bucket();
       const file = bucket.file(storagePath);
-      const [contents] = await file.download();
-      const bulkData = JSON.parse(contents.toString());
-      bulkData.snapshot = firestoreExtra.snapshot;
+      let bulkData: Record<string, unknown> = {};
+      try {
+        const [contents] = await file.download();
+        bulkData = JSON.parse(contents.toString());
+      } catch {
+        // File may not exist yet
+      }
+      for (const field of gcsFields) {
+        bulkData[field] = firestoreExtra![field];
+        delete firestoreExtra![field];
+      }
       await file.save(JSON.stringify(bulkData), {
         contentType: "application/json",
       });
-      delete firestoreExtra.snapshot;
     }
 
     await getFirestore()
@@ -653,6 +510,27 @@ async function updateOrganizeProposalStatus(
   } catch (error) {
     logger.error("Database error in updateOrganizeProposalStatus:", error);
     throw error;
+  }
+}
+
+async function getOrganizePhaseData(
+    proposalId: string,
+): Promise<Record<string, unknown> | undefined> {
+  try {
+    const doc = await getFirestore()
+        .collection("OrganizeProposals")
+        .doc(proposalId)
+        .get();
+    if (!doc.exists) return undefined;
+    const storagePath = doc.data()?.storagePath as string;
+    if (!storagePath) return undefined;
+    const bucket = getStorage().bucket();
+    const [contents] = await bucket.file(storagePath).download();
+    const bulkData = JSON.parse(contents.toString());
+    return bulkData.phaseData as Record<string, unknown> | undefined;
+  } catch (error) {
+    logger.error("Database error in getOrganizePhaseData:", error);
+    return undefined;
   }
 }
 
@@ -731,6 +609,8 @@ export {
   storeUser,
   addUserEmailAddress,
   updateUserTokens,
+  saveDriveUserPreferences,
+  getDriveUserPreferences,
   addPendingEmailAddress,
   getPendingEmailAddressByCode,
   removeEmailAddress,
@@ -738,17 +618,10 @@ export {
   saveOrganizeProposal,
   saveOrganizeIntermediateState,
   getOrganizeIntermediateState,
-  getChunkResultPath,
-  saveOrganizeChunkResult,
-  getOrganizeChunkResults,
-  incrementOrganizeCompletedChunks,
-  claimChunkProcessing,
-  releaseChunkProcessing,
-  claimOrganizeProposalFinalization,
+  getOrganizePhaseData,
   finalizeOrganizeProposal,
   getOrganizeProposal,
   findGeneratingProposal,
-  getStuckOrganizeProposals,
   getResumableOrganizeProposals,
   updateOrganizeProposalStatus,
   saveDriveFileData,

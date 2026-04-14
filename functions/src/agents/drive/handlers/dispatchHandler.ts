@@ -8,11 +8,11 @@ import {handleDriveEmail} from "./driveHandler";
 import {processUpload} from "./uploadHandler";
 import {handleOrganizeDrive} from "./organizeMain";
 import {handleOrganizeProposalReply} from "./organizeProposal";
-import {processOrganizeChunk} from "./organizeChunk";
+import {processExecutionChunk} from "./organizeExecution";
 import {signActionToken} from "./organizeHelpers";
 import {driveSignupUrl} from "../mailTemplates";
 import {ENVIRONMENT_NAME, RESEND_API_KEY} from "../../../util/config";
-import {AGENT_EMAIL_ADDRESS, DRIVE_ADMIN_API_KEY} from "../config";
+import {AGENT_EMAIL_ADDRESS} from "../config";
 import {sendEvent} from "../../../util/analytics";
 import {
   TaskRequest,
@@ -34,10 +34,10 @@ import {
 } from "../../../resend/emailFetcher";
 import {
   FileProposal,
+  ExecutionChunkTaskData,
   OrganizeProposalDoc,
   PostAuthTaskData,
   OrganizeActionTaskData,
-  OrganizeChunkTaskData,
 } from "../types";
 
 // ============================================================================
@@ -221,9 +221,9 @@ export async function dispatchOrganizeActionTask(
   });
 }
 
-/** Enqueues processing for a single organize proposal chunk. */
-export async function dispatchOrganizeChunkTask(
-    data: OrganizeChunkTaskData,
+/** Enqueues sequential content-aware execution chunk processing. */
+export async function dispatchExecutionChunkTask(
+    data: ExecutionChunkTaskData,
 ): Promise<void> {
   const isLocal = ENVIRONMENT_NAME.value() === "local" ||
     ENVIRONMENT_NAME.value() === "test";
@@ -236,16 +236,17 @@ export async function dispatchOrganizeChunkTask(
     } else {
       ({transformedEmail} = await fetchEmailById(data.emailId));
     }
-    await processOrganizeChunk(transformedEmail, data);
+    await processExecutionChunk(transformedEmail, data);
     return;
   }
+
   const queue = getFunctions().taskQueue(
-      "locations/us-central1/functions/v2driveOrganizeChunkTask",
+      "locations/us-central1/functions/v2driveExecutionChunkTask",
   );
   await queue.enqueue(data, {
     dispatchDeadlineSeconds: 60 * 30,
   });
-  logger.info("Drive organize chunk: Dispatched task", {
+  logger.info("Drive execution chunk: Dispatched task", {
     proposalId: data.proposalId,
     chunkIndex: data.chunkIndex,
   });
@@ -442,85 +443,6 @@ export async function handleTestProcessUpload(
   }
 }
 
-/** Retries a generating or failed organize proposal by dispatching its current chunk. */
-export async function handleRetryOrganizeProposal(
-    req: Request,
-    res: Response,
-): Promise<void> {
-  const adminKey = req.get("x-admin-key");
-  if (!adminKey || adminKey !== DRIVE_ADMIN_API_KEY.value()) {
-    res.status(401).json({error: "Unauthorized"});
-    return;
-  }
-
-  const proposalId = req.query.proposalId as string;
-  if (!proposalId) {
-    res.status(400).json({error: "Missing proposalId"});
-    return;
-  }
-
-  let proposalDoc: OrganizeProposalDoc | null = null;
-  try {
-    const raw = await getOrganizeProposal(proposalId);
-    if (!raw) {
-      res.status(404).json({error: "Proposal not found"});
-      return;
-    }
-    proposalDoc = raw as unknown as OrganizeProposalDoc;
-  } catch (err) {
-    logger.error("Drive organize retry: Failed to fetch proposal", {
-      proposalId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    res.status(500).json({error: "Failed to fetch proposal"});
-    return;
-  }
-
-  if (!proposalDoc.emailId || !proposalDoc.uid) {
-    res.status(500).json({error: "Proposal is missing retry metadata"});
-    return;
-  }
-
-  if (proposalDoc.status !== "generating" && proposalDoc.status !== "failed") {
-    res.status(400).json({
-      error: `Proposal status is ${proposalDoc.status}, not stuck`,
-    });
-    return;
-  }
-
-  const chunkIndex = proposalDoc.currentChunk || 0;
-
-  try {
-    if (proposalDoc.status === "failed") {
-      await updateOrganizeProposalStatus(proposalId, "generating", {
-        attemptCount: 1,
-        generationStartedAt: new Date().toISOString(),
-        lastError: null,
-      });
-    }
-
-    await dispatchOrganizeChunkTask({
-      proposalId,
-      emailId: proposalDoc.emailId,
-      uid: proposalDoc.uid,
-      chunkIndex,
-    });
-
-    res.status(200).json({
-      proposalId,
-      chunkIndex,
-      message: "Retry dispatched",
-    });
-  } catch (err) {
-    logger.error("Drive organize retry: Dispatch failed", {
-      proposalId,
-      chunkIndex,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    res.status(500).json({error: "Failed to dispatch retry"});
-  }
-}
-
 // ============================================================================
 // TASK QUEUE HANDLERS
 // ============================================================================
@@ -561,12 +483,12 @@ export async function handleOrganizeActionTask(
   logger.info("Drive organize action task: Complete", {proposalId, action});
 }
 
-/** Processes a queued organize chunk task. */
-export async function handleOrganizeChunkTask(
-    data: OrganizeChunkTaskData,
+/** Processes a queued content-aware execution chunk task. */
+export async function handleExecutionChunkTask(
+    data: ExecutionChunkTaskData,
 ): Promise<void> {
   const {proposalId, emailId, chunkIndex} = data;
-  logger.info("Drive organize chunk task: Starting", {proposalId, chunkIndex});
+  logger.info("Drive execution chunk task: Starting", {proposalId, chunkIndex});
 
   let transformedEmail: TransformedEmail;
   if (isAdminEmailId(emailId)) {
@@ -576,7 +498,7 @@ export async function handleOrganizeChunkTask(
   } else {
     ({transformedEmail} = await fetchEmailById(emailId));
   }
-  await processOrganizeChunk(transformedEmail, data);
+  await processExecutionChunk(transformedEmail, data);
 
-  logger.info("Drive organize chunk task: Complete", {proposalId, chunkIndex});
+  logger.info("Drive execution chunk task: Complete", {proposalId, chunkIndex});
 }

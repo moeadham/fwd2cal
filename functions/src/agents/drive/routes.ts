@@ -11,8 +11,7 @@ import {
   handleTestProcessUpload,
   handlePostAuthTask,
   handleOrganizeActionTask,
-  handleOrganizeChunkTask,
-  handleRetryOrganizeProposal,
+  handleExecutionChunkTask,
   dispatchPostAuthTask,
 } from "./dispatchHandler";
 import {signupCallbackHandler, hasRequiredScopes, oauthCronJob} from "../../auth/authHandler";
@@ -32,13 +31,9 @@ import {
 import {withErrorTracking} from "../../util/analytics";
 import {handleAdminOrganizeRequest, serveAdminForm} from "../../admin";
 import {
-  cleanupStuckOrganizeProposals,
-} from "./organizeHandler";
-
-import {
   PostAuthTaskData,
   OrganizeActionTaskData,
-  OrganizeChunkTaskData,
+  ExecutionChunkTaskData,
 } from "./types";
 
 // Global configuration for onRequest functions
@@ -235,13 +230,6 @@ export const v2driveOrganizeAction = onRequest(
     },
 );
 
-export const v2driveRetryOrganizeProposal = onRequest(
-    onRequestConfig,
-    async (req, res) => {
-      await handleRetryOrganizeProposal(req, res);
-    },
-);
-
 export const v2driveAdminOrganize = onRequest(
     onRequestConfig,
     async (req, res) => {
@@ -267,10 +255,10 @@ export const v2driveOrganizeActionTask = onTaskDispatched(
     }),
 );
 
-export const v2driveOrganizeChunkTask = onTaskDispatched(
+export const v2driveExecutionChunkTask = onTaskDispatched(
     driveDispatchConfig,
     withErrorTracking("drive", async (req): Promise<void> => {
-      await handleOrganizeChunkTask(req.data as OrganizeChunkTaskData);
+      await handleExecutionChunkTask(req.data as ExecutionChunkTaskData);
     }),
 );
 
@@ -287,18 +275,6 @@ export const v2cleanupDriveFileData = onSchedule(
     async () => {
       const deleted = await cleanupExpiredDriveFileData();
       logger.info("Drive: Cleanup complete", {deleted});
-    },
-);
-
-export const v2cleanupStuckOrganizeProposals = onSchedule(
-    {
-      schedule: "every 15 minutes",
-      timeZone: "UTC",
-      memory: "512MiB",
-    },
-    async () => {
-      const result = await cleanupStuckOrganizeProposals();
-      logger.info("Drive organize cleanup complete", result);
     },
 );
 

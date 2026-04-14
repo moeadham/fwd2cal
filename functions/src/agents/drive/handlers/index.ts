@@ -6,7 +6,6 @@ export * from "./accountHandler";
 export * from "./dispatchHandler";
 export * from "./organizeHelpers";
 export * from "./organizeMain";
-export * from "./organizeChunk";
 export * from "./organizeProposal";
 export * from "./organizeExecution";
 export * from "./organizeVerify";

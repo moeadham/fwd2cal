@@ -6,6 +6,7 @@ import * as fs from "fs";
 import * as path from "path";
 import {initializeApp} from "firebase-admin/app";
 import {getFirestore} from "firebase-admin/firestore";
+import {getStorage} from "firebase-admin/storage";
 import OpenAI from "openai";
 import type {Response} from "superagent";
 
@@ -29,25 +30,24 @@ import {
   mergeRevisedProposal,
   normalizeFolderPrefixes,
   renumberFoldersContiguously,
-  reconcileFileActions,
-  refineOrganizationProposal,
   renderFolderTreePlainText,
 } from "../src/agents/drive/llm";
-import {ORGANIZE_DRIVE_CHUNK_SIZE} from "../src/agents/drive/config";
-import {DriveOrganizeProposal, FolderOperation, MoveInstructionSchema} from "../src/agents/drive/types";
 import {
-  mergeChunkProposalFolders,
-  getParallelBatchChunkIndexes,
-  seedFoldersFromDrive,
-} from "../src/agents/drive/organizeHandler";
+  DriveFileEntry,
+  DriveOrganizeProposal,
+  FolderOperation,
+  MoveInstructionSchema,
+  OrganizeProposalDoc,
+} from "../src/agents/drive/types";
 import {defaultCompletion, setOpenAIClientForTest} from "../src/util/openai";
 import {
   getResumableOrganizeProposals,
-  claimChunkProcessing,
-  releaseChunkProcessing,
-  claimOrganizeProposalFinalization,
-  incrementOrganizeCompletedChunks,
+  getOrganizePhaseData,
 } from "../src/util/firestoreHandler";
+import {getLastSentEmail, clearMockData} from "../src/util/resendMock";
+import {organizeProposalTestHooks} from "../src/agents/drive/handlers/organizeProposal";
+import {buildSequentialExecutionProposal} from "../src/agents/drive/handlers/organizeExecution";
+import {TransformedEmail} from "../src/util/types";
 
 
 chai.use(chaiHttp);
@@ -56,14 +56,14 @@ const apiURL = "http://127.0.0.1:5002";
 const DRIVE_CALLBACK_ENDPOINT = "/drive/v2/inboundCallback";
 const TESTER_PRIMARY_GOOGLE_ACCT = process.env.TESTER_PRIMARY_GOOGLE_ACCT || "";
 const DRIVE_EMAIL_ADDRESS = process.env.DRIVE_EMAIL_ADDRESS || "drive@fwd2drive.com";
-const MOCK_LLM = process.env.MOCK_LLM !== "false";
 const DISPATCH_URL = "http://127.0.0.1:5001";
 const DISPATCH_REGION = "us-central1";
 const APP_ID = process.env.GCLOUD_PROJECT || "fwd2cal-dev-2578e";
 
 process.env.FIRESTORE_EMULATOR_HOST = "127.0.0.1:8080";
-initializeApp({projectId: APP_ID});
-const testApp = initializeApp({projectId: APP_ID}, "drive-test");
+process.env.FIREBASE_STORAGE_EMULATOR_HOST = "127.0.0.1:9199";
+initializeApp({projectId: APP_ID, storageBucket: `${APP_ID}.appspot.com`});
+const testApp = initializeApp({projectId: APP_ID, storageBucket: `${APP_ID}.appspot.com`}, "drive-test");
 const db = getFirestore(testApp);
 
 interface WebhookWithMock {
@@ -136,6 +136,48 @@ function makeOrganizeProposal(
     })),
     summary: "summary",
   };
+}
+
+function makeTestEmail(text: string): TransformedEmail {
+  return {
+    from: "Tester <tester@example.com>",
+    to: ["drive@fwd2drive.com"],
+    subject: "Re: Organize my Drive",
+    text,
+    html: text,
+    headers: {
+      "message-id": `<email-${Date.now()}@example.com>`,
+      "references": "<original@example.com>",
+    },
+    SPF: "pass",
+    dkim: "pass",
+  };
+}
+
+function setFakeStructuredCompletions(results: unknown[]): void {
+  const queue = [...results];
+  const fakeClient = {
+    chat: {
+      completions: {
+        create: async () => {
+          const result = queue.shift();
+          if (!result) {
+            throw new Error("No fake LLM completion queued");
+          }
+          return {
+            choices: [{
+              message: {
+                content: JSON.stringify(result),
+              },
+              finish_reason: "stop",
+            }],
+            usage: {total_tokens: 1},
+          };
+        },
+      },
+    },
+  } as unknown as OpenAI;
+  setOpenAIClientForTest(fakeClient);
 }
 
 // Helper: send Resend webhook and dispatch to drive handler (Phase 1 — proposal)
@@ -882,157 +924,6 @@ describe("applyFolderOperations", function() {
   });
 });
 
-describe("reconcileFileActions", function() {
-  it("DT00m reconciles renumbered root folders", function() {
-    const proposal = makeOrganizeProposal(
-        ["1"],
-        {"1": "14-Personal"},
-        ["01-Personal"],
-    );
-
-    reconcileFileActions(proposal);
-
-    expect(proposal.file_actions[0].new_folder).to.equal("01-Personal");
-  });
-
-  it("DT00n reconciles restructured folders via suffix", function() {
-    const proposal = makeOrganizeProposal(
-        ["1"],
-        {"1": "08-Bitaccess"},
-        ["04-Work", "04-Work/Bitaccess"],
-    );
-
-    reconcileFileActions(proposal);
-
-    expect(proposal.file_actions[0].new_folder).to.equal("04-Work/Bitaccess");
-  });
-
-  it("DT00o reconciles subfolders under a renamed root", function() {
-    const proposal = makeOrganizeProposal(
-        ["1"],
-        {"1": "14-Personal/Medical"},
-        ["01-Personal", "01-Personal/Medical"],
-    );
-
-    reconcileFileActions(proposal);
-
-    expect(proposal.file_actions[0].new_folder).to.equal("01-Personal/Medical");
-  });
-
-  it("DT00p keep actions with no match add folders to the proposal", function() {
-    const proposal = makeOrganizeProposal(
-        ["1"],
-        {"1": "03-Photos"},
-        ["01-Personal"],
-    );
-    proposal.file_actions[0].action = "keep";
-
-    reconcileFileActions(proposal);
-
-    expect(proposal.file_actions[0].new_folder).to.equal("03-Photos");
-    expect(proposal.proposed_folders.some((folder) => folder.folder_path === "03-Photos")).to.equal(true);
-  });
-
-  it("DT00q non-keep actions with no match stay orphaned", function() {
-    const proposal = makeOrganizeProposal(
-        ["1"],
-        {"1": "03-Photos"},
-        ["01-Personal"],
-    );
-    proposal.file_actions[0].action = "move";
-
-    reconcileFileActions(proposal);
-
-    expect(proposal.file_actions[0].new_folder).to.equal("03-Photos");
-    expect(proposal.proposed_folders.some((folder) => folder.folder_path === "03-Photos")).to.equal(false);
-  });
-
-  it("DT00r raw Drive paths without a prefix map by base name", function() {
-    const proposal = makeOrganizeProposal(
-        ["1"],
-        {"1": "Visibl"},
-        ["17-Visibl"],
-    );
-
-    reconcileFileActions(proposal);
-
-    expect(proposal.file_actions[0].new_folder).to.equal("17-Visibl");
-  });
-
-  it("DT00s reconciles mixed proposals so visible actions match proposed folders", function() {
-    const proposal = makeOrganizeProposal(
-        ["1", "2", "3", "4", "5"],
-        {
-          "1": "14-Personal",
-          "2": "08-Bitaccess",
-          "3": "Visibl",
-          "4": "03-Photos",
-          "5": "05-Others",
-        },
-        ["01-Personal", "04-Work", "04-Work/Bitaccess", "17-Visibl"],
-    );
-    proposal.file_actions[0].action = "keep";
-    proposal.file_actions[1].action = "move";
-    proposal.file_actions[2].action = "move";
-    proposal.file_actions[3].action = "keep";
-    proposal.file_actions[4].action = "move";
-
-    reconcileFileActions(proposal);
-
-    const visibleFolderPaths = new Set(proposal.proposed_folders.map((folder) => folder.folder_path));
-    expect(proposal.file_actions.find((action) => action.file_id === "1")?.new_folder).to.equal("01-Personal");
-    expect(proposal.file_actions.find((action) => action.file_id === "2")?.new_folder).to.equal("04-Work/Bitaccess");
-    expect(proposal.file_actions.find((action) => action.file_id === "3")?.new_folder).to.equal("17-Visibl");
-    expect(proposal.file_actions.find((action) => action.file_id === "4")?.new_folder).to.equal("03-Photos");
-    expect(visibleFolderPaths.has("03-Photos")).to.equal(true);
-    expect(proposal.file_actions.find((action) => action.file_id === "5")?.new_folder).to.equal("05-Others");
-    expect(visibleFolderPaths.has("05-Others")).to.equal(false);
-
-    for (const action of proposal.file_actions) {
-      if (action.file_id === "5") {
-        continue;
-      }
-      expect(visibleFolderPaths.has(action.new_folder)).to.equal(true);
-    }
-  });
-});
-
-describe("mergeChunkProposalFolders", function() {
-  it("DT00ta merges only new chunk folders and normalizes prefixes against accumulated folders", function() {
-    const accumulatedFolders = [
-      {
-        folder_path: "01-Personal",
-        description: "Existing personal folder",
-      },
-    ];
-    const chunkProposal = makeOrganizeProposal(
-        ["1", "2"],
-        {
-          "1": "Work/Client",
-          "2": "01-Personal",
-        },
-        ["01-Personal", "Work", "Work/Client"],
-    );
-
-    const mergedFolders = mergeChunkProposalFolders(accumulatedFolders, chunkProposal);
-
-    expect(mergedFolders.map((folder) => folder.folder_path)).to.deep.equal([
-      "01-Personal",
-      "02-Work",
-      "02-Work/Client",
-    ]);
-    expect(chunkProposal.proposed_folders.map((folder) => folder.folder_path)).to.deep.equal([
-      "01-Personal",
-      "02-Work",
-      "02-Work/Client",
-    ]);
-    expect(chunkProposal.file_actions.find((action) => action.file_id === "1")?.new_folder)
-        .to.equal("02-Work/Client");
-    expect(chunkProposal.file_actions.find((action) => action.file_id === "2")?.new_folder)
-        .to.equal("01-Personal");
-  });
-});
-
 describe("MoveInstructionSchema", function() {
   it("DT00t accepts optional new_filename and still allows omission", function() {
     const withRename = MoveInstructionSchema.parse({
@@ -1114,102 +1005,6 @@ describe("defaultCompletion", function() {
   });
 });
 
-describe("drive config", function() {
-  it("DT00ta2 defaults organize chunk size to 30 files", function() {
-    expect(ORGANIZE_DRIVE_CHUNK_SIZE.options.default).to.equal(30);
-  });
-});
-
-describe("refineOrganizationProposal", function() {
-  afterEach(function() {
-    setOpenAIClientForTest(null);
-  });
-
-  it("DT00tb applies folder rename mappings from the refinement result", async function() {
-    this.timeout(60000);
-    const refinedResult = {
-      refined_folders: [
-        {
-          folder_path: "05-Financial",
-          description: "Finance documents",
-        },
-        {
-          folder_path: "05-Financial/Taxes",
-          description: "Tax records",
-        },
-        {
-          folder_path: "05-Financial/Taxes/2024",
-          description: "2024 taxes",
-        },
-        {
-          folder_path: "07-Travel",
-          description: "Travel documents",
-        },
-      ],
-      folder_renames: [
-        {old_path: "05-Finance", new_path: "05-Financial"},
-      ],
-      summary: "Grouped finance records under a cleaner Financial hierarchy.",
-    };
-    if (MOCK_LLM) {
-      const fakeClient = {
-        chat: {
-          completions: {
-            parse: async () => ({
-              choices: [{
-                message: {parsed: refinedResult},
-                finish_reason: "stop",
-              }],
-              usage: {total_tokens: 21},
-            }),
-            create: async () => ({
-              choices: [{
-                message: {
-                  content: JSON.stringify(refinedResult),
-                },
-                finish_reason: "stop",
-              }],
-              usage: {total_tokens: 21},
-            }),
-          },
-        },
-      } as unknown as OpenAI;
-      setOpenAIClientForTest(fakeClient);
-    }
-    const proposal = makeOrganizeProposal(
-        ["1", "2"],
-        {
-          "1": "05-Finance/Taxes/2024",
-          "2": "07-Travel",
-        },
-        ["05-Finance", "05-Finance/Taxes", "05-Finance/Taxes/2024", "07-Travel"],
-    );
-
-    const result = await refineOrganizationProposal(proposal);
-
-    if (MOCK_LLM) {
-      expect(result.summary).to.equal("Grouped finance records under a cleaner Financial hierarchy.");
-      expect(result.proposed_folders.map((folder) => folder.folder_path)).to.deep.equal([
-        "05-Financial",
-        "05-Financial/Taxes",
-        "05-Financial/Taxes/2024",
-        "07-Travel",
-      ]);
-      expect(result.file_actions.find((action) => action.file_id === "1")?.new_folder)
-          .to.equal("05-Financial/Taxes/2024");
-      expect(result.file_actions.find((action) => action.file_id === "2")?.new_folder)
-          .to.equal("07-Travel");
-    } else {
-      console.log("Live refined folders:", result.proposed_folders.map((f) => f.folder_path));
-      console.log("Live summary:", result.summary);
-      expect(result.proposed_folders).to.be.an("array").with.length.greaterThan(0);
-      expect(result.file_actions).to.have.length(2);
-      expect(result.summary).to.be.a("string").with.length.greaterThan(0);
-    }
-  });
-
-});
-
 describe("renderFolderTreePlainText", function() {
   it("DT00u renders a plain-text folder tree with counts", function() {
     const proposal = makeOrganizeProposal(
@@ -1265,341 +1060,376 @@ describe("admin resume helpers", function() {
   });
 });
 
-describe("organize chunk helpers", function() {
-  it("DT00uaa seeds canonical roots for an empty drive", function() {
-    const {seedFolders, folderRenameActions} = seedFoldersFromDrive([]);
+describe("organize phased proposal flow", function() {
+  const sender = "tester@example.com";
+  const uid = "phase-test-uid";
 
-    expect(seedFolders.map((folder) => folder.folder_path)).to.deep.equal([
-      "01-Documents",
-      "02-Finance",
-      "03-Work",
-      "04-Media",
-      "05-Projects",
-      "06-Personal",
-      "07-Education",
-      "08-Travel",
-      "09-Archive",
-    ]);
-    expect(folderRenameActions).to.deep.equal([]);
+  afterEach(function() {
+    setOpenAIClientForTest(null);
+    clearMockData();
   });
 
-  it("DT00uab maps matching folders, preserves unmatched folders, merges duplicates, and keeps canonical names", function() {
-    const {seedFolders, folderRenameActions} = seedFoldersFromDrive([
-      {
-        id: "folder-docs",
-        name: "Medical Insurance",
-        mimeType: "application/vnd.google-apps.folder",
-        parentId: "root",
-        parentPath: "My Drive",
-        createdTime: "2026-01-01T00:00:00.000Z",
-        size: 0,
-        webViewLink: "",
-        isFolder: true,
-      },
-      {
-        id: "folder-taxes",
-        name: "taxes",
-        mimeType: "application/vnd.google-apps.folder",
-        parentId: "root",
-        parentPath: "My Drive",
-        createdTime: "2026-01-02T00:00:00.000Z",
-        size: 0,
-        webViewLink: "",
-        isFolder: true,
-      },
-      {
-        id: "folder-random",
-        name: "Random",
-        mimeType: "application/vnd.google-apps.folder",
-        parentId: "root",
-        parentPath: "My Drive",
-        createdTime: "2026-01-03T00:00:00.000Z",
-        size: 0,
-        webViewLink: "",
-        isFolder: true,
-      },
-      {
-        id: "folder-random-dup",
-        name: "random",
-        mimeType: "application/vnd.google-apps.folder",
-        parentId: "root",
-        parentPath: "My Drive",
-        createdTime: "2026-01-04T00:00:00.000Z",
-        size: 0,
-        webViewLink: "",
-        isFolder: true,
-      },
-      {
-        id: "folder-finance-canonical",
-        name: "02-Finance",
-        mimeType: "application/vnd.google-apps.folder",
-        parentId: "root",
-        parentPath: "My Drive",
-        createdTime: "2026-01-05T00:00:00.000Z",
-        size: 0,
-        webViewLink: "",
-        isFolder: true,
-      },
-      {
-        id: "folder-finance-wrong-prefix",
-        name: "05-Finance",
-        mimeType: "application/vnd.google-apps.folder",
-        parentId: "root",
-        parentPath: "My Drive",
-        createdTime: "2026-01-06T00:00:00.000Z",
-        size: 0,
-        webViewLink: "",
-        isFolder: true,
-      },
-    ]);
-
-    expect(seedFolders.map((folder) => folder.folder_path)).to.include.members([
-      "01-Documents",
-      "02-Finance",
-      "09-Archive",
-      "10-Random",
-    ]);
-    expect(seedFolders).to.have.length(10);
-
-    expect(folderRenameActions).to.deep.include({
-      file_id: "folder-docs",
-      current_name: "Medical Insurance",
-      current_path: "My Drive",
-      new_name: "01-Documents",
-      new_folder: "My Drive",
-      action: "rename",
-      reason: "Mapped to canonical category 01-Documents",
-    });
-    expect(folderRenameActions).to.deep.include({
-      file_id: "folder-taxes",
-      current_name: "taxes",
-      current_path: "My Drive",
-      new_name: "02-Finance",
-      new_folder: "My Drive",
-      action: "rename",
-      reason: "Mapped to canonical category 02-Finance",
-    });
-    expect(folderRenameActions).to.deep.include({
-      file_id: "folder-random-dup",
-      current_name: "random",
-      current_path: "My Drive",
-      new_name: "10-Random",
-      new_folder: "My Drive",
-      action: "rename",
-      reason: "Renamed unmatched folder with custom prefix 10-Random",
-    });
-    expect(folderRenameActions).to.deep.include({
-      file_id: "folder-random",
-      current_name: "Random",
-      current_path: "My Drive",
-      new_name: "10-Random",
-      new_folder: "My Drive",
-      action: "rename",
-      reason: 'Merged duplicate folder into "10-Random"',
-    });
-    expect(folderRenameActions).to.deep.include({
-      file_id: "folder-finance-canonical",
-      current_name: "02-Finance",
-      current_path: "My Drive",
-      new_name: "02-Finance",
-      new_folder: "My Drive",
-      action: "keep",
-      reason: "Already using canonical root category",
-    });
-    expect(folderRenameActions).to.deep.include({
-      file_id: "folder-finance-wrong-prefix",
-      current_name: "05-Finance",
-      current_path: "My Drive",
-      new_name: "02-Finance",
-      new_folder: "My Drive",
-      action: "rename",
-      reason: 'Merged duplicate folder into "02-Finance"',
-    });
-  });
-
-  it("DT00uac increments completed chunk count once per chunk index", async function() {
-    const proposalId = `chunk-counter-${Date.now()}`;
+  async function seedPhaseProposal(
+      proposalId: string,
+      proposalDoc: OrganizeProposalDoc,
+  ): Promise<void> {
+    const storagePath = `organize-proposals/${proposalId}.json`;
     await db.collection("OrganizeProposals").doc(proposalId).set({
-      status: "generating",
-      completedChunks: 0,
-      completedChunkIndices: [],
+      uid: proposalDoc.uid,
+      senderEmail: proposalDoc.senderEmail,
+      emailId: proposalDoc.emailId,
+      status: proposalDoc.status,
+      phase: proposalDoc.phase,
+      createdAt: proposalDoc.createdAt,
+      expiresAt: proposalDoc.expiresAt,
+      storagePath,
     });
+    const intermediateState = {
+      driveStructureSummary:
+        proposalDoc.phaseData?.directoryLayout?.currentTreeSummary ||
+        "My Drive/\n  Inbox/ (2 files)\n",
+      fileEntries: [] as unknown[],
+      senderEmail: proposalDoc.senderEmail,
+      phaseData: proposalDoc.phaseData,
+    };
+    const bucket = getStorage().bucket();
+    await bucket.file(storagePath).save(
+        JSON.stringify(intermediateState),
+        {contentType: "application/json"},
+    );
+  }
 
-    const first = await incrementOrganizeCompletedChunks(proposalId, 0);
-    const duplicate = await incrementOrganizeCompletedChunks(proposalId, 0);
-    const second = await incrementOrganizeCompletedChunks(proposalId, 1);
-    const storedDoc = await db.collection("OrganizeProposals").doc(proposalId).get();
+  function makePhaseDoc(phase: OrganizeProposalDoc["phase"]): OrganizeProposalDoc {
+    return {
+      uid,
+      senderEmail: sender,
+      emailId: "phase-email-id",
+      status: "pending",
+      phase,
+      createdAt: "2026-04-13T00:00:00.000Z",
+      expiresAt: "2099-04-13T00:00:00.000Z",
+      storagePath: "unused",
+      phaseData: {
+        folderPreferences: {
+          detectedConvention: "",
+          suggestedConvention: "NN-Category root folders like 01-Documents",
+          topLevelFolderNames: ["Inbox", "Work", "Receipts", "Travel"],
+        },
+        directoryLayout: {
+          currentTreeSummary: "My Drive/\n  Inbox/ (2 files)\n",
+          userPrompt: "organize my drive",
+          conventionDescription: "Loose topical folders",
+          proposedStructure: [
+            {folder_path: "01-Documents", description: "Documents"},
+          ],
+          directoryMoves: [
+            {current_path: "Inbox", proposed_path: "01-Documents/Inbox", reason: "Nest inbox docs"},
+          ],
+          approvedStructure: [
+            {folder_path: "01-Documents", description: "Documents"},
+          ],
+        },
+        filenameConvention: {
+          convention: "YYYY.MM.DD - Description.ext",
+        },
+      },
+    };
+  }
 
-    expect(first).to.deep.equal({count: 1, wasNew: true});
-    expect(duplicate).to.deep.equal({count: 1, wasNew: false});
-    expect(second).to.deep.equal({count: 2, wasNew: true});
-    expect(storedDoc.data()?.completedChunks).to.equal(2);
-    expect(storedDoc.data()?.completedChunkIndices).to.deep.equal([0, 1]);
+  it("DT00ub0 routes folder_preferences approval to directory_analysis", async function() {
+    const proposalId = `phase-0-${Date.now()}`;
+    const proposalDoc = makePhaseDoc("folder_preferences");
+    await seedPhaseProposal(proposalId, proposalDoc);
+    setFakeStructuredCompletions([{
+      has_existing_convention: false,
+      convention_description: "NN-Category root folders",
+      proposed_structure: [{
+        folder_path: "01-Documents",
+        description: "Documents",
+        source: "proposed",
+      }],
+      summary: "Use numbered root folders.",
+    }]);
+
+    await organizeProposalTestHooks.handleOrganizePhaseReply(
+        makeTestEmail("approve"),
+        sender,
+        uid,
+        proposalId,
+        proposalDoc,
+        "approve",
+        true,
+    );
+
+    const stored = (await db.collection("OrganizeProposals").doc(proposalId).get()).data();
+    if (stored) stored.phaseData = await getOrganizePhaseData(proposalId);
+    const userDoc = (await db.collection("DriveUsers").doc(uid).get()).data();
+    expect(stored?.phase).to.equal("directory_analysis");
+    expect(stored?.phaseData.folderPreferences.confirmedConvention)
+        .to.equal("NN-Category root folders like 01-Documents");
+    expect(stored?.phaseData.directoryLayout.folderConvention)
+        .to.equal("NN-Category root folders like 01-Documents");
+    expect(userDoc?.preferences.folderConvention)
+        .to.equal("NN-Category root folders like 01-Documents");
+    expect(getLastSentEmail(sender)?.html).to.include("first pass");
   });
 
-  it("DT00uae reports wasNew false when a completed chunk is replayed at totalChunks", async function() {
-    const proposalId = `chunk-counter-final-${Date.now()}`;
-    await db.collection("OrganizeProposals").doc(proposalId).set({
-      status: "generating",
-      completedChunks: 3,
-      completedChunkIndices: [0, 1, 2],
-      totalChunks: 3,
-    });
-
-    const result = await incrementOrganizeCompletedChunks(proposalId, 2);
-
-    expect(result).to.deep.equal({count: 3, wasNew: false});
-  });
-
-  it("DT00uaf claims a chunk lock on first processing attempt", async function() {
-    const proposalId = `chunk-lock-${Date.now()}`;
-    await db.collection("OrganizeProposals").doc(proposalId).set({status: "generating"});
-
-    const claimed = await claimChunkProcessing(proposalId, 5, 15);
-    const storedDoc = await db.collection("OrganizeProposals").doc(proposalId).get();
-    const lockValue = storedDoc.data()?.processingChunks?.["5"];
-
-    expect(claimed).to.equal(true);
-    expect(lockValue).to.be.a("string");
-    expect(Date.parse(lockValue)).to.be.greaterThan(Date.now());
-  });
-
-  it("DT00uag rejects a duplicate chunk lock claim", async function() {
-    const proposalId = `chunk-lock-dup-${Date.now()}`;
-    await db.collection("OrganizeProposals").doc(proposalId).set({status: "generating"});
-
-    await claimChunkProcessing(proposalId, 5, 15);
-    const before = await db.collection("OrganizeProposals").doc(proposalId).get();
-    const duplicate = await claimChunkProcessing(proposalId, 5, 15);
-    const after = await db.collection("OrganizeProposals").doc(proposalId).get();
-
-    expect(duplicate).to.equal(false);
-    expect(after.data()?.processingChunks).to.deep.equal(before.data()?.processingChunks);
-  });
-
-  it("DT00uah allows distinct chunk lock claims to coexist", async function() {
-    const proposalId = `chunk-lock-multi-${Date.now()}`;
-    await db.collection("OrganizeProposals").doc(proposalId).set({status: "generating"});
-
-    const first = await claimChunkProcessing(proposalId, 5, 15);
-    const second = await claimChunkProcessing(proposalId, 6, 15);
-    const storedDoc = await db.collection("OrganizeProposals").doc(proposalId).get();
-
-    expect(first).to.equal(true);
-    expect(second).to.equal(true);
-    expect(storedDoc.data()?.processingChunks).to.have.keys(["5", "6"]);
-  });
-
-  it("DT00uai reclaims an expired chunk lock", async function() {
-    const proposalId = `chunk-lock-expired-${Date.now()}`;
-    await db.collection("OrganizeProposals").doc(proposalId).set({
-      status: "generating",
-      processingChunks: {"5": "2020-01-01T00:00:00.000Z"},
-    });
-
-    const claimed = await claimChunkProcessing(proposalId, 5, 15);
-    const storedDoc = await db.collection("OrganizeProposals").doc(proposalId).get();
-    const lockValue = storedDoc.data()?.processingChunks?.["5"];
-
-    expect(claimed).to.equal(true);
-    expect(lockValue).to.be.a("string");
-    expect(lockValue).to.not.equal("2020-01-01T00:00:00.000Z");
-    expect(Date.parse(lockValue)).to.be.greaterThan(Date.now());
-  });
-
-  it("DT00uaj grants exactly one chunk lock claim under contention", async function() {
-    const proposalId = `chunk-lock-race-${Date.now()}`;
-    await db.collection("OrganizeProposals").doc(proposalId).set({status: "generating"});
-
-    const results = await Promise.all([
-      claimChunkProcessing(proposalId, 5, 15),
-      claimChunkProcessing(proposalId, 5, 15),
+  it("DT00ub1 treats a folder_preferences revision as the confirmed convention", async function() {
+    const proposalId = `phase-0-revision-${Date.now()}`;
+    const proposalDoc = makePhaseDoc("folder_preferences");
+    await seedPhaseProposal(proposalId, proposalDoc);
+    setFakeStructuredCompletions([
+      {
+        is_change: true,
+        new_convention: "Client - Project folder names",
+      },
+      {
+        has_existing_convention: true,
+        convention_description: "Client - Project folders",
+        proposed_structure: [{
+          folder_path: "Acme - Contracts",
+          description: "Client contract documents",
+          source: "proposed",
+        }],
+        summary: "Use client-project folder names.",
+      },
     ]);
 
-    expect(results.filter(Boolean)).to.have.length(1);
-    expect(results.filter((result) => !result)).to.have.length(1);
+    await organizeProposalTestHooks.handleOrganizePhaseReply(
+        makeTestEmail("Use Client - Project folder names"),
+        sender,
+        uid,
+        proposalId,
+        proposalDoc,
+        "Use Client - Project folder names",
+        false,
+    );
+
+    const stored = (await db.collection("OrganizeProposals").doc(proposalId).get()).data();
+    if (stored) stored.phaseData = await getOrganizePhaseData(proposalId);
+    const userDoc = (await db.collection("DriveUsers").doc(uid).get()).data();
+    expect(stored?.phase).to.equal("directory_analysis");
+    expect(stored?.phaseData.folderPreferences.confirmedConvention)
+        .to.equal("Client - Project folder names");
+    expect(stored?.phaseData.directoryLayout.folderConvention)
+        .to.equal("Client - Project folder names");
+    expect(userDoc?.preferences.folderConvention)
+        .to.equal("Client - Project folder names");
   });
 
-  it("DT00uak releases an active chunk lock", async function() {
-    const proposalId = `chunk-lock-release-${Date.now()}`;
-    await db.collection("OrganizeProposals").doc(proposalId).set({
-      status: "generating",
-      processingChunks: {"5": "2099-01-01T00:00:00.000Z"},
-    });
+  it("DT00uba routes directory_analysis approval to directory_placement", async function() {
+    const proposalId = `phase-1a-${Date.now()}`;
+    const proposalDoc = makePhaseDoc("directory_analysis");
+    await seedPhaseProposal(proposalId, proposalDoc);
+    setFakeStructuredCompletions([{
+      directory_moves: [{
+        current_path: "Inbox",
+        proposed_path: "01-Documents/Inbox",
+        reason: "Keep loose files under Documents",
+      }],
+      no_changes_needed: false,
+      summary: "Move Inbox under Documents.",
+    }]);
 
-    await releaseChunkProcessing(proposalId, 5);
-    const storedDoc = await db.collection("OrganizeProposals").doc(proposalId).get();
+    await organizeProposalTestHooks.handleOrganizePhaseReply(
+        makeTestEmail("approve"),
+        sender,
+        uid,
+        proposalId,
+        proposalDoc,
+        "approve",
+        true,
+    );
 
-    expect(storedDoc.data()?.processingChunks).to.deep.equal({});
+    const stored = (await db.collection("OrganizeProposals").doc(proposalId).get()).data();
+    if (stored) stored.phaseData = await getOrganizePhaseData(proposalId);
+    expect(stored?.phase).to.equal("directory_placement");
+    expect(stored?.phaseData.directoryLayout.directoryMoves).to.deep.equal([{
+      current_path: "Inbox",
+      proposed_path: "01-Documents/Inbox",
+      reason: "Keep loose files under Documents",
+    }]);
+    expect(getLastSentEmail(sender)?.html).to.include("existing folders could fit");
   });
 
-  it("DT00ual ignores release requests for missing chunk locks", async function() {
-    const proposalId = `chunk-lock-missing-${Date.now()}`;
-    await db.collection("OrganizeProposals").doc(proposalId).set({status: "generating"});
+  it("DT00ubb routes directory_placement revision and stays in that phase", async function() {
+    const proposalId = `phase-1b-${Date.now()}`;
+    const proposalDoc = makePhaseDoc("directory_placement");
+    await seedPhaseProposal(proposalId, proposalDoc);
+    setFakeStructuredCompletions([{
+      directory_moves: [{
+        current_path: "Work",
+        proposed_path: "03-Work",
+        reason: "Use the Work root requested by the user",
+      }],
+      no_changes_needed: false,
+      summary: "Updated the placement recommendation.",
+    }]);
 
-    await releaseChunkProcessing(proposalId, 5);
-    const storedDoc = await db.collection("OrganizeProposals").doc(proposalId).get();
+    await organizeProposalTestHooks.handleOrganizePhaseReply(
+        makeTestEmail("put Work under the Work root"),
+        sender,
+        uid,
+        proposalId,
+        proposalDoc,
+        "put Work under the Work root",
+        false,
+    );
 
-    expect(storedDoc.data()?.processingChunks).to.equal(undefined);
+    const stored = (await db.collection("OrganizeProposals").doc(proposalId).get()).data();
+    if (stored) stored.phaseData = await getOrganizePhaseData(proposalId);
+    expect(stored?.phase).to.equal("directory_placement");
+    expect(stored?.phaseData.directoryLayout.directoryMoves[0].proposed_path).to.equal("03-Work");
+    expect(getLastSentEmail(sender)?.html).to.include("Updated the placement recommendation");
   });
 
-  it("DT00uam claims finalization once for a generating proposal", async function() {
-    const proposalId = `finalization-claim-${Date.now()}`;
-    await db.collection("OrganizeProposals").doc(proposalId).set({status: "generating"});
+  it("DT00ubc persists approved structure and advances to filename_convention", async function() {
+    const proposalId = `phase-1c-${Date.now()}`;
+    const proposalDoc = makePhaseDoc("directory_additions");
+    await seedPhaseProposal(proposalId, proposalDoc);
 
-    const claimed = await claimOrganizeProposalFinalization(proposalId);
-    const storedDoc = await db.collection("OrganizeProposals").doc(proposalId).get();
-    const sentAt = storedDoc.data()?.proposalEmailSentAt;
+    await organizeProposalTestHooks.handleOrganizePhaseReply(
+        makeTestEmail("approve"),
+        sender,
+        uid,
+        proposalId,
+        proposalDoc,
+        "approve",
+        true,
+    );
 
-    expect(claimed).to.equal(true);
-    expect(sentAt).to.be.a("string");
-    expect(Number.isNaN(Date.parse(sentAt))).to.equal(false);
-  });
-
-  it("DT00uan rejects duplicate finalization claims", async function() {
-    const proposalId = `finalization-dup-${Date.now()}`;
-    await db.collection("OrganizeProposals").doc(proposalId).set({
-      status: "generating",
-      proposalEmailSentAt: "2026-04-10T00:00:00.000Z",
-    });
-
-    const claimed = await claimOrganizeProposalFinalization(proposalId);
-    const storedDoc = await db.collection("OrganizeProposals").doc(proposalId).get();
-
-    expect(claimed).to.equal(false);
-    expect(storedDoc.data()?.proposalEmailSentAt).to.equal("2026-04-10T00:00:00.000Z");
-  });
-
-  it("DT00uao rejects finalization claims when the proposal is not generating", async function() {
-    const proposalId = `finalization-status-${Date.now()}`;
-    await db.collection("OrganizeProposals").doc(proposalId).set({status: "pending"});
-
-    const claimed = await claimOrganizeProposalFinalization(proposalId);
-    const storedDoc = await db.collection("OrganizeProposals").doc(proposalId).get();
-
-    expect(claimed).to.equal(false);
-    expect(storedDoc.data()?.proposalEmailSentAt).to.equal(undefined);
-  });
-
-  it("DT00uap grants exactly one finalization claim under contention", async function() {
-    const proposalId = `finalization-race-${Date.now()}`;
-    await db.collection("OrganizeProposals").doc(proposalId).set({status: "generating"});
-
-    const results = await Promise.all([
-      claimOrganizeProposalFinalization(proposalId),
-      claimOrganizeProposalFinalization(proposalId),
+    const stored = (await db.collection("OrganizeProposals").doc(proposalId).get()).data();
+    if (stored) stored.phaseData = await getOrganizePhaseData(proposalId);
+    const userDoc = (await db.collection("DriveUsers").doc(uid).get()).data();
+    expect(stored?.phase).to.equal("filename_convention");
+    expect(stored?.phaseData.filenameConvention.convention).to.equal("YYYY.MM.DD - Description.ext");
+    expect(userDoc?.preferences.approvedDirectoryStructure).to.deep.equal([
+      {folder_path: "01-Documents", description: "Documents"},
     ]);
-
-    expect(results.filter(Boolean)).to.have.length(1);
-    expect(results.filter((result) => !result)).to.have.length(1);
+    expect(getLastSentEmail(sender)?.html).to.include("filename convention");
   });
 
-  it("DT00uad dispatches the next chunk batch only at batch boundaries", function() {
-    expect(getParallelBatchChunkIndexes(1, 12, 10)).to.deep.equal([]);
-    expect(getParallelBatchChunkIndexes(10, 12, 10)).to.deep.equal([10, 11]);
-    expect(getParallelBatchChunkIndexes(12, 12, 10)).to.deep.equal([]);
-    expect(getParallelBatchChunkIndexes(11, 25, 10)).to.deep.equal([]);
-    expect(getParallelBatchChunkIndexes(20, 25, 10)).to.deep.equal([20, 21, 22, 23, 24]);
+  it("DT00ubd routes filename convention revision and stays in that phase", async function() {
+    const proposalId = `phase-2-${Date.now()}`;
+    const proposalDoc = makePhaseDoc("filename_convention");
+    await seedPhaseProposal(proposalId, proposalDoc);
+    setFakeStructuredCompletions([{
+      is_change: true,
+      new_convention: "YYYY-MM-DD_description.ext",
+    }]);
+
+    await organizeProposalTestHooks.handleOrganizePhaseReply(
+        makeTestEmail("use underscores instead"),
+        sender,
+        uid,
+        proposalId,
+        proposalDoc,
+        "use underscores instead",
+        false,
+    );
+
+    const stored = (await db.collection("OrganizeProposals").doc(proposalId).get()).data();
+    if (stored) stored.phaseData = await getOrganizePhaseData(proposalId);
+    expect(stored?.phase).to.equal("filename_convention");
+    expect(stored?.phaseData.filenameConvention.convention).to.equal("YYYY-MM-DD_description.ext");
+    expect(getLastSentEmail(sender)?.html).to.include("YYYY-MM-DD_description.ext");
+  });
+
+  it("DT00ube routes cost_estimate filename revisions back to filename_convention", async function() {
+    const proposalId = `phase-cost-${Date.now()}`;
+    const proposalDoc = makePhaseDoc("cost_estimate");
+    await seedPhaseProposal(proposalId, proposalDoc);
+
+    const result = await organizeProposalTestHooks.handleOrganizePhaseReply(
+        makeTestEmail("change the filename convention"),
+        sender,
+        uid,
+        proposalId,
+        proposalDoc,
+        "change the filename convention",
+        false,
+    );
+
+    expect(result?.proposalSent).to.equal(false);
+    const stored = (await db.collection("OrganizeProposals").doc(proposalId).get()).data();
+    if (stored) stored.phaseData = await getOrganizePhaseData(proposalId);
+    expect(stored?.phase).to.equal("filename_convention");
+  });
+
+});
+
+describe("organize sequential execution proposal builder", function() {
+  it("DT00ubf carries a new directory from file N into file N+1 prompt context", async function() {
+    const files: DriveFileEntry[] = [
+      {
+        id: "file-1",
+        name: "ticket.pdf",
+        mimeType: "application/pdf",
+        parentId: "root",
+        parentPath: "My Drive",
+        createdTime: "2026-04-01T00:00:00.000Z",
+        size: 100,
+        webViewLink: "",
+        isFolder: false,
+      },
+      {
+        id: "file-2",
+        name: "boarding-pass.pdf",
+        mimeType: "application/pdf",
+        parentId: "root",
+        parentPath: "My Drive",
+        createdTime: "2026-04-02T00:00:00.000Z",
+        size: 100,
+        webViewLink: "",
+        isFolder: false,
+      },
+    ];
+    const treeSnapshots: string[][] = [];
+
+    const proposal = await buildSequentialExecutionProposal(
+        files,
+        [{folder_path: "01-Documents", description: "Documents"}],
+        "YYYY.MM.DD - Description.ext",
+        "uid-phase3",
+        async () => "",
+        async (directoryTree, _convention, file) => {
+          treeSnapshots.push(directoryTree.map((folder) => folder.folder_path));
+          if (file.id === "file-1") {
+            return {
+              file_id: file.id,
+              current_name: file.name,
+              current_path: file.parentPath,
+              new_name: "2026.04.01 - Ticket.pdf",
+              target_directory: "02-Travel",
+              action: "move_and_rename",
+              needs_new_directory: true,
+              new_directory: {
+                folder_path: "02-Travel",
+                description: "Travel documents",
+              },
+              reason: "Travel ticket",
+            };
+          }
+          return {
+            file_id: file.id,
+            current_name: file.name,
+            current_path: file.parentPath,
+            new_name: "2026.04.02 - Boarding Pass.pdf",
+            target_directory: "02-Travel",
+            action: "move_and_rename",
+            needs_new_directory: false,
+            new_directory: null,
+            reason: "Related travel document",
+          };
+        },
+    );
+
+    expect(treeSnapshots[0]).to.deep.equal(["01-Documents"]);
+    expect(treeSnapshots[1]).to.deep.equal(["01-Documents", "02-Travel"]);
+    expect(proposal.proposed_folders.map((folder) => folder.folder_path))
+        .to.deep.equal(["01-Documents", "02-Travel"]);
+    expect(proposal.file_actions.map((action) => action.new_folder))
+        .to.deep.equal(["02-Travel", "02-Travel"]);
   });
 });
 
@@ -1660,17 +1490,6 @@ describe("admin resume routes", function() {
       .post("/v2driveAdminOrganize")
       .set("Content-Type", "application/json")
       .send({action: "list"});
-
-    expect(res).to.have.status(401);
-    expect(res.body).to.deep.equal({error: "Unauthorized"});
-  });
-
-  it("DT00uc rejects standalone retry without x-admin-key", async function() {
-    const res = await chaiWithHttp
-      .request(`${DISPATCH_URL}/${APP_ID}/${DISPATCH_REGION}`)
-      .get("/v2driveRetryOrganizeProposal")
-      .query({proposalId: "missing-proposal"})
-      .set("Content-Type", "application/json");
 
     expect(res).to.have.status(401);
     expect(res.body).to.deep.equal({error: "Unauthorized"});

@@ -148,6 +148,74 @@ export const DriveOrganizeProposalSchema = z.object({
 
 export type DriveOrganizeProposal = z.infer<typeof DriveOrganizeProposalSchema>;
 
+export type OrganizePhase =
+  "folder_preferences" |
+  "directory_analysis" |
+  "directory_placement" |
+  "directory_additions" |
+  "filename_convention" |
+  "cost_estimate" |
+  "executing" |
+  "completed";
+
+export interface DirectoryMoveData {
+  current_path: string;
+  proposed_path: string;
+  reason: string;
+}
+
+export interface DirectoryLayoutData {
+  currentTreeSummary: string;
+  userPrompt: string;
+  folderConvention?: string;
+  conventionDescription?: string;
+  proposedStructure?: z.infer<typeof OrganizeFolderSchema>[];
+  directoryMoves?: DirectoryMoveData[];
+  approvedStructure?: z.infer<typeof OrganizeFolderSchema>[];
+  addedDirectories?: string[];
+  summary?: string;
+}
+
+export interface FolderPreferencesData {
+  detectedConvention?: string;
+  suggestedConvention: string;
+  confirmedConvention?: string;
+  summary?: string;
+  topLevelFolderNames?: string[];
+}
+
+export interface FilenameConventionData {
+  convention: string;
+  examples?: string[];
+}
+
+export interface CostEstimateData {
+  totalFiles: number;
+  textFiles: number;
+  imageFiles: number;
+  totalCost: number;
+}
+
+export interface ExecutionData {
+  chunkSize: number;
+  totalChunks: number;
+  completedChunks: number;
+}
+
+export interface OrganizePhaseData {
+  folderPreferences?: FolderPreferencesData;
+  directoryLayout?: DirectoryLayoutData;
+  filenameConvention?: FilenameConventionData;
+  costEstimate?: CostEstimateData;
+  execution?: ExecutionData;
+}
+
+export interface DriveUserPreferences {
+  folderConvention?: string;
+  approvedDirectoryStructure?: z.infer<typeof OrganizeFolderSchema>[];
+  filenameConvention?: string;
+}
+
 export const FolderOperationSchema = z.object({
   action: z.enum(["create", "rename", "merge", "delete", "preserve_source"]).describe(
       "Folder operation type",
@@ -169,13 +237,6 @@ export const DriveOrganizeRevisionSchema = z.object({
 
 export type FolderOperation = z.infer<typeof FolderOperationSchema>;
 export type DriveOrganizeRevision = z.infer<typeof DriveOrganizeRevisionSchema>;
-
-export interface OrganizeChunkResult {
-  chunkIndex: number;
-  proposed_folders: DriveOrganizeProposal["proposed_folders"];
-  file_actions: DriveOrganizeProposal["file_actions"];
-  summary: string;
-}
 
 // Organize processing result
 export interface OrganizeProcessingResult {
@@ -206,6 +267,8 @@ export interface OrganizeProposalDoc {
   senderEmail: string;
   emailId: string;
   status: "generating" | "pending" | "approved" | "executing" | "completed" | "failed" | "undone";
+  phase?: OrganizePhase;
+  phaseData?: OrganizePhaseData;
   createdAt: string;
   expiresAt: string;
   storagePath: string;
@@ -217,11 +280,7 @@ export interface OrganizeProposalDoc {
   generationStartedAt?: string;
   attemptCount?: number;
   lastError?: string;
-  currentChunk?: number;
-  completedChunkIndices?: number[];
-  totalChunks?: number;
   proposalEmailSentAt?: string;
-  processingChunks?: Record<string, string>;
 }
 
 // Snapshot for undo (stored in Firestore)
@@ -259,10 +318,13 @@ export interface DrivePromptConfig {
 export interface DrivePrompts {
   proposeFilePlacement: DrivePromptConfig;
   interpretMoveInstructions: DrivePromptConfig;
-  proposeOrganization: DrivePromptConfig;
   reviseOrganization: DrivePromptConfig;
-  refineOrganization: DrivePromptConfig;
-  consolidateSummaries: DrivePromptConfig;
+  detectFolderConvention: DrivePromptConfig;
+  analyzeDirectoryStructure: DrivePromptConfig;
+  evaluateDirectoryPlacement: DrivePromptConfig;
+  finalizeDirectoryMap: DrivePromptConfig;
+  classifyConventionChange: DrivePromptConfig;
+  proposeFileAction: DrivePromptConfig;
 }
 
 // ============================================================================
@@ -292,6 +354,12 @@ export interface DriveMailTemplates {
   organizeScanStarted: DriveMailTemplate;
   organizeExecutionStarted: DriveMailTemplate;
   organizeProposal: DriveMailTemplate;
+  organizeFolderPreferences: DriveMailTemplate;
+  organizePhase1aProposal: DriveMailTemplate;
+  organizePhase1bProposal: DriveMailTemplate;
+  organizePhase1cProposal: DriveMailTemplate;
+  organizePhase2Proposal: DriveMailTemplate;
+  organizeCostEstimate: DriveMailTemplate;
   organizeError: DriveMailTemplate;
   organizeNoFiles: DriveMailTemplate;
   organizeComplete: DriveMailTemplate;
@@ -354,7 +422,7 @@ export interface OrganizeActionTaskData {
   emailId: string;
 }
 
-export interface OrganizeChunkTaskData {
+export interface ExecutionChunkTaskData {
   proposalId: string;
   emailId: string;
   uid: string;
@@ -364,11 +432,5 @@ export interface OrganizeChunkTaskData {
 export interface OrganizeIntermediateState {
   driveStructureSummary: string;
   fileEntries: DriveFileEntry[];
-  chunkSize: number;
-  seedFolders: DriveOrganizeProposal["proposed_folders"];
-  folderRenameActions: DriveOrganizeProposal["file_actions"];
-  completedChunks: number;
-  totalChunks: number;
-  parallelChunkLimit: number;
   senderEmail: string;
 }

@@ -16,6 +16,7 @@ lsof -ti :4400 | xargs kill
 lsof -ti :5000 | xargs kill
 lsof -ti :5002 | xargs kill
 lsof -ti :8080 | xargs kill
+lsof -ti :9199 | xargs kill
 
 echo "Building TypeScript..."
 npm run build || { echo "Build failed"; exit 1; }
@@ -32,6 +33,8 @@ echo "Starting firebase emulator (using dev project)"
 firebase emulators:start --config ../firebase.drive.json --project fwd2cal-dev-2578e > /dev/stdout &
 LOGS_PID=$!
 sleep 30
+
+export FIREBASE_STORAGE_EMULATOR_HOST="127.0.0.1:9199"
 
 echo "running drive tests"
 ./node_modules/.bin/mocha test/drive.test.cjs --timeout 99999999999 --bail "$@" || TEST_FAILED=true

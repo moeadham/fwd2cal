@@ -7,29 +7,144 @@ import {TransformedEmail} from "../../../util/types";
 import {AGENT_EMAIL_ADDRESS, AGENT_NAME} from "../config";
 import {applyTemplate, isDriveAuthError} from "../driveUtils";
 import {driveMailTemplates, driveOrganizeActionUrl} from "../mailTemplates";
-import {OrganizeEmbeddedData, OrganizeProcessingResult, OrganizeProposalDoc} from "../types";
+import {
+  DriveFileEntry,
+  OrganizeEmbeddedData,
+  OrganizeProcessingResult,
+  OrganizeProposalDoc,
+} from "../types";
 import {buildOrganizeEmbeddedData, renderFolderTree} from "../templates/folderTree";
 import {
+  calculateOrganizeCostEstimate,
   calculateOrganizeCostFromMimeMap,
   emptyResult,
   extractReplyBody,
   formatSummaryHtml,
   isApprovalText,
+  sendOrganizeCostEstimateEmail,
   sendOrganizeEmailResponse,
+  sendOrganizeFolderPreferencesEmail,
+  sendOrganizePhase1aEmail,
+  sendOrganizePhase1bEmail,
+  sendOrganizePhase1cEmail,
+  sendOrganizePhase2Email,
   sendOrganizeProposalEmail,
   signActionToken,
 } from "./organizeHelpers";
-import {executeOrganizeProposal} from "./organizeExecution";
+import {executeOrganizeProposal, startChunkedExecution} from "./organizeExecution";
 import {cleanupEmptyManagedFolders, handleOrganizeUndo, undoOrganizeActions} from "./organizeUndo";
 import {verifyOrganizeResults} from "./organizeVerify";
 import {sendOrganizeAuthRequiredEmail} from "./organizeMain";
 import {
   finalizeOrganizeProposal,
+  getOrganizeIntermediateState,
+  getOrganizePhaseData,
   getOrganizeProposal,
   getUserFromEmail,
+  saveDriveUserPreferences,
   updateOrganizeProposalStatus,
 } from "../../../util/firestoreHandler";
-import {mergeRevisedProposal, renumberFoldersContiguously, reviseOrganization} from "../llm";
+import {
+  analyzeDirectoryStructure,
+  classifyConventionChange,
+  evaluateDirectoryPlacement,
+  finalizeDirectoryMap,
+  mergeRevisedProposal,
+  renumberFoldersContiguously,
+  reviseOrganization,
+} from "../llm";
+const DEFAULT_FILENAME_CONVENTION = "YYYY.MM.DD - Description.ext";
+
+/** Loads the Drive tree summary from GCS intermediate state. */
+async function loadTreeSummary(proposalId: string): Promise<string> {
+  const state = await getOrganizeIntermediateState(proposalId);
+  return String(state.driveStructureSummary || "");
+}
+
+/** Handles replies during Phase 0 folder naming preference confirmation. */
+async function handleFolderPreferencesReply(
+    email: TransformedEmail,
+    sender: string,
+    uid: string,
+    proposalId: string,
+    proposalDoc: OrganizeProposalDoc,
+    replyBody: string,
+    isApproval: boolean,
+): Promise<OrganizeProcessingResult> {
+  const folderPreferences = proposalDoc.phaseData?.folderPreferences;
+  if (!folderPreferences?.suggestedConvention) {
+    return emptyResult("Folder preferences state missing");
+  }
+
+  const treeSummary = await loadTreeSummary(proposalId);
+  const topLevelFolderNames = folderPreferences.topLevelFolderNames || [];
+  const confirmedConvention = isApproval ?
+    folderPreferences.suggestedConvention :
+    replyBody.trim();
+  if (!confirmedConvention) {
+    await sendOrganizeFolderPreferencesEmail(
+        sender,
+        email,
+        proposalId,
+        topLevelFolderNames,
+        folderPreferences.detectedConvention || "",
+        folderPreferences.suggestedConvention,
+    );
+    return emptyResult("Empty folder convention");
+  }
+
+  // For revisions, extract the clean convention from the user's natural language reply
+  let resolvedConvention = confirmedConvention;
+  if (!isApproval) {
+    const parsed = await classifyConventionChange(
+        folderPreferences.suggestedConvention,
+        confirmedConvention,
+        uid,
+    );
+    if (parsed.is_change && parsed.new_convention) {
+      resolvedConvention = parsed.new_convention;
+    }
+  }
+  await saveDriveUserPreferences(uid, {folderConvention: resolvedConvention});
+  const analysis = await analyzeDirectoryStructure(
+      treeSummary,
+      resolvedConvention,
+      email.text || email.html || "",
+      uid,
+  );
+  const proposedStructure = analysis.proposed_structure.map((folder) => ({
+    folder_path: folder.folder_path,
+    description: folder.description,
+  }));
+  const nextPhaseData = {
+    ...proposalDoc.phaseData,
+    folderPreferences: {
+      ...folderPreferences,
+      confirmedConvention: resolvedConvention,
+    },
+    directoryLayout: {
+      userPrompt: email.text || email.html || "",
+      folderConvention: resolvedConvention,
+      conventionDescription: analysis.convention_description,
+      proposedStructure,
+      summary: analysis.summary,
+    },
+  };
+
+  await updateOrganizeProposalStatus(proposalId, "pending", {
+    phase: "directory_analysis",
+    phaseData: nextPhaseData,
+  });
+  await sendOrganizePhase1aEmail(
+      sender,
+      email,
+      proposalId,
+      analysis.convention_description,
+      analysis.summary,
+      proposedStructure,
+  );
+  return emptyResult();
+}
 
 /** Handles a user reply that requests changes to a pending organize proposal. */
 export async function handleOrganizeRevision(
@@ -105,6 +220,375 @@ export async function handleOrganizeRevision(
     return emptyResult("Revision failed");
   }
 }
+
+/** Handles replies during Phase 1a directory analysis. */
+async function handleDirectoryAnalysisReply(
+    email: TransformedEmail,
+    sender: string,
+    uid: string,
+    proposalId: string,
+    proposalDoc: OrganizeProposalDoc,
+    replyBody: string,
+    isApproval: boolean,
+): Promise<OrganizeProcessingResult> {
+  const layout = proposalDoc.phaseData?.directoryLayout;
+  if (!layout) {
+    return emptyResult("Directory analysis state missing");
+  }
+  const treeSummary = await loadTreeSummary(proposalId);
+
+  if (isApproval) {
+    const result = await evaluateDirectoryPlacement(
+        treeSummary,
+        layout.proposedStructure || [],
+        uid,
+    );
+    const nextPhaseData = {
+      ...proposalDoc.phaseData,
+      directoryLayout: {
+        ...layout,
+        directoryMoves: result.directory_moves,
+        summary: result.summary,
+      },
+    };
+    await updateOrganizeProposalStatus(proposalId, "pending", {
+      phase: "directory_placement",
+      phaseData: nextPhaseData,
+    });
+    await sendOrganizePhase1bEmail(sender, email, proposalId, result.summary, result.directory_moves);
+    return emptyResult();
+  }
+
+  const currentProposedTree = (layout.proposedStructure || [])
+      .map((f: {folder_path: string; description: string}) =>
+        `${f.folder_path}/ - ${f.description}`)
+      .join("\n");
+  const revisionPrompt =
+      `${layout.userPrompt || ""}\n\n` +
+      `## Current Proposed Structure (revise this)\n${currentProposedTree}\n\n` +
+      `## User Revision Request\n${replyBody}`;
+  const result = await analyzeDirectoryStructure(
+      treeSummary,
+      layout.folderConvention || proposalDoc.phaseData?.folderPreferences?.confirmedConvention || "",
+      revisionPrompt,
+      uid,
+  );
+  const proposedStructure = result.proposed_structure.map((folder) => ({
+    folder_path: folder.folder_path,
+    description: folder.description,
+  }));
+  const nextPhaseData = {
+    ...proposalDoc.phaseData,
+    directoryLayout: {
+      ...layout,
+      conventionDescription: result.convention_description,
+      proposedStructure,
+      summary: result.summary,
+    },
+  };
+  await updateOrganizeProposalStatus(proposalId, "pending", {
+    phase: "directory_analysis",
+    phaseData: nextPhaseData,
+  });
+  await sendOrganizePhase1aEmail(
+      sender,
+      email,
+      proposalId,
+      result.convention_description,
+      result.summary,
+      proposedStructure,
+      true,
+  );
+  return emptyResult();
+}
+
+/** Handles replies during Phase 1b directory placement. */
+async function handleDirectoryPlacementReply(
+    email: TransformedEmail,
+    sender: string,
+    uid: string,
+    proposalId: string,
+    proposalDoc: OrganizeProposalDoc,
+    replyBody: string,
+    isApproval: boolean,
+): Promise<OrganizeProcessingResult> {
+  const layout = proposalDoc.phaseData?.directoryLayout;
+  if (!layout) {
+    return emptyResult("Directory placement state missing");
+  }
+  const treeSummary = await loadTreeSummary(proposalId);
+
+  if (isApproval) {
+    const result = await finalizeDirectoryMap(
+        layout.proposedStructure || [],
+        layout.directoryMoves || [],
+        treeSummary,
+        uid,
+    );
+    const nextPhaseData = {
+      ...proposalDoc.phaseData,
+      directoryLayout: {
+        ...layout,
+        approvedStructure: result.final_directories,
+        addedDirectories: result.added_directories,
+        summary: result.summary,
+      },
+    };
+    await updateOrganizeProposalStatus(proposalId, "pending", {
+      phase: "directory_additions",
+      phaseData: nextPhaseData,
+    });
+    await sendOrganizePhase1cEmail(
+        sender,
+        email,
+        proposalId,
+        result.summary,
+        result.final_directories,
+        result.added_directories,
+    );
+    return emptyResult();
+  }
+
+  const result = await evaluateDirectoryPlacement(
+      treeSummary,
+      layout.proposedStructure || [],
+      uid,
+      replyBody,
+  );
+  const nextPhaseData = {
+    ...proposalDoc.phaseData,
+    directoryLayout: {
+      ...layout,
+      directoryMoves: result.directory_moves,
+      summary: result.summary,
+    },
+  };
+  await updateOrganizeProposalStatus(proposalId, "pending", {
+    phase: "directory_placement",
+    phaseData: nextPhaseData,
+  });
+  await sendOrganizePhase1bEmail(sender, email, proposalId, result.summary, result.directory_moves);
+  return emptyResult();
+}
+
+/** Handles replies during Phase 1c final directory additions. */
+async function handleDirectoryAdditionsReply(
+    email: TransformedEmail,
+    sender: string,
+    uid: string,
+    proposalId: string,
+    proposalDoc: OrganizeProposalDoc,
+    replyBody: string,
+    isApproval: boolean,
+): Promise<OrganizeProcessingResult> {
+  const layout = proposalDoc.phaseData?.directoryLayout;
+  if (!layout) {
+    return emptyResult("Directory additions state missing");
+  }
+
+  if (isApproval) {
+    const approvedStructure = layout.approvedStructure || layout.proposedStructure || [];
+    await saveDriveUserPreferences(uid, {
+      approvedDirectoryStructure: approvedStructure,
+    });
+    const nextPhaseData = {
+      ...proposalDoc.phaseData,
+      directoryLayout: {
+        ...layout,
+        approvedStructure,
+      },
+      filenameConvention: {
+        convention: DEFAULT_FILENAME_CONVENTION,
+      },
+    };
+    await updateOrganizeProposalStatus(proposalId, "pending", {
+      phase: "filename_convention",
+      phaseData: nextPhaseData,
+    });
+    await sendOrganizePhase2Email(sender, email, proposalId, DEFAULT_FILENAME_CONVENTION);
+    return emptyResult();
+  }
+
+  const treeSummary = await loadTreeSummary(proposalId);
+  const result = await finalizeDirectoryMap(
+      layout.proposedStructure || [],
+      layout.directoryMoves || [],
+      treeSummary,
+      uid,
+      replyBody,
+  );
+  const nextPhaseData = {
+    ...proposalDoc.phaseData,
+    directoryLayout: {
+      ...layout,
+      approvedStructure: result.final_directories,
+      addedDirectories: result.added_directories,
+      summary: result.summary,
+    },
+  };
+  await updateOrganizeProposalStatus(proposalId, "pending", {
+    phase: "directory_additions",
+    phaseData: nextPhaseData,
+  });
+  await sendOrganizePhase1cEmail(
+      sender,
+      email,
+      proposalId,
+      result.summary,
+      result.final_directories,
+      result.added_directories,
+  );
+  return emptyResult();
+}
+
+/** Handles replies during Phase 2 filename convention selection. */
+async function handleFilenameConventionReply(
+    email: TransformedEmail,
+    sender: string,
+    uid: string,
+    proposalId: string,
+    proposalDoc: OrganizeProposalDoc,
+    replyBody: string,
+    isApproval: boolean,
+): Promise<OrganizeProcessingResult> {
+  const convention =
+    proposalDoc.phaseData?.filenameConvention?.convention ||
+    DEFAULT_FILENAME_CONVENTION;
+
+  if (isApproval) {
+    await saveDriveUserPreferences(uid, {filenameConvention: convention});
+    const state = await getOrganizeIntermediateState(proposalId);
+    const fileEntries = (Array.isArray(state.fileEntries) ? state.fileEntries : []) as DriveFileEntry[];
+    const cost = calculateOrganizeCostEstimate(fileEntries);
+    const approvedStructure =
+      proposalDoc.phaseData?.directoryLayout?.approvedStructure ||
+      proposalDoc.phaseData?.directoryLayout?.proposedStructure ||
+      [];
+    const mimeMap = Object.fromEntries(
+        fileEntries.filter((file) => !file.isFolder)
+            .map((file) => [file.id, file.mimeType]),
+    );
+    await updateOrganizeProposalStatus(proposalId, "pending", {
+      phase: "cost_estimate",
+      cost,
+      mimeMap,
+      phaseData: {
+        ...proposalDoc.phaseData,
+        filenameConvention: {convention},
+        costEstimate: {
+          totalFiles: cost.totalFiles,
+          textFiles: cost.textFiles,
+          imageFiles: cost.imageFiles,
+          totalCost: cost.totalCost,
+        },
+      },
+    });
+    await sendOrganizeCostEstimateEmail(sender, email, proposalId, approvedStructure, convention, cost);
+    return {
+      totalFiles: cost.totalFiles,
+      filesToMove: cost.filesToMove,
+      filesToRename: cost.filesToRename,
+      totalCost: cost.totalCost,
+      proposalSent: true,
+    };
+  }
+
+  const change = await classifyConventionChange(convention, replyBody, uid);
+  if (!change.is_change) {
+    await sendOrganizePhase2Email(sender, email, proposalId, convention);
+    return emptyResult("Filename convention change unclear");
+  }
+
+  const nextPhaseData = {
+    ...proposalDoc.phaseData,
+    filenameConvention: {
+      convention: change.new_convention,
+    },
+  };
+  await updateOrganizeProposalStatus(proposalId, "pending", {
+    phase: "filename_convention",
+    phaseData: nextPhaseData,
+  });
+  await sendOrganizePhase2Email(sender, email, proposalId, change.new_convention);
+  return emptyResult();
+}
+
+/** Handles replies during the final cost-estimate phase. */
+async function handleCostEstimateReply(
+    email: TransformedEmail,
+    sender: string,
+    uid: string,
+    proposalId: string,
+    proposalDoc: OrganizeProposalDoc,
+    replyBody: string,
+    isApproval: boolean,
+): Promise<OrganizeProcessingResult> {
+  if (isApproval) {
+    return startChunkedExecution(email, sender, uid, proposalId, proposalDoc);
+  }
+
+  const lowered = replyBody.toLowerCase();
+  if (lowered.includes("folder") || lowered.includes("director")) {
+    await updateOrganizeProposalStatus(proposalId, "pending", {
+      phase: "directory_additions",
+    });
+    await sendOrganizeEmailResponse(
+        sender,
+        email,
+        "No problem. Reply with the folder structure changes you'd like, or reply &quot;approve&quot; to keep it.",
+    );
+    return emptyResult("Returned to directory additions");
+  }
+
+  await updateOrganizeProposalStatus(proposalId, "pending", {
+    phase: "filename_convention",
+  });
+  await sendOrganizePhase2Email(
+      sender,
+      email,
+      proposalId,
+      proposalDoc.phaseData?.filenameConvention?.convention || DEFAULT_FILENAME_CONVENTION,
+  );
+  return emptyResult("Returned to filename convention");
+}
+
+/** Routes replies to the active organize-drive phase. */
+async function handleOrganizePhaseReply(
+    email: TransformedEmail,
+    sender: string,
+    uid: string,
+    proposalId: string,
+    proposalDoc: OrganizeProposalDoc,
+    replyBody: string,
+    isApproval: boolean,
+): Promise<OrganizeProcessingResult | null> {
+  switch (proposalDoc.phase) {
+    case "folder_preferences":
+      return handleFolderPreferencesReply(email, sender, uid, proposalId, proposalDoc, replyBody, isApproval);
+    case "directory_analysis":
+      return handleDirectoryAnalysisReply(email, sender, uid, proposalId, proposalDoc, replyBody, isApproval);
+    case "directory_placement":
+      return handleDirectoryPlacementReply(email, sender, uid, proposalId, proposalDoc, replyBody, isApproval);
+    case "directory_additions":
+      return handleDirectoryAdditionsReply(email, sender, uid, proposalId, proposalDoc, replyBody, isApproval);
+    case "filename_convention":
+      return handleFilenameConventionReply(email, sender, uid, proposalId, proposalDoc, replyBody, isApproval);
+    case "cost_estimate":
+      return handleCostEstimateReply(email, sender, uid, proposalId, proposalDoc, replyBody, isApproval);
+    default:
+      return null;
+  }
+}
+
+export const organizeProposalTestHooks = {
+  handleOrganizePhaseReply,
+  handleFolderPreferencesReply,
+  handleDirectoryAnalysisReply,
+  handleDirectoryPlacementReply,
+  handleDirectoryAdditionsReply,
+  handleFilenameConventionReply,
+  handleCostEstimateReply,
+};
 // ============================================================================
 // APPROVAL HANDLER
 // ============================================================================
@@ -190,11 +674,12 @@ export async function handleOrganizeProposalReply(
     return emptyResult("Proposal expired");
   }
 
-  if (!proposalDoc.proposal || !proposalDoc.cost) {
-    logger.error("Drive organize: Proposal payload missing", {proposalId});
-    const html = applyTemplate(driveMailTemplates.organizeError.html, {});
-    await sendOrganizeEmailResponse(sender, email, html);
-    return emptyResult("Proposal missing");
+  // Load phaseData from GCS (not stored in Firestore for scalability)
+  if (!proposalDoc.phaseData) {
+    const gcsPhaseData = await getOrganizePhaseData(proposalId);
+    if (gcsPhaseData) {
+      proposalDoc.phaseData = gcsPhaseData as OrganizeProposalDoc["phaseData"];
+    }
   }
 
   const replyBody = extractReplyBody(email.text || "");
@@ -205,6 +690,26 @@ export async function handleOrganizeProposalReply(
       "Reply with changes you'd like to make, or reply &quot;approve&quot; to proceed.";
     await sendOrganizeEmailResponse(sender, email, html);
     return emptyResult("Empty reply");
+  }
+
+  const phaseResult = await handleOrganizePhaseReply(
+      email,
+      sender,
+      uid,
+      proposalId,
+      proposalDoc,
+      replyBody,
+      isApproval,
+  );
+  if (phaseResult) {
+    return phaseResult;
+  }
+
+  if (!proposalDoc.proposal || !proposalDoc.cost) {
+    logger.error("Drive organize: Proposal payload missing", {proposalId});
+    const html = applyTemplate(driveMailTemplates.organizeError.html, {});
+    await sendOrganizeEmailResponse(sender, email, html);
+    return emptyResult("Proposal missing");
   }
 
   if (!isApproval && proposalDoc.status === "pending") {

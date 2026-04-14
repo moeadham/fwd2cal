@@ -9,16 +9,16 @@ import {
 import {getEmailThreadHeaders, threadEmailHtml} from "../../../util/emailUtils";
 import {sendEmailResend} from "../../../util/resend";
 import {TransformedEmail} from "../../../util/types";
-import {applyTemplate, toTitleCase} from "../driveUtils";
+import {applyTemplate} from "../driveUtils";
 import {
   DriveFileEntry,
   DriveOrganizeProposal,
+  DirectoryMoveData,
   OrganizeCostBreakdown,
   OrganizeEmbeddedData,
   OrganizeProcessingResult,
 } from "../types";
 import {driveMailTemplates, driveOrganizeActionUrl} from "../mailTemplates";
-import {normalizeFolderPrefixes} from "../llm";
 import {updateOrganizeProposalStatus} from "../../../util/firestoreHandler";
 import {renderFolderTree, buildOrganizeEmbeddedData} from "../templates/folderTree";
 /** Signs organize action URLs with the configured HMAC key. */
@@ -118,7 +118,7 @@ export function buildFileEntries(
     id: f.id,
     name: f.name,
     mimeType: f.mimeType,
-    parentId: f.parents[0] || null,
+    parentId: parentMap.get(f.id) || null,
     parentPath: getPath(f.id),
     createdTime: f.createdTime,
     size: parseInt(f.size, 10) || 0,
@@ -139,12 +139,14 @@ export function buildFileEntries(
  */
 export function buildDriveStructureSummary(
     files: DriveFileEntry[],
+    rootFolderId?: string,
 ): {treeSummary: string; fileCount: number; folderCount: number} {
+  const rootId = rootFolderId || "root";
   const folders = files.filter((f) => f.isFolder);
   const nonFolders = files.filter((f) => !f.isFolder);
   const foldersByParent = new Map<string, DriveFileEntry[]>();
   for (const folder of folders) {
-    const parentId = folder.parentId || "root";
+    const parentId = folder.parentId || rootId;
     if (!foldersByParent.has(parentId)) {
       foldersByParent.set(parentId, []);
     }
@@ -152,7 +154,7 @@ export function buildDriveStructureSummary(
   }
   const fileCountByFolder = new Map<string, number>();
   for (const file of nonFolders) {
-    const parentId = file.parentId || "root";
+    const parentId = file.parentId || rootId;
     fileCountByFolder.set(parentId, (fileCountByFolder.get(parentId) || 0) + 1);
   }
   /** Renders a nested folder tree summary for prompt context. */
@@ -168,19 +170,9 @@ export function buildDriveStructureSummary(
     }
     return result;
   }
-  const rootFileCount = fileCountByFolder.get("root") || 0;
+  const rootFileCount = fileCountByFolder.get(rootId) || 0;
   let treeSummary = `My Drive/ (${rootFileCount} files at root)\n`;
-  treeSummary += renderTree("root", "  ");
-  const knownFolderIds = new Set(folders.map((f) => f.id));
-  for (const folder of folders) {
-    if (folder.parentId && !knownFolderIds.has(folder.parentId) &&
-        folder.parentId !== "root" && !foldersByParent.has(folder.parentId)) {
-      const count = fileCountByFolder.get(folder.id) || 0;
-      const countStr = count > 0 ? ` (${count} files)` : "";
-      treeSummary += `  ${folder.name}/${countStr}\n`;
-      treeSummary += renderTree(folder.id, "    ");
-    }
-  }
+  treeSummary += renderTree(rootId, "  ");
   return {
     treeSummary,
     fileCount: nonFolders.length,
@@ -231,6 +223,31 @@ export function calculateOrganizeCost(
     filesToMove,
     filesToRename,
     filesToKeep,
+    textFiles,
+    imageFiles,
+    costPerTextFile,
+    costPerImageFile,
+    totalCost,
+  };
+}
+/** Calculates the cost estimate before content-aware execution. */
+export function calculateOrganizeCostEstimate(
+    fileEntries: DriveFileEntry[],
+): OrganizeCostBreakdown {
+  const textMaxTokens = ORGANIZE_DRIVE_TEXT_MAX_TOKENS.value();
+  const imageMaxTokens = ORGANIZE_DRIVE_IMAGE_MAX_TOKENS.value();
+  const costPerMTokens = parseFloat(ORGANIZE_DRIVE_COST_PER_M_INPUT_TOKENS.value());
+  const costPerTextFile = (textMaxTokens * costPerMTokens) / 1_000_000;
+  const costPerImageFile = (imageMaxTokens * costPerMTokens) / 1_000_000;
+  const nonFolderFiles = fileEntries.filter((file) => !file.isFolder);
+  const imageFiles = nonFolderFiles.filter((file) => isImageMimeType(file.mimeType)).length;
+  const textFiles = nonFolderFiles.length - imageFiles;
+  const totalCost = textFiles * costPerTextFile + imageFiles * costPerImageFile;
+  return {
+    totalFiles: nonFolderFiles.length,
+    filesToMove: nonFolderFiles.length,
+    filesToRename: nonFolderFiles.length,
+    filesToKeep: 0,
     textFiles,
     imageFiles,
     costPerTextFile,
@@ -320,93 +337,184 @@ export function formatSummaryHtml(summary: string): string {
   html = html.replace(/\d{4}\.\d{2}\.\d{2}\s*-\s*\S+/g, (match) => `<b>${match}</b>`);
   return html;
 }
-type CanonicalRootFolder = {
-  prefix: string;
-  name: string;
-  description: string;
-  patterns: RegExp[];
-};
-export const CANONICAL_ROOT_FOLDERS: CanonicalRootFolder[] = [
-  {
-    prefix: "01",
-    name: "Documents",
-    description: "Contracts, legal, medical, insurance, housing, vehicles",
-    patterns: [
-      /document|contract|legal|medical|health|insurance|policy/i,
-      /housing|home|property|lease|mortgage|vehicle|car|auto|registration/i,
-    ],
-  },
-  {
-    prefix: "02",
-    name: "Finance",
-    description: "Tax returns, invoices, receipts, bank statements, budgets",
-    patterns: [
-      /financ|tax|invoice|receipt|bank|budget|accounting|bill|payment/i,
-    ],
-  },
-  {
-    prefix: "03",
-    name: "Work",
-    description: "Employment, pay stubs, resumes, work projects, clients",
-    patterns: [/work|job|employ|career|resume|cv|pay.?stub|client|business|office/i],
-  },
-  {
-    prefix: "04",
-    name: "Media",
-    description: "Photos, videos, screenshots, creative assets",
-    patterns: [/photo|picture|image|video|camera|screenshot|media|film|movie/i],
-  },
-  {
-    prefix: "05",
-    name: "Projects",
-    description: "Side projects, hobbies, volunteer, creative work",
-    patterns: [/project|hobby|creative|volunteer|side|craft/i],
-  },
-  {
-    prefix: "06",
-    name: "Personal",
-    description: "Identity docs, vital records, family, correspondence",
-    patterns: [/personal|family|identity|passport|birth|vital|correspondence|letter/i],
-  },
-  {
-    prefix: "07",
-    name: "Education",
-    description: "Transcripts, diplomas, coursework, certifications, training",
-    patterns: [/educat|school|university|college|course|class|diploma|transcript|certif|training|learn/i],
-  },
-  {
-    prefix: "08",
-    name: "Travel",
-    description: "Itineraries, bookings, passport copies, visa docs",
-    patterns: [/travel|trip|vacation|flight|booking|itinerar|visa|hotel/i],
-  },
-  {
-    prefix: "09",
-    name: "Archive",
-    description: "Old/inactive files, completed projects, historical records",
-    patterns: [/archive|old|backup|legacy|completed|inactive/i],
-  },
-];
-/** Normalizes folder names for canonical category matching. */
-export function normalizeFolderNameForMatching(name: string): string {
-  return name
-      .replace(/^\d{2,3}\s*-\s*/, "")
-      .replace(/[_-]+/g, " ")
-      .replace(/\s+/g, " ")
-      .trim()
-      .toLowerCase();
+/** Escapes text for small HTML template fragments. */
+function escapeHtml(value: string): string {
+  return value
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
 }
-/** Builds the canonical numbered folder path. */
-export function canonicalFolderPath(folder: CanonicalRootFolder): string {
-  return `${folder.prefix}-${folder.name}`;
+/** Renders directory paths and descriptions for phase emails. */
+function renderDirectoryList(
+    folders: DriveOrganizeProposal["proposed_folders"],
+): string {
+  if (folders.length === 0) {
+    return "(no folders proposed)";
+  }
+
+  type TreeNode = {
+    children: Map<string, TreeNode>;
+    description: string;
+  };
+
+  const root: TreeNode = {children: new Map(), description: ""};
+
+  for (const folder of [...folders].sort((a, b) => a.folder_path.localeCompare(b.folder_path))) {
+    const segments = folder.folder_path.split("/").filter(Boolean);
+    let current = root;
+    for (let i = 0; i < segments.length; i++) {
+      const seg = segments[i];
+      if (!current.children.has(seg)) {
+        current.children.set(seg, {children: new Map(), description: ""});
+      }
+      const child = current.children.get(seg)!;
+      if (i === segments.length - 1) {
+        child.description = folder.description;
+      }
+      current = child;
+    }
+  }
+
+  let html = "My Drive/<br>";
+  function render(node: TreeNode, prefix: string): void {
+    const entries = [...node.children.entries()];
+    for (let i = 0; i < entries.length; i++) {
+      const [name, child] = entries[i];
+      const isLast = i === entries.length - 1;
+      const branch = isLast ? "└── " : "├── ";
+      const desc = child.description ?
+        `&nbsp;&nbsp;<span style="color:#888">` +
+        `${escapeHtml(child.description)}</span>` : "";
+      html += `${prefix}${branch}${escapeHtml(name)}/${desc}<br>`;
+      render(child, `${prefix}${isLast ? "&nbsp;&nbsp;&nbsp;&nbsp;" : "│&nbsp;&nbsp;&nbsp;"}`);
+    }
+  }
+  render(root, "");
+  return html;
 }
-/** Finds the canonical root folder that matches a name. */
-export function matchCanonicalRootFolder(name: string): CanonicalRootFolder | undefined {
-  const normalizedName = normalizeFolderNameForMatching(name);
-  return CANONICAL_ROOT_FOLDERS.find((folder) =>
-    normalizedName === folder.name.toLowerCase() ||
-    folder.patterns.some((matcher) => matcher.test(normalizedName)),
-  );
+/** Renders directory move recommendations for phase emails. */
+function renderDirectoryMoves(moves: DirectoryMoveData[]): string {
+  if (moves.length === 0) {
+    return "No directory moves needed.";
+  }
+  return moves
+      .map((move) => `<div><b>${escapeHtml(move.current_path)}</b> -> ` +
+        `<b>${escapeHtml(move.proposed_path)}</b><br>` +
+        `${escapeHtml(move.reason)}</div>`)
+      .join("<br>");
+}
+/** Builds embedded proposal metadata for phase emails. */
+function phaseEmbeddedHtml(proposalId: string): string {
+  const embeddedData: OrganizeEmbeddedData = {proposalId};
+  return buildOrganizeEmbeddedData(embeddedData);
+}
+/** Sends the initial directory structure phase email. */
+export async function sendOrganizePhase1aEmail(
+    sender: string,
+    email: TransformedEmail,
+    proposalId: string,
+    conventionSummary: string,
+    summary: string,
+    folders: DriveOrganizeProposal["proposed_folders"],
+    isRevision = false,
+): Promise<void> {
+  const header = isRevision ?
+    "Here's the revised folder structure:" :
+    "Here's a first pass at your Google Drive folder structure:";
+  const html = applyTemplate(driveMailTemplates.organizePhase1aProposal.html, {
+    PHASE1A_HEADER: header,
+    CONVENTION_SUMMARY: escapeHtml(conventionSummary || "No existing convention detected."),
+    SUMMARY: formatSummaryHtml(escapeHtml(summary || "")),
+    FOLDER_TREE: renderDirectoryList(folders),
+    EMBEDDED_DATA: phaseEmbeddedHtml(proposalId),
+  });
+  await sendOrganizeEmailResponse(sender, email, html);
+}
+/** Sends the directory placement phase email. */
+export async function sendOrganizePhase1bEmail(
+    sender: string,
+    email: TransformedEmail,
+    proposalId: string,
+    summary: string,
+    moves: DirectoryMoveData[],
+): Promise<void> {
+  const html = applyTemplate(driveMailTemplates.organizePhase1bProposal.html, {
+    SUMMARY: formatSummaryHtml(escapeHtml(summary || "")),
+    DIRECTORY_MOVES: renderDirectoryMoves(moves),
+    EMBEDDED_DATA: phaseEmbeddedHtml(proposalId),
+  });
+  await sendOrganizeEmailResponse(sender, email, html);
+}
+/** Sends the final directory structure phase email. */
+export async function sendOrganizePhase1cEmail(
+    sender: string,
+    email: TransformedEmail,
+    proposalId: string,
+    summary: string,
+    folders: DriveOrganizeProposal["proposed_folders"],
+    addedDirectories: string[],
+): Promise<void> {
+  const addedHtml = addedDirectories.length > 0 ?
+    addedDirectories.map((path) => `- ${escapeHtml(path)}`).join("<br>") :
+    "No additional directories.";
+  const html = applyTemplate(driveMailTemplates.organizePhase1cProposal.html, {
+    SUMMARY: formatSummaryHtml(escapeHtml(summary || "")),
+    FOLDER_TREE: renderDirectoryList(folders),
+    ADDED_DIRECTORIES: addedHtml,
+    EMBEDDED_DATA: phaseEmbeddedHtml(proposalId),
+  });
+  await sendOrganizeEmailResponse(sender, email, html);
+}
+/** Sends the filename convention phase email. */
+export async function sendOrganizePhase2Email(
+    sender: string,
+    email: TransformedEmail,
+    proposalId: string,
+    convention: string,
+): Promise<void> {
+  const examples = [
+    "2026.04.13 - Tax Receipt.pdf",
+    "2026.04.13 - Client Agreement.docx",
+    "2026.04.13 - Travel Itinerary.pdf",
+  ].map((example) => `- ${escapeHtml(example)}`).join("<br>");
+  const html = applyTemplate(driveMailTemplates.organizePhase2Proposal.html, {
+    FILENAME_CONVENTION: escapeHtml(convention),
+    FILENAME_EXAMPLES: examples,
+    EMBEDDED_DATA: phaseEmbeddedHtml(proposalId),
+  });
+  await sendOrganizeEmailResponse(sender, email, html);
+}
+/** Sends the final cost estimate before execution. */
+export async function sendOrganizeCostEstimateEmail(
+    sender: string,
+    email: TransformedEmail,
+    proposalId: string,
+    folders: DriveOrganizeProposal["proposed_folders"],
+    filenameConvention: string,
+    cost: OrganizeCostBreakdown,
+): Promise<void> {
+  const examples = [
+    "2026.04.13 - Tax Receipt.pdf",
+    "2026.04.13 - Client Agreement.docx",
+    "2026.04.13 - Travel Itinerary.pdf",
+  ].map((example) => `- ${escapeHtml(example)}`).join("<br>");
+  const approveToken = signActionToken(proposalId, "approve");
+  const approveLink = `${driveOrganizeActionUrl()}?proposalId=${proposalId}&action=approve&token=${approveToken}`;
+  const html = applyTemplate(driveMailTemplates.organizeCostEstimate.html, {
+    FOLDER_TREE: renderDirectoryList(folders),
+    FILENAME_CONVENTION: escapeHtml(filenameConvention),
+    FILENAME_EXAMPLES: examples,
+    TOTAL_FILES: String(cost.totalFiles),
+    TEXT_FILES: String(cost.textFiles),
+    IMAGE_FILES: String(cost.imageFiles),
+    TOTAL_COST: `$${cost.totalCost.toFixed(2)}`,
+    TEXT_COST: `$${(cost.textFiles * cost.costPerTextFile).toFixed(2)}`,
+    IMAGE_COST: `$${(cost.imageFiles * cost.costPerImageFile).toFixed(2)}`,
+    APPROVE_LINK: approveLink,
+    EMBEDDED_DATA: phaseEmbeddedHtml(proposalId),
+  });
+  await sendOrganizeEmailResponse(sender, email, html);
 }
 /** Sends an organize proposal email with approval metadata. */
 export async function sendOrganizeProposalEmail(
@@ -438,6 +546,35 @@ export async function sendOrganizeProposalEmail(
   });
   await sendOrganizeEmailResponse(sender, email, html);
 }
+/** Sends the folder preference confirmation email. */
+export async function sendOrganizeFolderPreferencesEmail(
+    sender: string,
+    email: TransformedEmail,
+    proposalId: string,
+    topLevelFolderNames: string[],
+    detectedConvention: string,
+    suggestedConvention: string,
+): Promise<void> {
+  const hasDetectedConvention = detectedConvention.trim().length > 0;
+  const conventionLooksNumbered = /\bNN\b|\d{2,3}[-\s]/i.test(suggestedConvention);
+  const matchingFolders = hasDetectedConvention && conventionLooksNumbered ?
+    topLevelFolderNames.filter((folder) => /^\d{2,3}[-\s]/.test(folder)) :
+    topLevelFolderNames;
+  const selectedExamples = (matchingFolders.length > 0 ? matchingFolders : topLevelFolderNames).slice(0, 3);
+  const examples = selectedExamples.length > 0 ?
+    selectedExamples.map((example) => `- ${escapeHtml(example)}`) :
+    ["- No top-level folders found"];
+  if (!hasDetectedConvention && topLevelFolderNames.length > selectedExamples.length) {
+    examples.push("- ...");
+  }
+  const html = applyTemplate(driveMailTemplates.organizeFolderPreferences.html, {
+    DETECTED_CONVENTION: escapeHtml(detectedConvention || "No convention detected."),
+    SUGGESTED_CONVENTION: escapeHtml(suggestedConvention),
+    FOLDER_EXAMPLES: examples.join("<br>"),
+    EMBEDDED_DATA: phaseEmbeddedHtml(proposalId),
+  });
+  await sendOrganizeEmailResponse(sender, email, html);
+}
 /** Marks proposal generation as failed and notifies the sender. */
 export async function failOrganizeGeneration(
     proposalId: string,
@@ -451,128 +588,6 @@ export async function failOrganizeGeneration(
   });
   const html = applyTemplate(driveMailTemplates.organizeError.html, {});
   await sendOrganizeEmailResponse(sender, email, html);
-}
-/** Creates seed folders and root-folder rename actions from current Drive structure. */
-export function seedFoldersFromDrive(
-    fileEntries: DriveFileEntry[],
-): {
-  seedFolders: DriveOrganizeProposal["proposed_folders"];
-  folderRenameActions: DriveOrganizeProposal["file_actions"];
-} {
-  const rootFolders = fileEntries.filter(
-      (f) => f.isFolder && f.parentPath === "My Drive",
-  );
-  rootFolders.sort((a, b) => a.name.localeCompare(b.name));
-  const seedFolders: DriveOrganizeProposal["proposed_folders"] = CANONICAL_ROOT_FOLDERS.map((folder) => ({
-    folder_path: canonicalFolderPath(folder),
-    description: folder.description,
-  }));
-  const folderRenameActions: DriveOrganizeProposal["file_actions"] = [];
-  const seededPaths = new Set(seedFolders.map((folder) => folder.folder_path));
-  const seenNames = new Map<string, string>();
-  let nextCustomPrefix = 10;
-  for (const folder of rootFolders) {
-    const baseName = folder.name.replace(/^\d{2,3}\s*-\s*/, "").trim();
-    const normalizedFolderName = normalizeFolderNameForMatching(folder.name);
-    if (seenNames.has(normalizedFolderName)) {
-      const targetFolderName = seenNames.get(normalizedFolderName)!;
-      folderRenameActions.push({
-        file_id: folder.id,
-        current_name: folder.name,
-        current_path: "My Drive",
-        new_name: targetFolderName,
-        new_folder: "My Drive",
-        action: targetFolderName === folder.name ? "keep" : "rename",
-        reason: `Merged duplicate folder into "${targetFolderName}"`,
-      });
-      continue;
-    }
-    const canonicalFolder = matchCanonicalRootFolder(folder.name);
-    if (canonicalFolder) {
-      const targetFolderPath = canonicalFolderPath(canonicalFolder);
-      seenNames.set(normalizedFolderName, targetFolderPath);
-      folderRenameActions.push({
-        file_id: folder.id,
-        current_name: folder.name,
-        current_path: "My Drive",
-        new_name: targetFolderPath,
-        new_folder: "My Drive",
-        action: folder.name === targetFolderPath ? "keep" : "rename",
-        reason: folder.name === targetFolderPath ?
-          "Already using canonical root category" :
-          `Mapped to canonical category ${targetFolderPath}`,
-      });
-      continue;
-    }
-    const customFolderPath =
-      `${String(nextCustomPrefix).padStart(2, "0")}-${toTitleCase(baseName)}`;
-    nextCustomPrefix++;
-    seenNames.set(normalizedFolderName, customFolderPath);
-    if (!seededPaths.has(customFolderPath)) {
-      seedFolders.push({
-        folder_path: customFolderPath,
-        description: `Existing folder "${folder.name}"`,
-      });
-      seededPaths.add(customFolderPath);
-    }
-    folderRenameActions.push({
-      file_id: folder.id,
-      current_name: folder.name,
-      current_path: "My Drive",
-      new_name: customFolderPath,
-      new_folder: "My Drive",
-      action: folder.name === customFolderPath ? "keep" : "rename",
-      reason: folder.name === customFolderPath ?
-        "Already correctly named" :
-        `Renamed unmatched folder with custom prefix ${customFolderPath}`,
-    });
-  }
-  return {seedFolders, folderRenameActions};
-}
-/** Merges chunk-level proposed folders into the accumulated proposal. */
-export function mergeChunkProposalFolders(
-    accumulatedFolders: DriveOrganizeProposal["proposed_folders"],
-    chunkProposal: DriveOrganizeProposal,
-): DriveOrganizeProposal["proposed_folders"] {
-  const existingPaths = new Set(accumulatedFolders.map((folder) => folder.folder_path));
-  chunkProposal.proposed_folders = [
-    ...accumulatedFolders,
-    ...chunkProposal.proposed_folders,
-  ];
-  normalizeFolderPrefixes(chunkProposal);
-  const mergedFolders = [...accumulatedFolders];
-  const mergedPaths = new Set(existingPaths);
-  for (const folder of chunkProposal.proposed_folders) {
-    if (mergedPaths.has(folder.folder_path)) {
-      continue;
-    }
-    mergedFolders.push(folder);
-    mergedPaths.add(folder.folder_path);
-  }
-  chunkProposal.proposed_folders = mergedFolders;
-  return mergedFolders;
-}
-/** Returns the next chunk indexes to dispatch after a batch completes. */
-export function getParallelBatchChunkIndexes(
-    completedChunks: number,
-    totalChunks: number,
-    parallelChunkLimit: number,
-): number[] {
-  if (completedChunks <= 0 || completedChunks > totalChunks) {
-    return [];
-  }
-  const currentBatchEnd = Math.min(
-      totalChunks,
-      Math.ceil(completedChunks / parallelChunkLimit) * parallelChunkLimit,
-  );
-  if (completedChunks !== currentBatchEnd || currentBatchEnd >= totalChunks) {
-    return [];
-  }
-  const nextBatchEnd = Math.min(currentBatchEnd + parallelChunkLimit, totalChunks);
-  return Array.from(
-      {length: nextBatchEnd - currentBatchEnd},
-      (_value, index) => currentBatchEnd + index,
-  );
 }
 /** Builds an empty organize processing result. */
 export function emptyResult(

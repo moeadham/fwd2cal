@@ -1,15 +1,11 @@
 import type {Request, Response} from "express";
 import {AGENT_EMAIL_ADDRESS, DRIVE_ADMIN_API_KEY} from "../agents/drive/config";
-import {dispatchOrganizeChunkTask} from "../agents/drive/dispatchHandler";
 import {findGeneratingProposal, hasFullDriveScope, scanAndPropose} from "../agents/drive/organizeHandler";
-import {OrganizeProposalDoc} from "../agents/drive/types";
 import {
   DRIVE_USERS_COLLECTION,
-  getOrganizeProposal,
   getResumableOrganizeProposals,
   getUserFromEmail,
   getUserFromUID,
-  updateOrganizeProposalStatus,
 } from "../util/firestoreHandler";
 import {TransformedEmail} from "../util/types";
 
@@ -37,56 +33,6 @@ export async function handleAdminOrganizeRequest(req: Request, res: Response): P
   if (body?.action === "list") {
     const proposals = await getResumableOrganizeProposals();
     res.status(200).json(proposals);
-    return;
-  }
-
-  if (body?.action === "retry") {
-    const proposalId = body.proposalId?.trim();
-    if (!proposalId) {
-      res.status(400).json({error: "Missing proposalId"});
-      return;
-    }
-
-    const rawProposal = await getOrganizeProposal(proposalId);
-    if (!rawProposal) {
-      res.status(404).json({error: "Proposal not found"});
-      return;
-    }
-
-    const proposal = rawProposal as unknown as OrganizeProposalDoc;
-    if (proposal.status !== "generating" && proposal.status !== "failed") {
-      res.status(400).json({
-        error: `Proposal status is ${proposal.status}`,
-      });
-      return;
-    }
-
-    if (!proposal.emailId || !proposal.uid) {
-      res.status(500).json({error: "missing retry metadata"});
-      return;
-    }
-
-    const chunkIndex = proposal.currentChunk || 0;
-    if (proposal.status === "failed") {
-      await updateOrganizeProposalStatus(proposalId, "generating", {
-        attemptCount: 1,
-        generationStartedAt: new Date().toISOString(),
-        lastError: null,
-      });
-    }
-
-    await dispatchOrganizeChunkTask({
-      proposalId,
-      emailId: proposal.emailId,
-      uid: proposal.uid,
-      chunkIndex,
-    });
-
-    res.status(200).json({
-      proposalId,
-      chunkIndex,
-      message: "Retry dispatched",
-    });
     return;
   }
 

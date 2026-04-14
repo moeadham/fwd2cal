@@ -1,4 +1,3 @@
-import {z} from "zod";
 import {logger} from "firebase-functions/v2";
 import {defaultCompletion, DEFAULT_TEMP} from "../../util/openai";
 import {getPrompts} from "./prompts/index";
@@ -8,7 +7,6 @@ import {
   MoveInstructionSchema,
   MoveInstruction,
   DriveEmbeddedFileData,
-  DriveOrganizeProposalSchema,
   DriveOrganizeProposal,
   DriveOrganizeRevisionSchema,
   DriveOrganizeRevision,
@@ -17,16 +15,30 @@ import {
   FileInfo,
 } from "./types";
 import {ChatMessage, TextContent, ImageURLContent} from "../../util/types";
-import {REFINE_ORGANIZATION_MODEL} from "./config";
-
-const RefineOrganizationResultSchema = z.object({
-  refined_folders: DriveOrganizeProposalSchema.shape.proposed_folders,
-  folder_renames: z.array(z.object({
-    old_path: z.string().describe("Original folder path"),
-    new_path: z.string().describe("New folder path"),
-  })).describe("Folder rename mappings to apply to existing file actions"),
-  summary: z.string(),
-});
+import {
+  DetectFolderConventionSchema,
+  DetectFolderConventionResult,
+} from "./prompts/detectFolderConvention/v1";
+import {
+  AnalyzeDirectoryStructureSchema,
+  AnalyzeDirectoryStructureResult,
+} from "./prompts/analyzeDirectoryStructure/v1";
+import {
+  EvaluateDirectoryPlacementSchema,
+  EvaluateDirectoryPlacementResult,
+} from "./prompts/evaluateDirectoryPlacement/v1";
+import {
+  FinalizeDirectoryMapSchema,
+  FinalizeDirectoryMapResult,
+} from "./prompts/finalizeDirectoryMap/v1";
+import {
+  ClassifyConventionChangeSchema,
+  ClassifyConventionChangeResult,
+} from "./prompts/classifyConventionChange/v1";
+import {
+  ProposeFileActionSchema,
+  ProposeFileActionResult,
+} from "./prompts/proposeFileAction/v1";
 
 /** Formats one folder path segment for display. */
 function titleCaseFolderSegment(segment: string): string {
@@ -303,39 +315,186 @@ async function reviseOrganization(
   return {proposal: revisedProposal, preservedRootPaths};
 }
 
-/**
- * Build user text for a single chunk of files.
- */
-function buildChunkUserText(
-    driveStructureSummary: string,
-    existingFolders: DriveOrganizeProposal["proposed_folders"],
-    chunkFiles: DriveFileEntry[],
-    chunkIndex: number,
-    totalChunks: number,
-    totalFiles: number,
-): string {
-  let userText = `## Current Drive Structure\n`;
-  userText += driveStructureSummary + "\n\n";
+/** Detect the existing or preferred folder naming convention from the current Drive tree. */
+async function detectFolderConvention(
+    treeSummary: string,
+    uid: string | null = null,
+): Promise<DetectFolderConventionResult> {
+  const {prompts, versions} = getPrompts();
+  const userContent = `## Current Drive Tree\n${treeSummary}\n`;
+  logger.info("detectFolderConvention LLM input", {
+    userContentPreview: userContent.slice(0, 500),
+  });
+  const messages: ChatMessage[] = [
+    {role: "system", content: prompts.detectFolderConvention.prompt},
+    {role: "user", content: userContent},
+  ];
+  const result = await defaultCompletion<DetectFolderConventionResult>(
+      messages,
+      prompts.detectFolderConvention.model,
+      prompts.detectFolderConvention.temperature ?? DEFAULT_TEMP,
+      DetectFolderConventionSchema,
+      uid,
+      {promptVersion: versions.PROMPT_DETECT_FOLDER_CONVENTION_VERSION},
+  ) as DetectFolderConventionResult;
+  logger.info("detectFolderConvention LLM result", {
+    has_convention: result.has_convention,
+    detected_convention: result.detected_convention,
+    suggested_convention: result.suggested_convention,
+    summary: result.summary,
+    inputTreeLength: treeSummary.length,
+  });
+  return result;
+}
 
-  if (existingFolders.length > 0) {
-    userText += `## Previously Known Folders from Existing Drive Structure (reuse these)\n`;
-    for (const folder of existingFolders) {
-      userText += `- ${folder.folder_path}: ${folder.description}\n`;
-    }
-    userText += "\n";
-  }
+/** Analyze the current Drive tree and propose an initial directory structure. */
+async function analyzeDirectoryStructure(
+    treeSummary: string,
+    folderConvention: string,
+    userPrompt: string,
+    uid: string | null = null,
+): Promise<AnalyzeDirectoryStructureResult> {
+  const {prompts, versions} = getPrompts();
+  const userText = `## Current Drive Tree\n${treeSummary}\n\n` +
+    `## Confirmed Folder Naming Convention\n${folderConvention || "(none)"}\n\n` +
+    `## User Instructions\n${userPrompt || "(none)"}\n`;
+  logger.info("analyzeDirectoryStructure LLM input", {
+    folderConvention: folderConvention || "(empty)",
+    userPromptPreview: userPrompt.slice(0, 200),
+    treeSummaryLength: treeSummary.length,
+  });
+  const messages: ChatMessage[] = [
+    {role: "system", content: prompts.analyzeDirectoryStructure.prompt},
+    {role: "user", content: userText},
+  ];
+  return await defaultCompletion<AnalyzeDirectoryStructureResult>(
+      messages,
+      prompts.analyzeDirectoryStructure.model,
+      prompts.analyzeDirectoryStructure.temperature ?? DEFAULT_TEMP,
+      AnalyzeDirectoryStructureSchema,
+      uid,
+      {promptVersion: versions.PROMPT_ANALYZE_DIRECTORY_STRUCTURE_VERSION},
+  ) as AnalyzeDirectoryStructureResult;
+}
 
-  const nonFolders = chunkFiles.filter((f) => !f.isFolder);
-  userText += `## File Batch ${chunkIndex + 1}/${totalChunks}` +
-    ` (${nonFolders.length} files, ${totalFiles} total in drive)\n`;
-  for (const file of nonFolders) {
-    userText += `- [${file.id}] "${file.name}" in "${file.parentPath}" ` +
-      `(${file.mimeType}, created: ${file.createdTime}, ` +
-      `${file.size} bytes)\n`;
-  }
-  userText += `\nYou MUST return exactly ${nonFolders.length} file_actions — one per file above.\n`;
+/** Evaluate whether existing directories should move into the proposed structure. */
+async function evaluateDirectoryPlacement(
+    currentTree: string,
+    proposedStructure: DriveOrganizeProposal["proposed_folders"],
+    uid: string | null = null,
+    userFeedback = "",
+): Promise<EvaluateDirectoryPlacementResult> {
+  const {prompts, versions} = getPrompts();
+  const proposed = proposedStructure
+      .map((folder) => `- ${folder.folder_path}: ${folder.description}`)
+      .join("\n");
+  const userText = `## Current Drive Tree\n${currentTree}\n\n` +
+    `## Proposed Structure\n${proposed || "(none)"}\n\n` +
+    `## User Feedback\n${userFeedback || "(none)"}\n`;
+  const messages: ChatMessage[] = [
+    {role: "system", content: prompts.evaluateDirectoryPlacement.prompt},
+    {role: "user", content: userText},
+  ];
+  return await defaultCompletion<EvaluateDirectoryPlacementResult>(
+      messages,
+      prompts.evaluateDirectoryPlacement.model,
+      prompts.evaluateDirectoryPlacement.temperature ?? DEFAULT_TEMP,
+      EvaluateDirectoryPlacementSchema,
+      uid,
+      {promptVersion: versions.PROMPT_EVALUATE_DIRECTORY_PLACEMENT_VERSION},
+  ) as EvaluateDirectoryPlacementResult;
+}
 
-  return userText;
+/** Finalize the approved directory map before filename convention selection. */
+async function finalizeDirectoryMap(
+    proposedStructure: DriveOrganizeProposal["proposed_folders"],
+    directoryMoves: Array<{current_path: string; proposed_path: string; reason: string}>,
+    fileSummary: string,
+    uid: string | null = null,
+    userFeedback = "",
+): Promise<FinalizeDirectoryMapResult> {
+  const {prompts, versions} = getPrompts();
+  const proposed = proposedStructure
+      .map((folder) => `- ${folder.folder_path}: ${folder.description}`)
+      .join("\n");
+  const moves = directoryMoves
+      .map((move) => `- ${move.current_path} -> ${move.proposed_path}: ${move.reason}`)
+      .join("\n");
+  const userText = `## Proposed Structure\n${proposed || "(none)"}\n\n` +
+    `## Directory Moves\n${moves || "(none)"}\n\n` +
+    `## File Summary\n${fileSummary || "(none)"}\n\n` +
+    `## User Feedback\n${userFeedback || "(none)"}\n`;
+  const messages: ChatMessage[] = [
+    {role: "system", content: prompts.finalizeDirectoryMap.prompt},
+    {role: "user", content: userText},
+  ];
+  return await defaultCompletion<FinalizeDirectoryMapResult>(
+      messages,
+      prompts.finalizeDirectoryMap.model,
+      prompts.finalizeDirectoryMap.temperature ?? DEFAULT_TEMP,
+      FinalizeDirectoryMapSchema,
+      uid,
+      {promptVersion: versions.PROMPT_FINALIZE_DIRECTORY_MAP_VERSION},
+  ) as FinalizeDirectoryMapResult;
+}
+
+/** Classify whether a reply updates the filename convention. */
+async function classifyConventionChange(
+    convention: string,
+    userReply: string,
+    uid: string | null = null,
+): Promise<ClassifyConventionChangeResult> {
+  const {prompts, versions} = getPrompts();
+  const userText = `## Current Convention\n${convention}\n\n` +
+    `## User Reply\n${userReply}\n`;
+  const messages: ChatMessage[] = [
+    {role: "system", content: prompts.classifyConventionChange.prompt},
+    {role: "user", content: userText},
+  ];
+  return await defaultCompletion<ClassifyConventionChangeResult>(
+      messages,
+      prompts.classifyConventionChange.model,
+      prompts.classifyConventionChange.temperature ?? DEFAULT_TEMP,
+      ClassifyConventionChangeSchema,
+      uid,
+      {promptVersion: versions.PROMPT_CLASSIFY_CONVENTION_CHANGE_VERSION},
+  ) as ClassifyConventionChangeResult;
+}
+
+/** Propose the action for one file using the evolving directory tree. */
+async function proposeFileAction(
+    directoryTree: DriveOrganizeProposal["proposed_folders"],
+    convention: string,
+    fileInfo: DriveFileEntry,
+    contentSummary: string,
+    uid: string | null = null,
+): Promise<ProposeFileActionResult> {
+  const {prompts, versions} = getPrompts();
+  const tree = directoryTree
+      .map((folder) => `- ${folder.folder_path}: ${folder.description}`)
+      .join("\n");
+  const userText = `## Approved Directory Tree\n${tree || "(none)"}\n\n` +
+    `## Filename Convention\n${convention}\n\n` +
+    `## File\n` +
+    `ID: ${fileInfo.id}\n` +
+    `Name: ${fileInfo.name}\n` +
+    `Current Path: ${fileInfo.parentPath}\n` +
+    `MIME Type: ${fileInfo.mimeType}\n` +
+    `Created: ${fileInfo.createdTime}\n` +
+    `Size: ${fileInfo.size} bytes\n\n` +
+    `## Content Summary\n${contentSummary || "(none)"}\n`;
+  const messages: ChatMessage[] = [
+    {role: "system", content: prompts.proposeFileAction.prompt},
+    {role: "user", content: userText},
+  ];
+  return await defaultCompletion<ProposeFileActionResult>(
+      messages,
+      prompts.proposeFileAction.model,
+      prompts.proposeFileAction.temperature ?? DEFAULT_TEMP,
+      ProposeFileActionSchema,
+      uid,
+      {promptVersion: versions.PROMPT_PROPOSE_FILE_ACTION_VERSION},
+  ) as ProposeFileActionResult;
 }
 
 /** Renders a proposal folder tree as plain text for prompt context. */
@@ -1156,94 +1315,6 @@ function reconcileFileActions(proposal: DriveOrganizeProposal): void {
   });
 }
 
-/** Runs the refinement LLM over an organization proposal. */
-async function refineOrganizationProposal(
-    proposal: DriveOrganizeProposal,
-    uid: string | null = null,
-): Promise<DriveOrganizeProposal> {
-  const {prompts, versions} = getPrompts();
-  const actionCounts = {
-    move: 0,
-    rename: 0,
-    move_and_rename: 0,
-    keep: 0,
-  };
-
-  for (const action of proposal.file_actions) {
-    actionCounts[action.action] += 1;
-  }
-
-  const userText = [
-    "## Proposed Folder Tree",
-    renderFolderTreePlainText(proposal),
-    "",
-    "## Action Counts",
-    `move: ${actionCounts.move}`,
-    `rename: ${actionCounts.rename}`,
-    `move_and_rename: ${actionCounts.move_and_rename}`,
-    `keep: ${actionCounts.keep}`,
-    "",
-    "## Current Summary",
-    proposal.summary,
-  ].join("\n");
-
-  const refineModel = REFINE_ORGANIZATION_MODEL.value().trim() || prompts.refineOrganization.model;
-
-  logger.info("Drive organize refinement prompt", {
-    model: refineModel,
-    proposedFolders: proposal.proposed_folders.length,
-    fileActions: proposal.file_actions.length,
-    userTextLength: userText.length,
-  });
-
-  const messages: ChatMessage[] = [
-    {role: "system", content: prompts.refineOrganization.prompt},
-    {role: "user", content: userText},
-  ];
-
-  const result = await defaultCompletion<z.infer<typeof RefineOrganizationResultSchema>>(
-      messages,
-      refineModel,
-      prompts.refineOrganization.temperature ?? DEFAULT_TEMP,
-      RefineOrganizationResultSchema,
-      uid,
-      {promptVersion: versions.PROMPT_REFINE_ORGANIZATION_VERSION},
-  ) as z.infer<typeof RefineOrganizationResultSchema>;
-
-  const refinedProposal: DriveOrganizeProposal = {
-    proposed_folders: result.refined_folders.map((folder) => ({...folder})),
-    file_actions: proposal.file_actions.map((action) => ({...action})),
-    summary: result.summary,
-  };
-
-  const renameEntries = result.folder_renames
-      .map((r) => [normalizeFolderPath(r.old_path), normalizeFolderPath(r.new_path)] as const)
-      .filter(([from, to]) => from && to)
-      .sort(([left], [right]) => right.length - left.length);
-
-  for (const action of refinedProposal.file_actions) {
-    const normalizedFolder = normalizeFolderPath(action.new_folder);
-    let nextFolder = normalizedFolder;
-
-    for (const [from, to] of renameEntries) {
-      if (nextFolder === from) {
-        nextFolder = to;
-        break;
-      }
-      if (nextFolder.startsWith(`${from}/`)) {
-        nextFolder = `${to}${nextFolder.slice(from.length)}`;
-        break;
-      }
-    }
-
-    action.new_folder = nextFolder;
-  }
-
-  normalizeFolderPrefixes(refinedProposal);
-  reconcileFileActions(refinedProposal);
-  return refinedProposal;
-}
-
 /** Merges a revision proposal into the original proposal. */
 function mergeRevisedProposal(
     original: DriveOrganizeProposal,
@@ -1302,86 +1373,20 @@ function mergeRevisedProposal(
   return merged;
 }
 
-/** Adds keep actions for files that were not covered by chunk results. */
-function backfillUncoveredFiles(
-    nonFolders: DriveFileEntry[],
-    allFileActions: DriveOrganizeProposal["file_actions"],
-): DriveOrganizeProposal["file_actions"] {
-  const coveredIds = new Set(allFileActions.map((a) => a.file_id));
-  const uncoveredFiles = nonFolders.filter((file) => !coveredIds.has(file.id));
-
-  if (uncoveredFiles.length > 0) {
-    logger.warn("LLM organize: uncovered files backfilled with keep actions", {
-      uncoveredCount: uncoveredFiles.length,
-      totalFiles: nonFolders.length,
-      coveragePercent: Math.round(((nonFolders.length - uncoveredFiles.length) / Math.max(nonFolders.length, 1)) * 100),
-    });
-    for (const file of uncoveredFiles) {
-      allFileActions.push({
-        file_id: file.id,
-        current_name: file.name,
-        current_path: file.parentPath,
-        new_name: file.name,
-        new_folder: file.parentPath,
-        action: "keep",
-        reason: "Safety backfill — not covered by LLM",
-      });
-    }
-  }
-
-  return allFileActions;
-}
-
-/** Combines chunk summaries into a final proposal summary. */
-async function consolidateSummaries(
-    summaries: string[],
-    uid: string | null = null,
-): Promise<string> {
-  const {prompts, versions} = getPrompts();
-  let finalSummary = summaries[0] ?? "";
-  if (summaries.length <= 1) {
-    return finalSummary;
-  }
-
-  const consolidateMessages: ChatMessage[] = [
-    {
-      role: "system",
-      content: prompts.consolidateSummaries.prompt,
-    },
-    {
-      role: "user",
-      content: summaries.map((s, i) =>
-        `Batch ${i + 1}: ${s}`).join("\n"),
-    },
-  ];
-  try {
-    const result = await defaultCompletion<{summary: string}>(
-        consolidateMessages,
-        prompts.consolidateSummaries.model,
-        prompts.consolidateSummaries.temperature ?? DEFAULT_TEMP,
-        z.object({summary: z.string()}),
-        uid,
-        {promptVersion: versions.PROMPT_CONSOLIDATE_SUMMARIES_VERSION},
-    );
-    finalSummary = (result as {summary: string}).summary;
-  } catch (err) {
-    logger.warn("Failed to consolidate summaries, using first", err);
-  }
-  return finalSummary;
-}
 
 export {
   proposeFilePlacement,
   interpretMoveInstructions,
   reviseOrganization,
-  refineOrganizationProposal,
-  buildChunkUserText,
   renderFolderTreePlainText,
   normalizeFolderPrefixes,
   renumberFoldersContiguously,
   mergeRevisedProposal,
-  reconcileFileActions,
   applyFolderOperations,
-  backfillUncoveredFiles,
-  consolidateSummaries,
+  detectFolderConvention,
+  analyzeDirectoryStructure,
+  evaluateDirectoryPlacement,
+  finalizeDirectoryMap,
+  classifyConventionChange,
+  proposeFileAction,
 };
