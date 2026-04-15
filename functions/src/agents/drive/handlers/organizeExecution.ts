@@ -360,7 +360,6 @@ export async function processExecutionChunk(
       proposalId,
       proposal as unknown as Record<string, unknown>,
       (proposalDoc.cost || {}) as unknown as Record<string, unknown>,
-      proposalDoc.mimeMap as unknown as Record<string, unknown> | undefined,
   );
   await updateOrganizeProposalStatus(proposalId, "completed", {
     phase: "completed",

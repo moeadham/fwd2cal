@@ -41,8 +41,11 @@ import {
 } from "../src/agents/drive/types";
 import {defaultCompletion, setOpenAIClientForTest} from "../src/util/openai";
 import {
+  finalizeOrganizeProposal,
+  getOrganizeProposal,
   getResumableOrganizeProposals,
   getOrganizePhaseData,
+  saveOrganizeProposal,
 } from "../src/util/firestoreHandler";
 import {getLastSentEmail, clearMockData} from "../src/util/resendMock";
 import {organizeProposalTestHooks} from "../src/agents/drive/handlers/organizeProposal";
@@ -1057,6 +1060,66 @@ describe("admin resume helpers", function() {
       `${baseId}-failed`,
       `${baseId}-generating`,
     ]);
+  });
+});
+
+describe("organize proposal persistence", function() {
+  const emptyProposal: DriveOrganizeProposal = {
+    proposed_folders: [],
+    file_actions: [],
+    summary: "No changes",
+  };
+  const emptyCost = {
+    totalFiles: 0,
+    filesToMove: 0,
+    filesToRename: 0,
+    filesToKeep: 0,
+    textFiles: 0,
+    imageFiles: 0,
+    costPerTextFile: 0,
+    costPerImageFile: 0,
+    totalCost: 0,
+  };
+
+  it("DT00ub saves organize proposals without MIME lookup data", async function() {
+    const proposalId = await saveOrganizeProposal({
+      uid: "mime-save-uid",
+      senderEmail: "mime-save@example.com",
+      emailId: `mime-save-${Date.now()}`,
+      status: "pending",
+      createdAt: "2026-04-15T00:00:00.000Z",
+      expiresAt: "2099-04-15T00:00:00.000Z",
+      proposal: emptyProposal,
+      cost: emptyCost,
+    });
+
+    const doc = await db.collection("OrganizeProposals").doc(proposalId).get();
+    const hydrated = await getOrganizeProposal(proposalId);
+
+    expect(doc.data()).to.not.have.property("mimeMap");
+    expect(hydrated).to.not.have.property("mimeMap");
+  });
+
+  it("DT00uc finalizes organize proposals without MIME lookup data", async function() {
+    const proposalId = await saveOrganizeProposal({
+      uid: "mime-finalize-uid",
+      senderEmail: "mime-finalize@example.com",
+      emailId: `mime-finalize-${Date.now()}`,
+      status: "pending",
+      createdAt: "2026-04-15T00:00:00.000Z",
+      expiresAt: "2099-04-15T00:00:00.000Z",
+      proposal: emptyProposal,
+      cost: emptyCost,
+    });
+
+    await finalizeOrganizeProposal(
+        proposalId,
+        emptyProposal as unknown as Record<string, unknown>,
+        emptyCost as unknown as Record<string, unknown>,
+    );
+
+    const hydrated = await getOrganizeProposal(proposalId);
+    expect(hydrated).to.not.have.property("mimeMap");
   });
 });
 

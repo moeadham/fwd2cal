@@ -193,9 +193,9 @@ export function calculateOrganizeCost(
   const costPerMTokens = parseFloat(ORGANIZE_DRIVE_COST_PER_M_INPUT_TOKENS.value());
   const costPerTextFile = (textMaxTokens * costPerMTokens) / 1_000_000;
   const costPerImageFile = (imageMaxTokens * costPerMTokens) / 1_000_000;
-  const mimeMap = new Map<string, string>();
+  const mimeTypesByFileId = new Map<string, string>();
   for (const entry of fileEntries) {
-    mimeMap.set(entry.id, entry.mimeType);
+    mimeTypesByFileId.set(entry.id, entry.mimeType);
   }
   const actions = proposal.file_actions;
   const filesToMove = actions.filter(
@@ -209,7 +209,7 @@ export function calculateOrganizeCost(
   let textFiles = 0;
   let imageFiles = 0;
   for (const action of changedActions) {
-    const mime = mimeMap.get(action.file_id) || "";
+    const mime = mimeTypesByFileId.get(action.file_id) || "";
     if (isImageMimeType(mime)) {
       imageFiles++;
     } else {
@@ -255,10 +255,10 @@ export function calculateOrganizeCostEstimate(
     totalCost,
   };
 }
-/** Calculates organize proposal cost from stored MIME metadata. */
-export function calculateOrganizeCostFromMimeMap(
+/** Calculates organize proposal cost from MIME metadata keyed by file id. */
+export function calculateOrganizeCostFromMimeTypesByFileId(
     proposal: DriveOrganizeProposal,
-    mimeMap: Record<string, string>,
+    mimeTypesByFileId: Record<string, string>,
 ): OrganizeCostBreakdown {
   const textMaxTokens = ORGANIZE_DRIVE_TEXT_MAX_TOKENS.value();
   const imageMaxTokens = ORGANIZE_DRIVE_IMAGE_MAX_TOKENS.value();
@@ -277,7 +277,7 @@ export function calculateOrganizeCostFromMimeMap(
   let textFiles = 0;
   let imageFiles = 0;
   for (const action of changedActions) {
-    const mime = mimeMap[action.file_id] || "text/plain";
+    const mime = mimeTypesByFileId[action.file_id] || "text/plain";
     if (isImageMimeType(mime)) {
       imageFiles++;
     } else {

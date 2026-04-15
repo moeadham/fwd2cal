@@ -16,7 +16,7 @@ import {
 import {buildOrganizeEmbeddedData, renderFolderTree} from "../templates/folderTree";
 import {
   calculateOrganizeCostEstimate,
-  calculateOrganizeCostFromMimeMap,
+  calculateOrganizeCostFromMimeTypesByFileId,
   emptyResult,
   extractReplyBody,
   formatSummaryHtml,
@@ -166,16 +166,21 @@ export async function handleOrganizeRevision(
         revisedProposal,
     );
     renumberFoldersContiguously(mergedProposal, preservedRootPaths);
-    const newCost = calculateOrganizeCostFromMimeMap(
+    const state = await getOrganizeIntermediateState(proposalId);
+    const fileEntries = (Array.isArray(state.fileEntries) ? state.fileEntries : []) as DriveFileEntry[];
+    const mimeTypesByFileId = Object.fromEntries(
+        fileEntries.filter((file) => !file.isFolder)
+            .map((file) => [file.id, file.mimeType]),
+    );
+    const newCost = calculateOrganizeCostFromMimeTypesByFileId(
         mergedProposal,
-        proposalDoc.mimeMap || {},
+        mimeTypesByFileId,
     );
 
     await finalizeOrganizeProposal(
         proposalId,
         mergedProposal as unknown as Record<string, unknown>,
         newCost as unknown as Record<string, unknown>,
-        proposalDoc.mimeMap as unknown as Record<string, unknown> | undefined,
     );
     await sendOrganizeProposalEmail(
         sender,
@@ -464,14 +469,9 @@ async function handleFilenameConventionReply(
       proposalDoc.phaseData?.directoryLayout?.approvedStructure ||
       proposalDoc.phaseData?.directoryLayout?.proposedStructure ||
       [];
-    const mimeMap = Object.fromEntries(
-        fileEntries.filter((file) => !file.isFolder)
-            .map((file) => [file.id, file.mimeType]),
-    );
     await updateOrganizeProposalStatus(proposalId, "pending", {
       phase: "cost_estimate",
       cost,
-      mimeMap,
       phaseData: {
         ...proposalDoc.phaseData,
         filenameConvention: {convention},

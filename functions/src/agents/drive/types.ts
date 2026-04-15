@@ -274,7 +274,6 @@ export interface OrganizeProposalDoc {
   storagePath: string;
   proposal?: DriveOrganizeProposal;
   cost?: OrganizeCostBreakdown;
-  mimeMap?: Record<string, string>;
   snapshot?: OrganizeSnapshotAction[];
   completedAt?: string;
   generationStartedAt?: string;
