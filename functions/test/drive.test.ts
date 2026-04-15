@@ -29,6 +29,7 @@ import {
   applyFolderOperations,
   mergeRevisedProposal,
   normalizeFolderPrefixes,
+  proposeFilePlacement,
   renumberFoldersContiguously,
   renderFolderTreePlainText,
 } from "../src/agents/drive/llm";
@@ -1005,6 +1006,64 @@ describe("defaultCompletion", function() {
 
     expect(result).to.equal("ok");
     expect(capturedRequest?.max_tokens).to.equal(32768);
+  });
+});
+
+describe("proposeFilePlacement", function() {
+  afterEach(function() {
+    setOpenAIClientForTest(null);
+  });
+
+  it("DT00ta2 includes the saved filename convention in the user message", async function() {
+    let capturedRequest: OpenAI.ChatCompletionCreateParams | null = null;
+    const fakeClient = {
+      chat: {
+        completions: {
+          create: async (request: OpenAI.ChatCompletionCreateParams) => {
+            capturedRequest = request;
+            return {
+              choices: [{
+                message: {
+                  content: JSON.stringify({
+                    folder_name: "01-Invoices",
+                    is_existing_folder: true,
+                    proposals: [{
+                      file_index: 0,
+                      suggested_name: "2024-03-15_invoice.pdf",
+                      reason: "Follows the saved convention",
+                    }],
+                  }),
+                },
+                finish_reason: "stop",
+              }],
+              usage: {total_tokens: 1},
+            };
+          },
+        },
+      },
+    } as unknown as OpenAI;
+    setOpenAIClientForTest(fakeClient);
+
+    await proposeFilePlacement(
+        [{
+          fileName: "invoice.pdf",
+          mimeType: "application/pdf",
+          fileSize: 1234,
+          contentSummary: "Invoice dated March 15, 2024",
+        }],
+        "Invoice",
+        "",
+        ["01-Invoices"],
+        "02",
+        "test-uid",
+        [],
+        "YYYY-MM-DD_desc.ext",
+    );
+
+    const userContent = capturedRequest?.messages[1]?.content;
+    expect(userContent).to.be.a("string");
+    expect(userContent).to.include("## Filename Convention");
+    expect(userContent).to.include("Use this exact pattern for suggested_name: YYYY-MM-DD_desc.ext");
   });
 });
 

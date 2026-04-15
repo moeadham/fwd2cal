@@ -8,8 +8,8 @@ import {z} from "zod";
 export const FileProposalItemSchema = z.object({
   file_index: z.number().describe("The 0-based index of the file from the input list"),
   suggested_name: z.string().describe(
-      "A descriptive filename with extension, ALWAYS prefixed with " +
-      "YYYY.MM.DD date (e.g., '2024.03.15 Amazon Invoice Laptop.pdf')",
+      "A descriptive filename with extension that follows the provided filename convention, " +
+      "or the YYYY.MM.DD fallback when no convention is provided.",
   ),
   reason: z.string().describe("Brief reasoning for the suggested name"),
 });
@@ -25,6 +25,14 @@ export const FileProposalSchema = z.object({
 });
 
 export type FileProposal = z.infer<typeof FileProposalSchema>;
+
+export const GenerateFilenameExamplesSchema = z.object({
+  examples: z.array(z.string()).length(3).describe(
+      "Exactly three example filenames matching the convention, one per requested description, in order.",
+  ),
+});
+
+export type GenerateFilenameExamplesResult = z.infer<typeof GenerateFilenameExamplesSchema>;
 
 // Move instruction result (reply handler)
 export const MoveInstructionItemSchema = z.object({
@@ -324,6 +332,7 @@ export interface DrivePrompts {
   finalizeDirectoryMap: DrivePromptConfig;
   classifyConventionChange: DrivePromptConfig;
   proposeFileAction: DrivePromptConfig;
+  generateFilenameExamples: DrivePromptConfig;
 }
 
 // ============================================================================

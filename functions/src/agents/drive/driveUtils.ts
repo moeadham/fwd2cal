@@ -1,6 +1,6 @@
 import {logger} from "firebase-functions/v2";
 import {
-  saveDriveFileData, getDriveFileData,
+  saveDriveFileData, getDriveFileData, getDriveUserPreferences,
 } from "../../util/firestoreHandler";
 import {sendEmailResend} from "../../util/resend";
 import {getSupportEmail} from "../../util/config";
@@ -15,6 +15,10 @@ import {
 import {downloadAttachmentBuffer, extractContentSummary, extractDocumentImageUrls} from "./fileProcessor";
 import {proposeFilePlacement} from "./llm";
 import {Auth} from "googleapis";
+
+function getNonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
 
 /**
  * Check if an error message indicates an OAuth/authentication failure.
@@ -431,11 +435,17 @@ export async function callProposalWithFallback(
     uid: string | null,
     attachments: DriveAttachment[],
     imageUrls: string[] = [],
+    filenameConvention?: string,
 ): Promise<FileProposal> {
   try {
+    let resolvedFilenameConvention = getNonEmptyString(filenameConvention);
+    if (!resolvedFilenameConvention && uid) {
+      const preferences = await getDriveUserPreferences(uid);
+      resolvedFilenameConvention = getNonEmptyString(preferences.filenameConvention);
+    }
     return await proposeFilePlacement(
         fileInfos, emailSubject, emailBody,
-        agentFolderNames, nextPrefix, uid, imageUrls,
+        agentFolderNames, nextPrefix, uid, imageUrls, resolvedFilenameConvention,
     );
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);

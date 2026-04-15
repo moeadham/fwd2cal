@@ -13,6 +13,8 @@ import {
   DriveFileEntry,
   FolderOperation,
   FileInfo,
+  GenerateFilenameExamplesSchema,
+  GenerateFilenameExamplesResult,
 } from "./types";
 import {ChatMessage, TextContent, ImageURLContent} from "../../util/types";
 import {
@@ -39,6 +41,57 @@ import {
   ProposeFileActionSchema,
   ProposeFileActionResult,
 } from "./prompts/proposeFileAction/v1";
+
+/** Builds the optional user preference block for filename-producing prompts. */
+function renderFilenameConventionBlock(filenameConvention?: string): string {
+  const convention = typeof filenameConvention === "string" ? filenameConvention.trim() : "";
+  if (!convention) {
+    return "";
+  }
+  return `\n## Filename Convention\nUse this exact pattern for suggested_name: ${convention}\n`;
+}
+
+const FILENAME_EXAMPLE_INPUTS = [
+  {description: "Tax Receipt", extension: ".pdf"},
+  {description: "Client Agreement", extension: ".docx"},
+  {description: "Travel Itinerary", extension: ".pdf"},
+];
+
+function formatDateParts(date: Date): {yyyy: string; mm: string; dd: string} {
+  return {
+    yyyy: String(date.getFullYear()),
+    mm: String(date.getMonth() + 1).padStart(2, "0"),
+    dd: String(date.getDate()).padStart(2, "0"),
+  };
+}
+
+function fallbackFilenameExample(convention: string, description: string, extension: string, date: Date): string {
+  const {yyyy, mm, dd} = formatDateParts(date);
+  let example = convention.trim() || `${yyyy}.${mm}.${dd} - Description.ext`;
+  example = example
+      .replace(/YYYY/g, yyyy)
+      .replace(/YY/g, yyyy.slice(-2))
+      .replace(/MM/g, mm)
+      .replace(/DD/g, dd)
+      .replace(/\bDescription\b/g, description)
+      .replace(/\bdescription\b/g, description.toLowerCase())
+      .replace(/\bdesc\b/g, description)
+      .replace(/\bname\b/g, description)
+      .replace(/\.ext\b/g, extension)
+      .replace(/\bext\b/g, extension.replace(/^\./, ""));
+  if (!example.includes(".")) {
+    example += extension;
+  }
+  return example;
+}
+
+function fallbackFilenameExamples(convention: string): string[] {
+  const today = new Date();
+  const fallbackConvention = convention.trim() || "YYYY.MM.DD - Description.ext";
+  return FILENAME_EXAMPLE_INPUTS.map((input) =>
+    fallbackFilenameExample(fallbackConvention, input.description, input.extension, today),
+  );
+}
 
 /** Formats one folder path segment for display. */
 function titleCaseFolderSegment(segment: string): string {
@@ -130,6 +183,7 @@ async function proposeFilePlacement(
     nextPrefix: string,
     uid: string | null = null,
     imageUrls: string[] = [],
+    filenameConvention?: string,
 ): Promise<FileProposal> {
   const {prompts, versions} = getPrompts();
   let userText = `## Existing Agent-Managed Folders\n`;
@@ -156,6 +210,7 @@ async function proposeFilePlacement(
     if (emailSubject) userText += `Subject: ${emailSubject}\n`;
     if (emailBody) userText += `Body: ${emailBody.slice(0, 500)}\n`;
   }
+  userText += renderFilenameConventionBlock(filenameConvention);
 
   // Build user message content - text + images (mirrors calendar agent pattern)
   let userContent: string | Array<TextContent | ImageURLContent>;
@@ -269,13 +324,15 @@ async function reviseOrganization(
     currentProposal: DriveOrganizeProposal,
     userInstructions: string,
     uid: string | null = null,
+    filenameConvention?: string,
 ): Promise<{ proposal: DriveOrganizeProposal; preservedRootPaths: Set<string> }> {
   const {prompts, versions} = getPrompts();
   const proposedTree = renderFolderTreePlainText(currentProposal);
   const originalTree = renderOriginalFolderTree(currentProposal);
   const userText = `## User Requested Changes\n${userInstructions}\n\n` +
     `## Current Proposed Folder Tree\n${proposedTree}\n\n` +
-    `## Original Drive Folder Tree\n${originalTree}\n`;
+    `## Original Drive Folder Tree\n${originalTree}\n` +
+    renderFilenameConventionBlock(filenameConvention);
 
   const messages: ChatMessage[] = [
     {role: "system", content: prompts.reviseOrganization.prompt},
@@ -313,6 +370,49 @@ async function reviseOrganization(
   );
   normalizeFolderPrefixes(revisedProposal, preservedRootPaths);
   return {proposal: revisedProposal, preservedRootPaths};
+}
+
+/** Generates user-facing filename examples for a confirmed convention. */
+async function generateFilenameExamples(
+    convention: string,
+    uid: string | null = null,
+): Promise<string[]> {
+  const safeConvention = convention.trim() || "YYYY.MM.DD - Description.ext";
+  const {prompts, versions} = getPrompts();
+  const {yyyy, mm, dd} = formatDateParts(new Date());
+  const userText = `## Filename Convention\n${safeConvention}\n\n` +
+    `## Today's Date\n${yyyy}-${mm}-${dd}\n\n` +
+    `## Required Examples\n` +
+    FILENAME_EXAMPLE_INPUTS
+        .map((input, index) => `${index + 1}. ${input.description}${input.extension}`)
+        .join("\n") +
+    "\n";
+
+  try {
+    const messages: ChatMessage[] = [
+      {role: "system", content: prompts.generateFilenameExamples.prompt},
+      {role: "user", content: userText},
+    ];
+    const result = await defaultCompletion<GenerateFilenameExamplesResult>(
+        messages,
+        prompts.generateFilenameExamples.model,
+        prompts.generateFilenameExamples.temperature ?? DEFAULT_TEMP,
+        GenerateFilenameExamplesSchema,
+        uid,
+        {
+          promptVersion: versions.PROMPT_GENERATE_FILENAME_EXAMPLES_VERSION,
+          retry: false,
+        },
+    ) as GenerateFilenameExamplesResult;
+    return result.examples.map((example) => String(example));
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    logger.warn("Drive organize: Filename example generation failed, using fallback examples", {
+      error: errMsg,
+      convention: safeConvention,
+    });
+    return fallbackFilenameExamples(safeConvention);
+  }
 }
 
 /** Detect the existing or preferred folder naming convention from the current Drive tree. */
@@ -1389,4 +1489,5 @@ export {
   finalizeDirectoryMap,
   classifyConventionChange,
   proposeFileAction,
+  generateFilenameExamples,
 };

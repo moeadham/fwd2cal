@@ -37,6 +37,7 @@ import {verifyOrganizeResults} from "./organizeVerify";
 import {sendOrganizeAuthRequiredEmail} from "./organizeMain";
 import {
   finalizeOrganizeProposal,
+  getDriveUserPreferences,
   getOrganizeIntermediateState,
   getOrganizePhaseData,
   getOrganizeProposal,
@@ -49,11 +50,16 @@ import {
   classifyConventionChange,
   evaluateDirectoryPlacement,
   finalizeDirectoryMap,
+  generateFilenameExamples,
   mergeRevisedProposal,
   renumberFoldersContiguously,
   reviseOrganization,
 } from "../llm";
 const DEFAULT_FILENAME_CONVENTION = "YYYY.MM.DD - Description.ext";
+
+function getNonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
 
 /** Loads the Drive tree summary from GCS intermediate state. */
 async function loadTreeSummary(proposalId: string): Promise<string> {
@@ -160,6 +166,7 @@ export async function handleOrganizeRevision(
         proposalDoc.proposal!,
         userInstructions,
         uid,
+        proposalDoc.phaseData?.filenameConvention?.convention,
     );
     const mergedProposal = mergeRevisedProposal(
         proposalDoc.proposal!,
@@ -396,6 +403,11 @@ async function handleDirectoryAdditionsReply(
     await saveDriveUserPreferences(uid, {
       approvedDirectoryStructure: approvedStructure,
     });
+    const preferences = await getDriveUserPreferences(uid);
+    const convention =
+      getNonEmptyString(proposalDoc.phaseData?.filenameConvention?.convention) ||
+      getNonEmptyString(preferences.filenameConvention) ||
+      DEFAULT_FILENAME_CONVENTION;
     const nextPhaseData = {
       ...proposalDoc.phaseData,
       directoryLayout: {
@@ -403,14 +415,15 @@ async function handleDirectoryAdditionsReply(
         approvedStructure,
       },
       filenameConvention: {
-        convention: DEFAULT_FILENAME_CONVENTION,
+        convention,
       },
     };
     await updateOrganizeProposalStatus(proposalId, "pending", {
       phase: "filename_convention",
       phaseData: nextPhaseData,
     });
-    await sendOrganizePhase2Email(sender, email, proposalId, DEFAULT_FILENAME_CONVENTION);
+    const examples = await generateFilenameExamples(convention, uid);
+    await sendOrganizePhase2Email(sender, email, proposalId, convention, examples);
     return emptyResult();
   }
 
@@ -483,7 +496,10 @@ async function handleFilenameConventionReply(
         },
       },
     });
-    await sendOrganizeCostEstimateEmail(sender, email, proposalId, approvedStructure, convention, cost);
+    const examples = await generateFilenameExamples(convention, uid);
+    await sendOrganizeCostEstimateEmail(
+        sender, email, proposalId, approvedStructure, convention, cost, examples,
+    );
     return {
       totalFiles: cost.totalFiles,
       filesToMove: cost.filesToMove,
@@ -495,7 +511,8 @@ async function handleFilenameConventionReply(
 
   const change = await classifyConventionChange(convention, replyBody, uid);
   if (!change.is_change) {
-    await sendOrganizePhase2Email(sender, email, proposalId, convention);
+    const examples = await generateFilenameExamples(convention, uid);
+    await sendOrganizePhase2Email(sender, email, proposalId, convention, examples);
     return emptyResult("Filename convention change unclear");
   }
 
@@ -509,7 +526,8 @@ async function handleFilenameConventionReply(
     phase: "filename_convention",
     phaseData: nextPhaseData,
   });
-  await sendOrganizePhase2Email(sender, email, proposalId, change.new_convention);
+  const examples = await generateFilenameExamples(change.new_convention, uid);
+  await sendOrganizePhase2Email(sender, email, proposalId, change.new_convention, examples);
   return emptyResult();
 }
 
@@ -543,12 +561,11 @@ async function handleCostEstimateReply(
   await updateOrganizeProposalStatus(proposalId, "pending", {
     phase: "filename_convention",
   });
-  await sendOrganizePhase2Email(
-      sender,
-      email,
-      proposalId,
-      proposalDoc.phaseData?.filenameConvention?.convention || DEFAULT_FILENAME_CONVENTION,
-  );
+  const convention =
+    proposalDoc.phaseData?.filenameConvention?.convention ||
+    DEFAULT_FILENAME_CONVENTION;
+  const examples = await generateFilenameExamples(convention, uid);
+  await sendOrganizePhase2Email(sender, email, proposalId, convention, examples);
   return emptyResult("Returned to filename convention");
 }
 
@@ -753,7 +770,12 @@ export async function handleOrganizeProposalReply(
   const proposal = proposalDoc.proposal!;
   let execResult;
   try {
-    execResult = await executeOrganizeProposal(oauth2Client, proposal, uid);
+    execResult = await executeOrganizeProposal(
+        oauth2Client,
+        proposal,
+        uid,
+        proposalDoc.phaseData?.filenameConvention?.convention || DEFAULT_FILENAME_CONVENTION,
+    );
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     logger.error("Drive organize approval: Execution failed", {

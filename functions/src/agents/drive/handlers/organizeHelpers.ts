@@ -472,12 +472,11 @@ export async function sendOrganizePhase2Email(
     email: TransformedEmail,
     proposalId: string,
     convention: string,
+    filenameExamples: string[],
 ): Promise<void> {
-  const examples = [
-    "2026.04.13 - Tax Receipt.pdf",
-    "2026.04.13 - Client Agreement.docx",
-    "2026.04.13 - Travel Itinerary.pdf",
-  ].map((example) => `- ${escapeHtml(example)}`).join("<br>");
+  const examples = filenameExamples
+      .map((example) => `- ${escapeHtml(example)}`)
+      .join("<br>");
   const html = applyTemplate(driveMailTemplates.organizePhase2Proposal.html, {
     FILENAME_CONVENTION: escapeHtml(convention),
     FILENAME_EXAMPLES: examples,
@@ -493,12 +492,11 @@ export async function sendOrganizeCostEstimateEmail(
     folders: DriveOrganizeProposal["proposed_folders"],
     filenameConvention: string,
     cost: OrganizeCostBreakdown,
+    filenameExamples: string[],
 ): Promise<void> {
-  const examples = [
-    "2026.04.13 - Tax Receipt.pdf",
-    "2026.04.13 - Client Agreement.docx",
-    "2026.04.13 - Travel Itinerary.pdf",
-  ].map((example) => `- ${escapeHtml(example)}`).join("<br>");
+  const examples = filenameExamples
+      .map((example) => `- ${escapeHtml(example)}`)
+      .join("<br>");
   const approveToken = signActionToken(proposalId, "approve");
   const approveLink = `${driveOrganizeActionUrl()}?proposalId=${proposalId}&action=approve&token=${approveToken}`;
   const html = applyTemplate(driveMailTemplates.organizeCostEstimate.html, {

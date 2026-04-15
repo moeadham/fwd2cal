@@ -32,7 +32,7 @@ Return a COMPLETE revised DriveOrganizeProposal that incorporates the user's ins
 - Support broad revisions such as moving many files, merging folders, splitting folders, renaming categories, or applying a rule across many files
 
 ## Filename rules:
-- Rename files to "YYYY.MM.DD - descriptive-name.ext" format
+- If the user message includes a "## Filename Convention" section, follow that exact pattern for renamed files. Otherwise, rename files to "YYYY.MM.DD - descriptive-name.ext" format
 - Preserve the original extension
 - If the user explicitly says not to rename certain files, keep their existing names
 - If the user requests a bulk rule, apply it consistently across all relevant files

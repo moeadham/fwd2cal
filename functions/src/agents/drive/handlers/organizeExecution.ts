@@ -390,6 +390,7 @@ export async function executeOrganizeProposal(
     oauth2Client: Auth.OAuth2Client,
     proposal: DriveOrganizeProposal,
     uid: string | null = null,
+    filenameConvention: string = "YYYY.MM.DD - Description.ext",
 ): Promise<{
   folderMap: Map<string, string>;
   snapshot: OrganizeSnapshotAction[];
@@ -634,7 +635,7 @@ export async function executeOrganizeProposal(
                 const agentFolderNames = [...folderMap.keys()];
                 const nextPrefix = getNextFolderPrefix(agentFolderNames);
                 const placement = await proposeFilePlacement(
-                    [fileInfo], "", "", agentFolderNames, nextPrefix, uid, imageUrls,
+                    [fileInfo], "", "", agentFolderNames, nextPrefix, uid, imageUrls, filenameConvention,
                 );
                 if (placement.proposals[0]?.suggested_name) {
                   finalName = placement.proposals[0].suggested_name;
