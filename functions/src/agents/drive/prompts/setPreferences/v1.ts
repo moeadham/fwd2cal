@@ -6,8 +6,16 @@ const SetPreferencesSchema = z.object({
   folderConvention: z.string().nullable().optional().describe(
       "The requested folder naming convention, or null/omitted if the user did not specify one",
   ),
+  folderConventionDescription: z.string().nullable().optional().describe(
+      "One-sentence plain-English description of folderConvention. Required when folderConvention is set; " +
+      "must be explicit about digit width and separator. Example: " +
+      "'Three-digit zero-padded prefix, a dash, then the category name (e.g. 001-Personal).'",
+  ),
   filenameConvention: z.string().nullable().optional().describe(
       "The requested filename convention, or null/omitted if the user did not specify one",
+  ),
+  filenameConventionDescription: z.string().nullable().optional().describe(
+      "One-sentence plain-English description of filenameConvention. Required when filenameConvention is set.",
   ),
   summary: z.string().describe("Brief user-facing summary of the preferences found"),
 });
@@ -25,6 +33,8 @@ Return only conventions that the user explicitly requested.
 
 Rules:
 - folderConvention and filenameConvention must be TERSE token patterns using the tokens below — NEVER sentences, natural-language descriptions, or instructions.
+- Whenever you set folderConvention, also set folderConventionDescription to a single plain-English sentence that unambiguously describes the pattern (digit width, separator, what each part means). Do the same for filenameConventionDescription whenever you set filenameConvention.
+- Descriptions should be stable enough to reuse verbatim in downstream prompts between revisions.
 - Do NOT include words like "use", "should", "prefix", "followed by", "e.g." in the convention strings. Just the pattern itself.
 - folderConvention is a single folder-name template (e.g. "N-Category", "NN-Category", "ClientName-Project").
 - filenameConvention is a single filename template including the extension placeholder (e.g. "YYYYMMDD_Description.ext", "YYYY.MM.DD - Description.ext").

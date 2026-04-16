@@ -214,6 +214,7 @@ export async function scanAndPropose(
       folderPreferences: {
         detectedConvention: convention.detected_convention,
         suggestedConvention: convention.suggested_convention,
+        conventionDescription: convention.convention_description,
         summary: convention.summary,
         topLevelFolderNames,
       },
@@ -246,6 +247,7 @@ export async function scanAndPropose(
         topLevelFolderNames,
         convention.detected_convention,
         convention.suggested_convention,
+        convention.convention_description,
     );
 
     sendEvent(uid, "driveOrganizeFolderPreferencesProposed", "drive", {

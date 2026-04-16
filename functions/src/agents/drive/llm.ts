@@ -50,12 +50,15 @@ const DEFAULT_FOLDER_CONVENTION = "NN-Category";
 const DEFAULT_FILENAME_CONVENTION = "YYYY.MM.DD - Description.ext";
 
 /** Builds the user preference block for folder-producing prompts. */
-function renderFolderConventionBlock(folderConvention?: string): string {
+function renderFolderConventionBlock(folderConvention?: string, folderConventionDescription?: string): string {
   const convention = typeof folderConvention === "string" ? folderConvention.trim() : "";
   if (!convention) {
     return "";
   }
-  return `\n## Folder Convention\nUse this exact pattern for folder_name and folder paths: ${convention}\n`;
+  const description = typeof folderConventionDescription === "string" ? folderConventionDescription.trim() : "";
+  const descriptionLine = description ? `\nDescription: ${description}` : "";
+  return "\n## Folder Convention\n" +
+    `Use this exact pattern for folder_name and folder paths: ${convention}${descriptionLine}\n`;
 }
 
 /** Builds the optional user preference block for filename-producing prompts. */
@@ -201,6 +204,7 @@ async function proposeFilePlacement(
     imageUrls: string[] = [],
     filenameConvention?: string,
     folderConvention?: string,
+    folderConventionDescription?: string,
 ): Promise<FileProposal> {
   const {prompts, versions} = getPrompts();
   let userText = `## Existing Agent-Managed Folders\n`;
@@ -210,7 +214,7 @@ async function proposeFilePlacement(
     userText += "(none — this is a new user)\n";
   }
   userText += `\nNext available folder prefix: ${nextPrefix}\n\n`;
-  userText += renderFolderConventionBlock(folderConvention);
+  userText += renderFolderConventionBlock(folderConvention, folderConventionDescription);
 
   userText += `## Files (${files.length} total)\n`;
   for (let i = 0; i < files.length; i++) {
@@ -346,12 +350,13 @@ async function reviseOrganization(
     uid: string | null = null,
     filenameConvention?: string,
     folderConvention?: string,
+    folderConventionDescription?: string,
 ): Promise<{ proposal: DriveOrganizeProposal; preservedRootPaths: Set<string> }> {
   const {prompts, versions} = getPrompts();
   const proposedTree = renderFolderTreePlainText(currentProposal);
   const originalTree = renderOriginalFolderTree(currentProposal);
   const userText = `## User Requested Changes\n${userInstructions}\n\n` +
-    renderFolderConventionBlock(folderConvention) +
+    renderFolderConventionBlock(folderConvention, folderConventionDescription) +
     `## Current Proposed Folder Tree\n${proposedTree}\n\n` +
     `## Original Drive Folder Tree\n${originalTree}\n` +
     renderFilenameConventionBlock(filenameConvention);

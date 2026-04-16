@@ -552,6 +552,7 @@ export async function sendOrganizeFolderPreferencesEmail(
     topLevelFolderNames: string[],
     detectedConvention: string,
     suggestedConvention: string,
+    conventionDescription: string = "",
 ): Promise<void> {
   const hasDetectedConvention = detectedConvention.trim().length > 0;
   const conventionLooksNumbered = /\bNN\b|\d{2,3}[-\s]/i.test(suggestedConvention);
@@ -565,8 +566,12 @@ export async function sendOrganizeFolderPreferencesEmail(
   if (!hasDetectedConvention && topLevelFolderNames.length > selectedExamples.length) {
     examples.push("- ...");
   }
+  const descriptionBlock = hasDetectedConvention && conventionDescription.trim() ?
+    `<span style="color:#666;font-size:13px;">${escapeHtml(conventionDescription.trim())}</span><br>` :
+    "";
   const html = applyTemplate(driveMailTemplates.organizeFolderPreferences.html, {
     DETECTED_CONVENTION: escapeHtml(detectedConvention || "No convention detected."),
+    CONVENTION_DESCRIPTION: descriptionBlock,
     SUGGESTED_CONVENTION: escapeHtml(suggestedConvention),
     FOLDER_EXAMPLES: examples.join("<br>"),
     EMBEDDED_DATA: phaseEmbeddedHtml(proposalId),

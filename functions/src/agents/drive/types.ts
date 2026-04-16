@@ -194,6 +194,7 @@ export interface FolderPreferencesData {
   detectedConvention?: string;
   suggestedConvention: string;
   confirmedConvention?: string;
+  conventionDescription?: string;
   summary?: string;
   topLevelFolderNames?: string[];
 }

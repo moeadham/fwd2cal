@@ -392,6 +392,7 @@ export async function executeOrganizeProposal(
     uid: string | null = null,
     filenameConvention: string = "YYYY.MM.DD - Description.ext",
     folderConvention: string = DEFAULT_FOLDER_CONVENTION,
+    folderConventionDescription?: string,
 ): Promise<{
   folderMap: Map<string, string>;
   snapshot: OrganizeSnapshotAction[];
@@ -637,7 +638,7 @@ export async function executeOrganizeProposal(
                 const nextPrefix = getNextFolderPrefix(agentFolderNames);
                 const placement = await proposeFilePlacement(
                     [fileInfo], "", "", agentFolderNames, nextPrefix, uid, imageUrls,
-                    filenameConvention, folderConvention,
+                    filenameConvention, folderConvention, folderConventionDescription,
                 );
                 if (placement.proposals[0]?.suggested_name) {
                   finalName = placement.proposals[0].suggested_name;

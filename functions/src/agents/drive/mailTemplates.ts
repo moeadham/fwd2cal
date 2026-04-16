@@ -196,7 +196,9 @@ Once authorized, you can forward emails with attachments to <a href="mailto:driv
     html: `We scanned your Google Drive. Before proposing the folder structure, please confirm the folder naming style.
 <br><br>
 <b>Detected convention:</b> %DETECTED_CONVENTION%
-<br><br>
+<br>
+%CONVENTION_DESCRIPTION%
+<br>
 <b>Suggested convention:</b> %SUGGESTED_CONVENTION%
 <br><br>
 <b>Folder examples:</b>

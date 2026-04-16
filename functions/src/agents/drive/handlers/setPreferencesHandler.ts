@@ -51,12 +51,17 @@ export async function handleSetPreferences(
   );
 
   const nextFolderConvention = getNonEmptyString(parsed.folderConvention);
+  const nextFolderConventionDescription = getNonEmptyString(parsed.folderConventionDescription);
   const nextFilenameConvention = getNonEmptyString(parsed.filenameConvention);
+  const nextFilenameConventionDescription = getNonEmptyString(parsed.filenameConventionDescription);
   const updates: Record<string, string> = {};
   const changes: PreferenceChange[] = [];
 
   if (nextFolderConvention && nextFolderConvention !== currentFolderConvention) {
     updates.folderConvention = nextFolderConvention;
+    if (nextFolderConventionDescription) {
+      updates.folderConventionDescription = nextFolderConventionDescription;
+    }
     changes.push({
       label: "Folder convention",
       before: currentFolderConvention,
@@ -65,6 +70,9 @@ export async function handleSetPreferences(
   }
   if (nextFilenameConvention && nextFilenameConvention !== currentFilenameConvention) {
     updates.filenameConvention = nextFilenameConvention;
+    if (nextFilenameConventionDescription) {
+      updates.filenameConventionDescription = nextFilenameConventionDescription;
+    }
     changes.push({
       label: "Filename convention",
       before: currentFilenameConvention,

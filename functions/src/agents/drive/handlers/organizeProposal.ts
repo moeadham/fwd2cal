@@ -96,6 +96,7 @@ async function handleFolderPreferencesReply(
         topLevelFolderNames,
         folderPreferences.detectedConvention || "",
         folderPreferences.suggestedConvention,
+        folderPreferences.conventionDescription || "",
     );
     return emptyResult("Empty folder convention");
   }
@@ -112,13 +113,18 @@ async function handleFolderPreferencesReply(
       resolvedConvention = parsed.new_convention;
     }
   }
-  await saveDriveUserPreferences(uid, {folderConvention: resolvedConvention});
   const analysis = await analyzeDirectoryStructure(
       treeSummary,
       resolvedConvention,
       email.text || email.html || "",
       uid,
   );
+  await saveDriveUserPreferences(uid, {
+    folderConvention: resolvedConvention,
+    folderConventionDescription: analysis.convention_description ||
+      folderPreferences.conventionDescription ||
+      "",
+  });
   const proposedStructure = analysis.proposed_structure.map((folder) => ({
     folder_path: folder.folder_path,
     description: folder.description,
@@ -168,6 +174,10 @@ export async function handleOrganizeRevision(
       getNonEmptyString(proposalDoc.phaseData?.directoryLayout?.folderConvention) ||
       getNonEmptyString(preferences.folderConvention) ||
       DEFAULT_FOLDER_CONVENTION;
+    const folderConventionDescription =
+      getNonEmptyString(proposalDoc.phaseData?.directoryLayout?.conventionDescription) ||
+      getNonEmptyString(proposalDoc.phaseData?.folderPreferences?.conventionDescription) ||
+      getNonEmptyString(preferences.folderConventionDescription);
     const filenameConvention =
       getNonEmptyString(proposalDoc.phaseData?.filenameConvention?.convention) ||
       getNonEmptyString(preferences.filenameConvention) ||
@@ -178,6 +188,7 @@ export async function handleOrganizeRevision(
         uid,
         filenameConvention,
         folderConvention,
+        folderConventionDescription,
     );
     const mergedProposal = mergeRevisedProposal(
         proposalDoc.proposal!,
@@ -784,6 +795,10 @@ export async function handleOrganizeProposalReply(
     getNonEmptyString(proposalDoc.phaseData?.directoryLayout?.folderConvention) ||
     getNonEmptyString(preferences.folderConvention) ||
     DEFAULT_FOLDER_CONVENTION;
+  const executionFolderConventionDescription =
+    getNonEmptyString(proposalDoc.phaseData?.directoryLayout?.conventionDescription) ||
+    getNonEmptyString(proposalDoc.phaseData?.folderPreferences?.conventionDescription) ||
+    getNonEmptyString(preferences.folderConventionDescription);
   const executionFilenameConvention =
     getNonEmptyString(proposalDoc.phaseData?.filenameConvention?.convention) ||
     getNonEmptyString(preferences.filenameConvention) ||
@@ -796,6 +811,7 @@ export async function handleOrganizeProposalReply(
         uid,
         executionFilenameConvention,
         executionFolderConvention,
+        executionFolderConventionDescription,
     );
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);

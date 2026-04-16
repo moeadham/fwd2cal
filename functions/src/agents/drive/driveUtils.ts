@@ -410,19 +410,22 @@ export async function callProposalWithFallback(
   try {
     let resolvedFilenameConvention = getNonEmptyString(filenameConvention);
     let resolvedFolderConvention = DEFAULT_FOLDER_CONVENTION;
+    let resolvedFolderConventionDescription: string | undefined;
     if (uid) {
       const preferences = await getDriveUserPreferences(uid);
       if (!resolvedFilenameConvention) {
         resolvedFilenameConvention = getNonEmptyString(preferences.filenameConvention);
       }
       resolvedFolderConvention = getNonEmptyString(preferences.folderConvention) || DEFAULT_FOLDER_CONVENTION;
+      resolvedFolderConventionDescription = getNonEmptyString(preferences.folderConventionDescription);
     }
     if (!resolvedFilenameConvention) {
       resolvedFilenameConvention = DEFAULT_FILENAME_CONVENTION;
     }
     return await proposeFilePlacement(
         fileInfos, emailSubject, emailBody,
-        agentFolderNames, nextPrefix, uid, imageUrls, resolvedFilenameConvention, resolvedFolderConvention,
+        agentFolderNames, nextPrefix, uid, imageUrls,
+        resolvedFilenameConvention, resolvedFolderConvention, resolvedFolderConventionDescription,
     );
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);

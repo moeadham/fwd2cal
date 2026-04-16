@@ -1182,6 +1182,28 @@ describe("detectFolderConvention", function() {
     expect(result.detected_convention).to.match(/NNN-Category/);
   });
 
+  it("DT00dfc5 detects a numeric convention when mixed with unprefixed folders", async function() {
+    this.timeout(60000);
+    setOpenAIClientForTest(null);
+    const treeSummary = `My Drive/ (5 files at root)
+  001-Hobbies/
+  002-Clients/
+  003-Household/
+  01-Archive/
+  02-Legacy/
+  Bitaccess/
+  Contracts/
+  Miscellaneous/
+  Old Stuff/
+  Personal/
+`;
+    const result = await detectFolderConvention(treeSummary, null, "NN-Category");
+    expect(result.has_convention).to.equal(true);
+    expect(result.detected_convention).to.match(/N{1,4}-Category/);
+    expect(result.convention_description).to.be.a("string");
+    expect(result.convention_description.length).to.be.greaterThan(10);
+  });
+
   it("DT00dfc4 detects NNN-Category on a deeply nested realistic tree", async function() {
     this.timeout(60000);
     setOpenAIClientForTest(null);
