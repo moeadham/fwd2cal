@@ -1,6 +1,6 @@
 import {logger} from "firebase-functions/v2";
 import {
-  getUserFromEmail, updateDriveFileData,
+  getDriveUserPreferences, getUserFromEmail, saveDriveUserPreferences, updateDriveFileData,
 } from "../../../util/firestoreHandler";
 import {getOauthClient} from "../../../auth/authHandler";
 import {AGENT_NAME} from "../config";
@@ -8,21 +8,72 @@ import {sendEvent} from "../../../util/analytics";
 import {TransformedEmail} from "../../../util/types";
 import {
   DriveProcessingResult, ProcessedDriveFile,
-  DriveFolder, DriveEmbeddedFileData,
+  DriveFolder, DriveEmbeddedFileData, MoveInstruction,
 } from "../types";
-import {driveMailTemplates} from "../mailTemplates";
+import {driveMailTemplates, PreferenceChange, renderPreferencesUpdatedBlock} from "../mailTemplates";
 import {
   getDriveFolderTree, findFolderInTree, getRootFolderId,
   moveFile, createFolder, placeMarkerFile,
   findAgentManagedFolders, renameFolder, getFolderFileCount,
   findSubfolderByName, trashFile, renameFile,
 } from "../driveHelper";
-import {interpretMoveInstructions} from "../llm";
+import {DEFAULT_FILENAME_CONVENTION, DEFAULT_FOLDER_CONVENTION, interpretMoveInstructions} from "../llm";
 import {
   toTitleCase, applyTemplate, sendDriveEmailResponse,
   getNextFolderPrefix, buildEmbeddedDriveHtml,
   buildEmbeddedDriveData, findFolderByName, isDriveAuthError,
 } from "../driveUtils";
+
+function getNonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+/** Persists preference updates returned by move-instruction parsing. */
+export async function persistMovePreferenceUpdates(
+    uid: string,
+    moveResult: MoveInstruction,
+): Promise<{
+  preferencesUpdatedBlock: string;
+  folderConvention: string;
+  filenameConvention: string;
+}> {
+  const existingPreferences = await getDriveUserPreferences(uid);
+  const currentFolderConvention = getNonEmptyString(existingPreferences.folderConvention) ||
+    DEFAULT_FOLDER_CONVENTION;
+  const currentFilenameConvention = getNonEmptyString(existingPreferences.filenameConvention) ||
+    DEFAULT_FILENAME_CONVENTION;
+  const preferenceUpdates: Record<string, string> = {};
+  const preferenceChanges: PreferenceChange[] = [];
+  const nextFolderConvention = getNonEmptyString(moveResult.folder_convention_update);
+  const nextFilenameConvention = getNonEmptyString(moveResult.filename_convention_update);
+  if (nextFolderConvention && nextFolderConvention !== currentFolderConvention) {
+    preferenceUpdates.folderConvention = nextFolderConvention;
+    preferenceChanges.push({
+      label: "Folder convention",
+      before: currentFolderConvention,
+      after: nextFolderConvention,
+    });
+  }
+  if (nextFilenameConvention && nextFilenameConvention !== currentFilenameConvention) {
+    preferenceUpdates.filenameConvention = nextFilenameConvention;
+    preferenceChanges.push({
+      label: "Filename convention",
+      before: currentFilenameConvention,
+      after: nextFilenameConvention,
+    });
+  }
+  if (Object.keys(preferenceUpdates).length > 0) {
+    await saveDriveUserPreferences(uid, preferenceUpdates);
+  }
+  return {
+    preferencesUpdatedBlock: renderPreferencesUpdatedBlock(
+        preferenceChanges,
+        "Saved this preference for future Drive organization.",
+    ),
+    folderConvention: preferenceUpdates.folderConvention || currentFolderConvention,
+    filenameConvention: preferenceUpdates.filenameConvention || currentFilenameConvention,
+  };
+}
 
 /**
  * Handle a user reply that contains move instructions.
@@ -85,6 +136,9 @@ export async function handleMoveReply(
 
   // LLM: interpret move instructions (only agent-managed folders)
   const replyText = email.text || "";
+  const movePreferences = await getDriveUserPreferences(uid);
+  const moveFilenameConvention = getNonEmptyString(movePreferences.filenameConvention) ||
+    DEFAULT_FILENAME_CONVENTION;
   let moveResult;
   try {
     moveResult = await interpretMoveInstructions(
@@ -92,6 +146,7 @@ export async function handleMoveReply(
         files,
         agentFolders.map((f) => ({name: f.name, id: f.id})),
         uid,
+        moveFilenameConvention,
     );
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
@@ -109,6 +164,12 @@ export async function handleMoveReply(
       new_filename: m.new_filename,
     })),
   });
+
+  const {
+    preferencesUpdatedBlock,
+    folderConvention: finalFolderConvention,
+    filenameConvention: finalFilenameConvention,
+  } = await persistMovePreferenceUpdates(uid, moveResult);
 
   // Resolve target folder and move files
   let rootFolderId: string;
@@ -384,19 +445,27 @@ export async function handleMoveReply(
   const movedFiles = succeeded.filter((r) => !trashedFiles.includes(r.filename));
 
   if (succeeded.length === 0) {
-    const html = applyTemplate(driveMailTemplates.moveFailed.html, {});
+    const html = preferencesUpdatedBlock ?
+      applyTemplate(driveMailTemplates.preferencesUpdated.html, {
+        PREFERENCES_UPDATED: preferencesUpdatedBlock,
+        CURRENT_FOLDER_CONVENTION: finalFolderConvention,
+        CURRENT_FILENAME_CONVENTION: finalFilenameConvention,
+      }) :
+      applyTemplate(driveMailTemplates.moveFailed.html, {});
     await sendDriveEmailResponse(sender, email, html);
   } else if (trashedFiles.length > 0 && movedFiles.length === 0) {
     // All files were trashed
     if (trashedFiles.length === 1) {
       const html = applyTemplate(driveMailTemplates.fileTrashed.html, {
         FILE_NAME: trashedFiles[0],
+        PREFERENCES_UPDATED: preferencesUpdatedBlock,
       });
       await sendDriveEmailResponse(sender, email, html);
     } else {
       const fileListHtml = trashedFiles.map((f) => `<b>${f}</b>`).join("<br>");
       const html = applyTemplate(driveMailTemplates.multipleFilesTrashed.html, {
         FILE_LIST: fileListHtml,
+        PREFERENCES_UPDATED: preferencesUpdatedBlock,
       });
       await sendDriveEmailResponse(sender, email, html);
     }
@@ -424,6 +493,7 @@ export async function handleMoveReply(
         FILE_NAME: file.suggestedName,
         NEW_PATH: file.folderPath,
         FILE_LINK: file.driveWebLink || "#",
+        PREFERENCES_UPDATED: preferencesUpdatedBlock,
         EMBEDDED_DATA: embeddedHtml,
       });
       await sendDriveEmailResponse(sender, email, html);
@@ -434,6 +504,7 @@ export async function handleMoveReply(
       ).join("<br>");
       const html = applyTemplate(driveMailTemplates.multipleFilesMoved.html, {
         FILE_LIST: fileListHtml,
+        PREFERENCES_UPDATED: preferencesUpdatedBlock,
         EMBEDDED_DATA: embeddedHtml,
       });
       await sendDriveEmailResponse(sender, email, html);

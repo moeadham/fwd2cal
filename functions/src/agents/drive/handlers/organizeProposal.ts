@@ -48,6 +48,7 @@ import {
 import {
   analyzeDirectoryStructure,
   classifyConventionChange,
+  DEFAULT_FOLDER_CONVENTION,
   evaluateDirectoryPlacement,
   finalizeDirectoryMap,
   generateFilenameExamples,
@@ -162,11 +163,21 @@ export async function handleOrganizeRevision(
     userInstructions: string,
 ): Promise<OrganizeProcessingResult> {
   try {
+    const preferences = await getDriveUserPreferences(uid);
+    const folderConvention =
+      getNonEmptyString(proposalDoc.phaseData?.directoryLayout?.folderConvention) ||
+      getNonEmptyString(preferences.folderConvention) ||
+      DEFAULT_FOLDER_CONVENTION;
+    const filenameConvention =
+      getNonEmptyString(proposalDoc.phaseData?.filenameConvention?.convention) ||
+      getNonEmptyString(preferences.filenameConvention) ||
+      DEFAULT_FILENAME_CONVENTION;
     const {proposal: revisedProposal, preservedRootPaths} = await reviseOrganization(
         proposalDoc.proposal!,
         userInstructions,
         uid,
-        proposalDoc.phaseData?.filenameConvention?.convention,
+        filenameConvention,
+        folderConvention,
     );
     const mergedProposal = mergeRevisedProposal(
         proposalDoc.proposal!,
@@ -768,13 +779,23 @@ export async function handleOrganizeProposalReply(
 
   // Execute the proposal
   const proposal = proposalDoc.proposal!;
+  const preferences = await getDriveUserPreferences(uid);
+  const executionFolderConvention =
+    getNonEmptyString(proposalDoc.phaseData?.directoryLayout?.folderConvention) ||
+    getNonEmptyString(preferences.folderConvention) ||
+    DEFAULT_FOLDER_CONVENTION;
+  const executionFilenameConvention =
+    getNonEmptyString(proposalDoc.phaseData?.filenameConvention?.convention) ||
+    getNonEmptyString(preferences.filenameConvention) ||
+    DEFAULT_FILENAME_CONVENTION;
   let execResult;
   try {
     execResult = await executeOrganizeProposal(
         oauth2Client,
         proposal,
         uid,
-        proposalDoc.phaseData?.filenameConvention?.convention || DEFAULT_FILENAME_CONVENTION,
+        executionFilenameConvention,
+        executionFolderConvention,
     );
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);

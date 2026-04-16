@@ -54,6 +54,12 @@ export const MoveInstructionItemSchema = z.object({
 
 export const MoveInstructionSchema = z.object({
   moves: z.array(MoveInstructionItemSchema).describe("Move instruction for each file"),
+  folder_convention_update: z.string().nullable().optional().describe(
+      "New global folder naming convention requested by the user. Null/omit when there is no convention change.",
+  ),
+  filename_convention_update: z.string().nullable().optional().describe(
+      "New global filename convention requested by the user. Null/omit when there is no convention change.",
+  ),
 });
 
 export type MoveInstruction = z.infer<typeof MoveInstructionSchema>;
@@ -326,6 +332,7 @@ export interface DrivePrompts {
   proposeFilePlacement: DrivePromptConfig;
   interpretMoveInstructions: DrivePromptConfig;
   reviseOrganization: DrivePromptConfig;
+  setPreferences: DrivePromptConfig;
   detectFolderConvention: DrivePromptConfig;
   analyzeDirectoryStructure: DrivePromptConfig;
   evaluateDirectoryPlacement: DrivePromptConfig;
@@ -372,6 +379,7 @@ export interface DriveMailTemplates {
   organizeNoFiles: DriveMailTemplate;
   organizeComplete: DriveMailTemplate;
   organizeUndone: DriveMailTemplate;
+  preferencesUpdated: DriveMailTemplate;
   userDeleted: DriveMailTemplate;
   emailRemoved: DriveMailTemplate;
   emailNotOwned: DriveMailTemplate;

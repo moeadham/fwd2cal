@@ -15,6 +15,7 @@ import {
 } from "../driveUtils";
 import {handleMoveReply} from "./moveHandler";
 import {handleFileUpload} from "./fileUploadHandler";
+import {handleSetPreferences} from "./setPreferencesHandler";
 
 /**
  * Main drive handler — processes an inbound email.
@@ -72,6 +73,16 @@ async function handleDriveEmail(
     logger.info("Drive: organize-drive skill matched", {sender, matchedIn: skillMatch.matchedIn});
     await handleOrganizeDrive(email, emailId);
     return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: []};
+  }
+
+  if (skillMatch?.skillId === "set-preferences") {
+    const uid = await getUserFromEmail(sender);
+    if (uid) {
+      logger.info("Drive: set-preferences skill matched", {sender, matchedIn: skillMatch.matchedIn});
+      await handleSetPreferences(email, emailId);
+      return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: []};
+    }
+    // Unknown user — fall through to auth flow below
   }
 
   // Account management skills require a known user

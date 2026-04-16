@@ -27,6 +27,8 @@ import {
 import {extractDocumentImages} from "../src/util/documentParser";
 import {
   applyFolderOperations,
+  DEFAULT_FOLDER_CONVENTION,
+  detectFolderConvention,
   mergeRevisedProposal,
   normalizeFolderPrefixes,
   proposeFilePlacement,
@@ -46,12 +48,17 @@ import {
   getOrganizeProposal,
   getResumableOrganizeProposals,
   getOrganizePhaseData,
+  getDriveUserPreferences,
   saveOrganizeProposal,
 } from "../src/util/firestoreHandler";
 import {getLastSentEmail, clearMockData} from "../src/util/resendMock";
 import {organizeProposalTestHooks} from "../src/agents/drive/handlers/organizeProposal";
+import {handleSetPreferences} from "../src/agents/drive/handlers/setPreferencesHandler";
+import {persistMovePreferenceUpdates} from "../src/agents/drive/handlers/moveHandler";
 import {buildSequentialExecutionProposal} from "../src/agents/drive/handlers/organizeExecution";
 import {TransformedEmail} from "../src/util/types";
+import {getSkills} from "../src/agents/drive/skills";
+import {fastMatchSkill} from "../src/util/skills/matcher";
 
 
 chai.use(chaiHttp);
@@ -966,6 +973,17 @@ describe("MoveInstructionSchema", function() {
     expect(withoutRename.moves[0]).to.not.have.property("new_filename");
     expect(withNullRename.moves[0].new_filename).to.equal(null);
   });
+
+  it("DT00t2 accepts optional convention updates at the top level", function() {
+    const result = MoveInstructionSchema.parse({
+      folder_convention_update: "ClientName-Project",
+      filename_convention_update: "YYYY-MM-DD Title.ext",
+      moves: [],
+    });
+
+    expect(result.folder_convention_update).to.equal("ClientName-Project");
+    expect(result.filename_convention_update).to.equal("YYYY-MM-DD Title.ext");
+  });
 });
 
 describe("defaultCompletion", function() {
@@ -1058,12 +1076,242 @@ describe("proposeFilePlacement", function() {
         "test-uid",
         [],
         "YYYY-MM-DD_desc.ext",
+        "ClientName-Project",
     );
 
     const userContent = capturedRequest?.messages[1]?.content;
     expect(userContent).to.be.a("string");
+    expect(userContent).to.include("## Folder Convention");
+    expect(userContent).to.include("Use this exact pattern for folder_name and folder paths: ClientName-Project");
     expect(userContent).to.include("## Filename Convention");
     expect(userContent).to.include("Use this exact pattern for suggested_name: YYYY-MM-DD_desc.ext");
+  });
+
+  it("DT00ta3 can inject the default folder convention fallback", async function() {
+    let capturedRequest: OpenAI.ChatCompletionCreateParams | null = null;
+    const fakeClient = {
+      chat: {
+        completions: {
+          create: async (request: OpenAI.ChatCompletionCreateParams) => {
+            capturedRequest = request;
+            return {
+              choices: [{
+                message: {
+                  content: JSON.stringify({
+                    folder_name: "01-Invoices",
+                    is_existing_folder: false,
+                    proposals: [{
+                      file_index: 0,
+                      suggested_name: "invoice.pdf",
+                      reason: "Fallback",
+                    }],
+                  }),
+                },
+                finish_reason: "stop",
+              }],
+              usage: {total_tokens: 1},
+            };
+          },
+        },
+      },
+    } as unknown as OpenAI;
+    setOpenAIClientForTest(fakeClient);
+
+    await proposeFilePlacement(
+        [{
+          fileName: "invoice.pdf",
+          mimeType: "application/pdf",
+          fileSize: 1234,
+          contentSummary: "Invoice",
+        }],
+        "Invoice",
+        "",
+        [],
+        "01",
+        "test-uid",
+        [],
+        undefined,
+        DEFAULT_FOLDER_CONVENTION,
+    );
+
+    const userContent = capturedRequest?.messages[1]?.content;
+    expect(userContent).to.be.a("string");
+    expect(userContent).to.include(`Use this exact pattern for folder_name and folder paths: ${DEFAULT_FOLDER_CONVENTION}`);
+  });
+});
+
+describe("detectFolderConvention", function() {
+  afterEach(function() {
+    setOpenAIClientForTest(null);
+  });
+
+  it("DT00dfc1 detects NNN-Category from 3-digit zero-padded folders", async function() {
+    this.timeout(60000);
+    setOpenAIClientForTest(null);
+    const treeSummary = `My Drive/ (15 files at root)
+  001-Personal/ (1 file)
+  002-Work/ (1 file)
+`;
+    const result = await detectFolderConvention(treeSummary, null);
+    expect(result.has_convention).to.equal(true);
+    expect(result.detected_convention).to.match(/NNN-Category/);
+  });
+
+  it("DT00dfc2 detects NN-Category from 2-digit zero-padded folders", async function() {
+    this.timeout(60000);
+    setOpenAIClientForTest(null);
+    const treeSummary = `My Drive/
+  01-Finance/
+  02-Work/
+  03-Personal/
+`;
+    const result = await detectFolderConvention(treeSummary, null);
+    expect(result.has_convention).to.equal(true);
+    expect(result.detected_convention).to.match(/NN-Category/);
+  });
+
+  it("DT00dfc3 trusts observed folders over a mismatched fallback preference", async function() {
+    this.timeout(60000);
+    setOpenAIClientForTest(null);
+    const treeSummary = `My Drive/
+  001-Personal/
+  002-Work/
+`;
+    const result = await detectFolderConvention(treeSummary, null, "N-Category");
+    expect(result.has_convention).to.equal(true);
+    expect(result.detected_convention).to.match(/NNN-Category/);
+  });
+
+  it("DT00dfc4 detects NNN-Category on a deeply nested realistic tree", async function() {
+    this.timeout(60000);
+    setOpenAIClientForTest(null);
+    const treeSummary = `My Drive/ (8 files at root)
+  001-Hobbies/ (2 files)
+    Gardening/
+    Photography/
+      Trips/
+        Iceland/
+        Kyoto/
+    Reading/
+  002-Clients/ (3 files)
+    Alpha Corp/
+      Contracts/
+      Invoices/
+      Meetings/
+    Beta LLC/
+      Proposals/
+      Statements/
+  003-Household/ (1 files)
+    Bills/
+      Electric/
+      Internet/
+    Maintenance/
+`;
+    const result = await detectFolderConvention(treeSummary, null);
+    expect(result.has_convention).to.equal(true);
+    expect(result.detected_convention).to.match(/NNN-Category/);
+  });
+});
+
+describe("set-preferences", function() {
+  afterEach(function() {
+    setOpenAIClientForTest(null);
+    clearMockData();
+  });
+
+  it("DT00tp1 matches the set-preferences skill from the email body", function() {
+    const match = fastMatchSkill(
+        "question",
+        "Please update my folder convention and filename convention",
+        getSkills(),
+    );
+
+    expect(match?.skillId).to.equal("set-preferences");
+  });
+
+  it("DT00tp2 persists folder and filename conventions and sends a before-after block", async function() {
+    const sender = `prefs-${Date.now()}@example.com`;
+    const uid = `prefs-uid-${Date.now()}`;
+    await db.collection("EmailAddress").doc(sender).set({uid, email: sender, default: true});
+    await db.collection("DriveUsers").doc(uid).set({
+      email: sender,
+      preferences: {
+        folderConvention: "Old folders",
+        filenameConvention: "Old files.ext",
+      },
+    });
+    setFakeStructuredCompletions([{
+      folderConvention: "ClientName-Project",
+      filenameConvention: "YYYY-MM-DD Title.ext",
+      summary: "Updated both conventions.",
+    }]);
+
+    await handleSetPreferences({
+      ...makeTestEmail("Use ClientName-Project for folders and YYYY-MM-DD Title.ext for files"),
+      from: sender,
+      subject: "set my preferences",
+    }, "prefs-email-id");
+
+    const prefs = await getDriveUserPreferences(uid);
+    const sent = getLastSentEmail(sender);
+    expect(prefs.folderConvention).to.equal("ClientName-Project");
+    expect(prefs.filenameConvention).to.equal("YYYY-MM-DD Title.ext");
+    expect(sent?.html).to.include("Preferences updated");
+    expect(sent?.html).to.include("Old folders");
+    expect(sent?.html).to.include("ClientName-Project");
+    expect(sent?.html).to.include("Old files.ext");
+    expect(sent?.html).to.include("YYYY-MM-DD Title.ext");
+  });
+
+  it("DT00tp3 leaves unspecified conventions unchanged", async function() {
+    const sender = `prefs-partial-${Date.now()}@example.com`;
+    const uid = `prefs-partial-uid-${Date.now()}`;
+    await db.collection("EmailAddress").doc(sender).set({uid, email: sender, default: true});
+    await db.collection("DriveUsers").doc(uid).set({
+      email: sender,
+      preferences: {
+        folderConvention: "ClientName-Project",
+        filenameConvention: "YYYY.MM.DD - Description.ext",
+      },
+    });
+    setFakeStructuredCompletions([{
+      filenameConvention: "YYYY-MM-DD Title.ext",
+      summary: "Updated filename convention.",
+    }]);
+
+    await handleSetPreferences({
+      ...makeTestEmail("From now on use YYYY-MM-DD Title.ext for filenames"),
+      from: sender,
+      subject: "filename convention",
+    }, "prefs-partial-email-id");
+
+    const prefs = await getDriveUserPreferences(uid);
+    expect(prefs.folderConvention).to.equal("ClientName-Project");
+    expect(prefs.filenameConvention).to.equal("YYYY-MM-DD Title.ext");
+    expect(getLastSentEmail(sender)?.html).to.include("ClientName-Project");
+  });
+
+  it("DT00tp4 persists convention updates returned by move instructions", async function() {
+    const uid = `prefs-move-uid-${Date.now()}`;
+    await db.collection("DriveUsers").doc(uid).set({
+      preferences: {
+        folderConvention: "Old folders",
+        filenameConvention: "Old files.ext",
+      },
+    });
+
+    const result = await persistMovePreferenceUpdates(uid, {
+      moves: [],
+      folder_convention_update: "ClientName-Project",
+      filename_convention_update: "YYYY-MM-DD Title.ext",
+    });
+
+    const prefs = await getDriveUserPreferences(uid);
+    expect(prefs.folderConvention).to.equal("ClientName-Project");
+    expect(prefs.filenameConvention).to.equal("YYYY-MM-DD Title.ext");
+    expect(result.preferencesUpdatedBlock).to.include("Preferences updated");
+    expect(result.preferencesUpdatedBlock).to.include("Old folders");
+    expect(result.preferencesUpdatedBlock).to.include("ClientName-Project");
   });
 });
 

@@ -19,7 +19,7 @@ import {
   renameFolder, getDriveFolderParent, moveFile,
 } from "../driveHelper";
 import {
-  toTitleCase, getExtension, ensureDatePrefix,
+  toTitleCase, getExtension,
   applyTemplate, sendDriveEmailResponse, getNextFolderPrefix,
   buildEmbeddedDriveData, buildFileInfos, callProposalWithFallback,
   isDriveAuthError, extractDriveFileIds, downloadDriveLinkedFiles,
@@ -160,15 +160,13 @@ async function uploadAttachments(
     targetFolderId: string,
     targetFolderPath: string,
     rootFolderId: string,
-    emailDate?: string,
 ): Promise<ProcessedDriveFile[]> {
   return Promise.all(attachments.map((attachment, i) => {
     const placementProposal = proposal.proposals.find((p) => p.file_index === i);
     const suggestedBase = placementProposal?.suggested_name || attachment.filename;
     const extension = getExtension(attachment.filename);
-    const withExt = suggestedBase.endsWith(extension) ?
+    const suggestedName = suggestedBase.endsWith(extension) ?
       suggestedBase : `${suggestedBase}${extension}`;
-    const suggestedName = ensureDatePrefix(withExt, emailDate);
     return uploadSingleFile(
         oauth2Client, attachment, suggestedName,
         targetFolderId, targetFolderPath, rootFolderId,
@@ -344,7 +342,6 @@ async function processUploadWithAttachments(
   const results = await uploadAttachments(
       oauth2Client, attachments, proposal,
       targetFolderId, targetFolderPath, rootFolderId,
-      originalEmail.headers?.date,
   );
 
   const succeeded = results.filter((r) => !r.error || r.driveFileId);

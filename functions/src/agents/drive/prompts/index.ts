@@ -16,6 +16,11 @@ import {
   VERSION_PARAM as REVISE_ORGANIZATION_VERSION_PARAM,
 } from "./reviseOrganization";
 import {
+  versions as setPreferencesVersions,
+  VERSION_KEY as SET_PREFERENCES_VERSION_KEY,
+  VERSION_PARAM as SET_PREFERENCES_VERSION_PARAM,
+} from "./setPreferences";
+import {
   versions as detectFolderConventionVersions,
   VERSION_KEY as DETECT_FOLDER_CONVENTION_VERSION_KEY,
   VERSION_PARAM as DETECT_FOLDER_CONVENTION_VERSION_PARAM,
@@ -65,6 +70,10 @@ function getPrompts(): { prompts: DrivePrompts; versions: Record<string, string>
       REVISE_ORGANIZATION_VERSION_PARAM,
       reviseOrganizationVersions,
   );
+  const setPreferences = resolvePrompt(
+      SET_PREFERENCES_VERSION_PARAM,
+      setPreferencesVersions,
+  );
   const detectFolderConvention = resolvePrompt(
       DETECT_FOLDER_CONVENTION_VERSION_PARAM,
       detectFolderConventionVersions,
@@ -98,6 +107,7 @@ function getPrompts(): { prompts: DrivePrompts; versions: Record<string, string>
     proposeFilePlacement: proposeFilePlacement.prompt,
     interpretMoveInstructions: interpretMoveInstructions.prompt,
     reviseOrganization: reviseOrganization.prompt,
+    setPreferences: setPreferences.prompt,
     detectFolderConvention: detectFolderConvention.prompt,
     analyzeDirectoryStructure: analyzeDirectoryStructure.prompt,
     evaluateDirectoryPlacement: evaluateDirectoryPlacement.prompt,
@@ -111,6 +121,7 @@ function getPrompts(): { prompts: DrivePrompts; versions: Record<string, string>
     [PROPOSE_FILE_PLACEMENT_VERSION_KEY]: proposeFilePlacement.version,
     [INTERPRET_MOVE_INSTRUCTIONS_VERSION_KEY]: interpretMoveInstructions.version,
     [REVISE_ORGANIZATION_VERSION_KEY]: reviseOrganization.version,
+    [SET_PREFERENCES_VERSION_KEY]: setPreferences.version,
     [DETECT_FOLDER_CONVENTION_VERSION_KEY]: detectFolderConvention.version,
     [ANALYZE_DIRECTORY_STRUCTURE_VERSION_KEY]: analyzeDirectoryStructure.version,
     [EVALUATE_DIRECTORY_PLACEMENT_VERSION_KEY]: evaluateDirectoryPlacement.version,

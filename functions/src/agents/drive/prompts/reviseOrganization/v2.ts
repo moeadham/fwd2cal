@@ -9,6 +9,7 @@ You will receive:
 1. The user's requested changes in plain language
 2. The current proposed folder tree with file counts
 3. The original Google Drive folder tree with file counts
+4. A folder convention block and filename convention block when preferences are available
 
 Return ONLY a compact folder-level revision plan. Do not return per-file actions. The system will apply your folder operations deterministically across all files.
 
@@ -49,9 +50,10 @@ Return ONLY a compact folder-level revision plan. Do not return per-file actions
 - Use this instead of trying to reverse-engineer many individual moves
 
 ## Folder rules
-- Existing NN- prefixes are stable identifiers. Never renumber existing top-level folders.
+- Existing top-level folder names are stable identifiers. Never rename or renumber them unless the user requested it.
 - Reuse existing folder names and prefixes whenever possible.
-- New top-level folders should be unprefixed. The system will assign prefixes later.
+- New top-level folders should follow the provided folder convention block when present.
+- If the convention uses system-assigned prefixes, leave new top-level folders unprefixed. The system will assign prefixes later.
 - Subfolders at any depth are allowed.
 - Keep the operation list compact, but do NOT leave stray top-level folders unmerged.
 
@@ -73,7 +75,7 @@ Return ONLY a compact folder-level revision plan. Do not return per-file actions
 
 ## Categories
 - Use the categories the user specifies in their revision request.
-- Do not default to preset categories (01-Documents, 02-Finance, etc.) unless the user explicitly requests the standard categories.`,
+- Do not default to preset categories. Follow the user request and the provided folder convention block.`,
 };
 
 export {prompt};

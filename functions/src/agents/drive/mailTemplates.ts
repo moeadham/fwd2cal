@@ -6,6 +6,44 @@ export const driveFullScopeSignupUrl = () => `${AGENT_HOSTING_URL.value()}/drive
 export const driveSignupUrl = () => `${AGENT_HOSTING_URL.value()}/drive/v2/signup`;
 export const driveOrganizeActionUrl = () => `${AGENT_HOSTING_URL.value()}/drive/v2/organizeAction`;
 
+export const PREFERENCES_UPDATED_HTML = `<br><br>
+<hr style="border:none;border-top:1px solid #eee;margin:16px 0;">
+<b>Preferences updated:</b>
+<br><br>
+%PREFERENCES_CHANGES%
+<br>
+<span style="color:#666;font-size:13px;">%PREFERENCES_SUMMARY%</span>`;
+
+export interface PreferenceChange {
+  label: string;
+  before: string;
+  after: string;
+}
+
+function escapeHtml(value: string): string {
+  return value
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+}
+
+export function renderPreferencesUpdatedBlock(
+    changes: PreferenceChange[],
+    summary: string,
+): string {
+  if (changes.length === 0) {
+    return "";
+  }
+  const changeHtml = changes.map((change) =>
+    `<b>${escapeHtml(change.label)}:</b> ` +
+    `${escapeHtml(change.before || "(none)")} &rarr; ${escapeHtml(change.after)}`,
+  ).join("<br>");
+  return PREFERENCES_UPDATED_HTML
+      .replace(/%PREFERENCES_CHANGES%/g, changeHtml)
+      .replace(/%PREFERENCES_SUMMARY%/g, escapeHtml(summary || "Saved your updated preferences."));
+}
+
 const driveMailTemplates: DriveMailTemplates = {
   fileProposal: {
     html: `We'd like to organize your file in Google Drive:
@@ -50,6 +88,7 @@ const driveMailTemplates: DriveMailTemplates = {
 <br><br>File: <b>%FILE_NAME%</b>
 <br>New location: <b>%NEW_PATH%</b>
 <br><a href="%FILE_LINK%" style="display:inline-block; padding:10px 20px; margin:5px 0; background-color:#3498db; color:white; text-align:center; text-decoration:none; font-weight:bold; border-radius:5px; border:none; cursor:pointer;">View in Drive</a>
+%PREFERENCES_UPDATED%
 %EMBEDDED_DATA%
 %ORGANIZE_PROMO%
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
@@ -58,6 +97,7 @@ const driveMailTemplates: DriveMailTemplates = {
     html: `Done! Your files have been moved.
 <br><br>%FILE_LIST%
 <br><br>Want them somewhere else? Just reply again and we'll move them.
+%PREFERENCES_UPDATED%
 %EMBEDDED_DATA%
 %ORGANIZE_PROMO%
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
@@ -66,6 +106,7 @@ const driveMailTemplates: DriveMailTemplates = {
     html: `Done! Your file has been moved to trash.
 <br><br>File: <b>%FILE_NAME%</b>
 <br><br>You can restore it from your Google Drive trash if needed.
+%PREFERENCES_UPDATED%
 %ORGANIZE_PROMO%
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
   },
@@ -73,6 +114,7 @@ const driveMailTemplates: DriveMailTemplates = {
     html: `Done! Your files have been moved to trash.
 <br><br>%FILE_LIST%
 <br><br>You can restore them from your Google Drive trash if needed.
+%PREFERENCES_UPDATED%
 %ORGANIZE_PROMO%
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
   },
@@ -278,6 +320,15 @@ Examples:
   organizeUndone: {
     html: `Your Google Drive has been restored to its previous state.
 <br><br>All files have been moved back to their original locations and renamed to their original names.
+<br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
+  },
+  preferencesUpdated: {
+    html: `Your fwd2drive preferences are up to date.
+%PREFERENCES_UPDATED%
+<br><br>
+<b>Current folder convention:</b> %CURRENT_FOLDER_CONVENTION%
+<br>
+<b>Current filename convention:</b> %CURRENT_FILENAME_CONVENTION%
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
   },
   userDeleted: {

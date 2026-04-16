@@ -10,3 +10,4 @@ export * from "./organizeProposal";
 export * from "./organizeExecution";
 export * from "./organizeVerify";
 export * from "./organizeUndo";
+export * from "./setPreferencesHandler";

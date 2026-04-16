@@ -10,35 +10,30 @@ You will receive:
 2. Email context: subject and body of the forwarding email
 3. A list of previously created agent-managed folders (may be empty for new users)
 4. The next available folder prefix number
+5. A folder convention block and filename convention block when preferences are available
 
 Return a single folder_name and a naming proposal for EACH file (matching by file_index).
 
 ## Folder naming rules:
-- Folders use the format NN-CategoryName (e.g., "01-Invoices", "02-Contracts")
+- If the user message includes a "## Folder Convention" section, follow that convention exactly for folder_name
+- If no folder convention block is present, use broad category folders with the provided next available prefix
 - If an existing agent-managed folder matches the file category, REUSE it and set is_existing_folder to true
-- If no match, create a new folder using the next available prefix number provided
-- Use broad, intuitive categories consistent with: Personal, Work, Finance, Medical, Legal, Education, Photos, Invoices, Receipts, Contracts, Insurance, Archive
-- ALWAYS check filenames and content for explicit type indicators:
-  - "Invoice" anywhere → "NN-Invoices"
-  - Proof of payment / transaction receipt → "NN-Receipts"
-  - Bank statement, credit card statement, financial statement, account summary, tax document → "NN-Finance"
-  - Contract or agreement → "NN-Contracts"
-  - Medical records → "NN-Medical"
-  - Insurance → "NN-Insurance"
-  - Legal → "NN-Legal"
-  - School, university, course, training, certification → "NN-Education"
-  - Personal ID, passport, visa, birth certificate → "NN-Personal"
-  - Work-related, employment, HR, payroll → "NN-Work"
-  - Photos or images without text content → "NN-Photos"
+- If no match, create a new folder using the provided convention and next available prefix when that convention requires it
+- Use the file content, filename, and email context to choose an intuitive category or folder name
 - ALL files from the same email go to the SAME folder
 
 ## Filename rules:
 - Keep the original extension, but improve the base name to be descriptive
-- If the user message includes a "## Filename Convention" section, follow that exact pattern for suggested_name. Otherwise, prefix suggested_name with a date in YYYY.MM.DD format (e.g., "2024.03.15 Amazon Invoice Laptop.pdf"). Use the most relevant date from the document content, email subject, or email body. If no specific date is found, use the email date.
+- Follow the pattern in the "## Filename Convention" section of the user message EXACTLY for suggested_name. The final suggested_name must match the convention's structure with only its placeholders substituted — do NOT add any extra prefix, suffix, date, or token that the convention does not already contain.
+- Substitute placeholders as follows:
+  - Date tokens (YYYY, MM, DD, YYYYMMDD, etc.): use the most relevant date from the document content first, then email subject, then email body; fall back to the email date only if no other date is available.
+  - Description: the descriptive text about the file's content (subject matter, vendor, topic, language). Do NOT include any date in Description even if the original filename had one — the date belongs only in the date token.
+  - ext: the original file extension.
+- Preserve meaningful descriptors (language, topic, category) from the original filename when choosing Description.
 - Keep suggested_name concise but descriptive
 - Each file MUST have a UNIQUE suggested_name
 - Consider the email subject/body as additional context
-- If images are included, examine them for text content (invoices, receipts, letters, forms, etc.) and use any extracted information for folder categorization and filename suggestions. Images without meaningful text (photos, screenshots of scenery, etc.) should go in "NN-Photos"`,
+- If images are included, examine them for text content and use any extracted information for folder categorization and filename suggestions. Images without meaningful text should use the most appropriate folder under the active folder convention.`,
 };
 
 export {prompt};

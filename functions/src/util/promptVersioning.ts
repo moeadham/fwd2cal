@@ -6,11 +6,14 @@ function resolvePrompt<T>(param: StringParam, versions: Record<string, T>): { pr
   const resolvedPrompt = versions[selectedVersion];
 
   if (!resolvedPrompt) {
-    const availableVersions = Object.keys(versions).sort().join(", ");
-    throw new Error(
-        `Unknown prompt version "${selectedVersion}" for ${param.name}. ` +
-        `Available versions: ${availableVersions}`,
-    );
+    const fallbackVersion = Object.keys(versions).sort().pop();
+    if (!fallbackVersion) {
+      throw new Error(`No prompt versions configured for ${param.name}.`);
+    }
+    return {
+      prompt: versions[fallbackVersion],
+      version: fallbackVersion,
+    };
   }
 
   return {

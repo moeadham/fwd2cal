@@ -25,7 +25,7 @@ import {
 } from "../types";
 import {buildOrganizeEmbeddedData, renderFolderTree} from "../templates/folderTree";
 import {extractContentSummary, extractDocumentImageUrls} from "../fileProcessor";
-import {proposeFileAction, proposeFilePlacement} from "../llm";
+import {DEFAULT_FOLDER_CONVENTION, proposeFileAction, proposeFilePlacement} from "../llm";
 import {ProposeFileActionResult} from "../prompts/proposeFileAction/v1";
 import {applyTemplate, getNextFolderPrefix, toTitleCase} from "../driveUtils";
 import {
@@ -391,6 +391,7 @@ export async function executeOrganizeProposal(
     proposal: DriveOrganizeProposal,
     uid: string | null = null,
     filenameConvention: string = "YYYY.MM.DD - Description.ext",
+    folderConvention: string = DEFAULT_FOLDER_CONVENTION,
 ): Promise<{
   folderMap: Map<string, string>;
   snapshot: OrganizeSnapshotAction[];
@@ -635,7 +636,8 @@ export async function executeOrganizeProposal(
                 const agentFolderNames = [...folderMap.keys()];
                 const nextPrefix = getNextFolderPrefix(agentFolderNames);
                 const placement = await proposeFilePlacement(
-                    [fileInfo], "", "", agentFolderNames, nextPrefix, uid, imageUrls, filenameConvention,
+                    [fileInfo], "", "", agentFolderNames, nextPrefix, uid, imageUrls,
+                    filenameConvention, folderConvention,
                 );
                 if (placement.proposals[0]?.suggested_name) {
                   finalName = placement.proposals[0].suggested_name;

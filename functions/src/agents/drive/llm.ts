@@ -41,6 +41,22 @@ import {
   ProposeFileActionSchema,
   ProposeFileActionResult,
 } from "./prompts/proposeFileAction/v1";
+import {
+  SetPreferencesSchema,
+  SetPreferencesResult,
+} from "./prompts/setPreferences/v1";
+
+const DEFAULT_FOLDER_CONVENTION = "NN-Category";
+const DEFAULT_FILENAME_CONVENTION = "YYYY.MM.DD - Description.ext";
+
+/** Builds the user preference block for folder-producing prompts. */
+function renderFolderConventionBlock(folderConvention?: string): string {
+  const convention = typeof folderConvention === "string" ? folderConvention.trim() : "";
+  if (!convention) {
+    return "";
+  }
+  return `\n## Folder Convention\nUse this exact pattern for folder_name and folder paths: ${convention}\n`;
+}
 
 /** Builds the optional user preference block for filename-producing prompts. */
 function renderFilenameConventionBlock(filenameConvention?: string): string {
@@ -184,6 +200,7 @@ async function proposeFilePlacement(
     uid: string | null = null,
     imageUrls: string[] = [],
     filenameConvention?: string,
+    folderConvention?: string,
 ): Promise<FileProposal> {
   const {prompts, versions} = getPrompts();
   let userText = `## Existing Agent-Managed Folders\n`;
@@ -193,6 +210,7 @@ async function proposeFilePlacement(
     userText += "(none — this is a new user)\n";
   }
   userText += `\nNext available folder prefix: ${nextPrefix}\n\n`;
+  userText += renderFolderConventionBlock(folderConvention);
 
   userText += `## Files (${files.length} total)\n`;
   for (let i = 0; i < files.length; i++) {
@@ -260,6 +278,7 @@ async function interpretMoveInstructions(
     currentFiles: DriveEmbeddedFileData[],
     agentFolders: {name: string; id: string}[],
     uid: string | null = null,
+    filenameConvention?: string,
 ): Promise<MoveInstruction> {
   const fastPath = tryFastParseMoveInstructions(replyText, currentFiles, agentFolders);
   if (fastPath) {
@@ -277,6 +296,7 @@ async function interpretMoveInstructions(
   const {prompts, versions} = getPrompts();
 
   let userContent = `## User's Instructions\n${replyText}\n\n`;
+  userContent += renderFilenameConventionBlock(filenameConvention);
 
   userContent += `## Current Files\n`;
   for (let i = 0; i < currentFiles.length; i++) {
@@ -325,11 +345,13 @@ async function reviseOrganization(
     userInstructions: string,
     uid: string | null = null,
     filenameConvention?: string,
+    folderConvention?: string,
 ): Promise<{ proposal: DriveOrganizeProposal; preservedRootPaths: Set<string> }> {
   const {prompts, versions} = getPrompts();
   const proposedTree = renderFolderTreePlainText(currentProposal);
   const originalTree = renderOriginalFolderTree(currentProposal);
   const userText = `## User Requested Changes\n${userInstructions}\n\n` +
+    renderFolderConventionBlock(folderConvention) +
     `## Current Proposed Folder Tree\n${proposedTree}\n\n` +
     `## Original Drive Folder Tree\n${originalTree}\n` +
     renderFilenameConventionBlock(filenameConvention);
@@ -415,14 +437,33 @@ async function generateFilenameExamples(
   }
 }
 
+/** Extract top-level folder names from the tree summary produced by buildDriveStructureSummary. */
+function extractTopLevelFolderNames(treeSummary: string): string[] {
+  const names: string[] = [];
+  for (const line of treeSummary.split("\n")) {
+    const m = line.match(/^ {2}([^\s/][^/]*)\//);
+    if (m) names.push(m[1]);
+  }
+  return names;
+}
+
 /** Detect the existing or preferred folder naming convention from the current Drive tree. */
 async function detectFolderConvention(
     treeSummary: string,
     uid: string | null = null,
+    folderConvention?: string,
 ): Promise<DetectFolderConventionResult> {
   const {prompts, versions} = getPrompts();
-  const userContent = `## Current Drive Tree\n${treeSummary}\n`;
+  const topLevelFolderNames = extractTopLevelFolderNames(treeSummary);
+  const fallbackBlock = folderConvention && folderConvention.trim() ?
+    `\n## Fallback Convention\nUse this only if no pattern is detectable: ${folderConvention.trim()}\n` :
+    "";
+  const folderList = topLevelFolderNames.length > 0 ?
+    topLevelFolderNames.map((n) => `- ${n}`).join("\n") :
+    "(none)";
+  const userContent = `## Top-Level Folders\n${folderList}\n${fallbackBlock}`;
   logger.info("detectFolderConvention LLM input", {
+    topLevelFolderCount: topLevelFolderNames.length,
     userContentPreview: userContent.slice(0, 500),
   });
   const messages: ChatMessage[] = [
@@ -437,14 +478,41 @@ async function detectFolderConvention(
       uid,
       {promptVersion: versions.PROMPT_DETECT_FOLDER_CONVENTION_VERSION},
   ) as DetectFolderConventionResult;
+
   logger.info("detectFolderConvention LLM result", {
     has_convention: result.has_convention,
     detected_convention: result.detected_convention,
     suggested_convention: result.suggested_convention,
     summary: result.summary,
-    inputTreeLength: treeSummary.length,
   });
   return result;
+}
+
+/** Parse an email into Drive preference updates. */
+async function setPreferences(
+    subject: string,
+    body: string,
+    currentFolderConvention: string,
+    currentFilenameConvention: string,
+    uid: string | null = null,
+): Promise<SetPreferencesResult> {
+  const {prompts, versions} = getPrompts();
+  const userText = `## Current Folder Convention\n${currentFolderConvention || "(none)"}\n\n` +
+    `## Current Filename Convention\n${currentFilenameConvention || "(none)"}\n\n` +
+    `## Email Subject\n${subject || "(none)"}\n\n` +
+    `## Email Body\n${body || "(none)"}\n`;
+  const messages: ChatMessage[] = [
+    {role: "system", content: prompts.setPreferences.prompt},
+    {role: "user", content: userText},
+  ];
+  return await defaultCompletion<SetPreferencesResult>(
+      messages,
+      prompts.setPreferences.model,
+      prompts.setPreferences.temperature ?? DEFAULT_TEMP,
+      SetPreferencesSchema,
+      uid,
+      {promptVersion: versions.PROMPT_SET_PREFERENCES_VERSION},
+  ) as SetPreferencesResult;
 }
 
 /** Analyze the current Drive tree and propose an initial directory structure. */
@@ -1476,6 +1544,9 @@ function mergeRevisedProposal(
 
 export {
   proposeFilePlacement,
+  DEFAULT_FOLDER_CONVENTION,
+  DEFAULT_FILENAME_CONVENTION,
+  renderFolderConventionBlock,
   interpretMoveInstructions,
   reviseOrganization,
   renderFolderTreePlainText,
@@ -1484,6 +1555,7 @@ export {
   mergeRevisedProposal,
   applyFolderOperations,
   detectFolderConvention,
+  setPreferences,
   analyzeDirectoryStructure,
   evaluateDirectoryPlacement,
   finalizeDirectoryMap,

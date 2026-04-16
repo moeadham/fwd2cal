@@ -13,7 +13,7 @@ import {
   DriveFolder, FileProposal, FileInfo, OrganizeEmbeddedData,
 } from "./types";
 import {downloadAttachmentBuffer, extractContentSummary, extractDocumentImageUrls} from "./fileProcessor";
-import {proposeFilePlacement} from "./llm";
+import {DEFAULT_FILENAME_CONVENTION, DEFAULT_FOLDER_CONVENTION, proposeFilePlacement} from "./llm";
 import {Auth} from "googleapis";
 
 function getNonEmptyString(value: unknown): string | undefined {
@@ -54,36 +54,6 @@ export function getExtension(filename: string): string {
   const lastDot = filename.lastIndexOf(".");
   if (lastDot === -1) return "";
   return filename.slice(lastDot);
-}
-
-/**
- * Ensure a filename has a YYYY.MM.DD date prefix.
- * Normalizes YYYY-MM-DD (dashes) to YYYY.MM.DD (dots).
- * Falls back to the email date header or today's date if none present.
- */
-export function ensureDatePrefix(filename: string, emailDate?: string): string {
-  // Already has YYYY.MM.DD prefix
-  if (/^\d{4}\.\d{2}\.\d{2}\s/.test(filename)) return filename;
-
-  // Has YYYY-MM-DD prefix — normalize dashes to dots
-  const dashMatch = filename.match(/^(\d{4})-(\d{2})-(\d{2})\s/);
-  if (dashMatch) {
-    return `${dashMatch[1]}.${dashMatch[2]}.${dashMatch[3]}${filename.slice(10)}`;
-  }
-
-  // No date prefix — extract from email header or use today
-  let date: Date;
-  if (emailDate) {
-    const parsed = new Date(emailDate);
-    date = isNaN(parsed.getTime()) ? new Date() : parsed;
-  } else {
-    date = new Date();
-  }
-
-  const yyyy = date.getFullYear();
-  const mm = String(date.getMonth() + 1).padStart(2, "0");
-  const dd = String(date.getDate()).padStart(2, "0");
-  return `${yyyy}.${mm}.${dd} ${filename}`;
 }
 
 /**
@@ -439,13 +409,20 @@ export async function callProposalWithFallback(
 ): Promise<FileProposal> {
   try {
     let resolvedFilenameConvention = getNonEmptyString(filenameConvention);
-    if (!resolvedFilenameConvention && uid) {
+    let resolvedFolderConvention = DEFAULT_FOLDER_CONVENTION;
+    if (uid) {
       const preferences = await getDriveUserPreferences(uid);
-      resolvedFilenameConvention = getNonEmptyString(preferences.filenameConvention);
+      if (!resolvedFilenameConvention) {
+        resolvedFilenameConvention = getNonEmptyString(preferences.filenameConvention);
+      }
+      resolvedFolderConvention = getNonEmptyString(preferences.folderConvention) || DEFAULT_FOLDER_CONVENTION;
+    }
+    if (!resolvedFilenameConvention) {
+      resolvedFilenameConvention = DEFAULT_FILENAME_CONVENTION;
     }
     return await proposeFilePlacement(
         fileInfos, emailSubject, emailBody,
-        agentFolderNames, nextPrefix, uid, imageUrls, resolvedFilenameConvention,
+        agentFolderNames, nextPrefix, uid, imageUrls, resolvedFilenameConvention, resolvedFolderConvention,
     );
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);

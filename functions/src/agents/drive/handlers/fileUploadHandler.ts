@@ -13,7 +13,6 @@ import {
   buildFileInfos,
   callProposalWithFallback,
   downloadDriveLinkedFiles,
-  ensureDatePrefix,
   extractDriveFileIds,
   getExtension,
   getNextFolderPrefix,
@@ -114,13 +113,11 @@ export async function handleFileUpload(
   const encodedState = Buffer.from(statePayload).toString("base64url");
   const signupLink = `${driveSignupUrl()}?state=${encodeURIComponent(encodedState)}`;
 
-  const emailDate = email.headers?.date;
   if (proposal.proposals.length === 1) {
     const file = proposal.proposals[0];
     const extension = getExtension(attachments[0].filename);
-    const withExt = file.suggested_name.endsWith(extension) ?
+    const suggestedName = file.suggested_name.endsWith(extension) ?
       file.suggested_name : `${file.suggested_name}${extension}`;
-    const suggestedName = ensureDatePrefix(withExt, emailDate);
     const html = applyTemplate(driveMailTemplates.fileProposal.html, {
       PROPOSED_NAME: suggestedName,
       PROPOSED_FOLDER: proposal.folder_name,
@@ -131,9 +128,8 @@ export async function handleFileUpload(
     const fileListHtml = proposal.proposals.map((p) => {
       const att = attachments[p.file_index];
       const extension = att ? getExtension(att.filename) : "";
-      const withExt = p.suggested_name.endsWith(extension) ?
+      const name = p.suggested_name.endsWith(extension) ?
         p.suggested_name : `${p.suggested_name}${extension}`;
-      const name = ensureDatePrefix(withExt, emailDate);
       return `<b>${name}</b>`;
     }).join("<br>");
     const html = applyTemplate(driveMailTemplates.multipleFileProposal.html, {

@@ -2,6 +2,7 @@ import {logger} from "firebase-functions/v2";
 import {
   DRIVE_USERS_COLLECTION,
   findGeneratingProposal,
+  getDriveUserPreferences,
   getUserFromEmail,
   getUserFromUID,
   saveOrganizeIntermediateState,
@@ -16,7 +17,7 @@ import {OrganizeIntermediateState, OrganizeProcessingResult} from "../types";
 import {AGENT_NAME} from "../config";
 import {driveMailTemplates, driveFullScopeSignupUrl} from "../mailTemplates";
 import {listAllDriveFiles, getRootFolderId} from "../driveHelper";
-import {detectFolderConvention} from "../llm";
+import {DEFAULT_FOLDER_CONVENTION, detectFolderConvention} from "../llm";
 import {
   buildDriveStructureSummary,
   buildFileEntries,
@@ -205,7 +206,10 @@ export async function scanAndPropose(
   const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
   try {
-    const convention = await detectFolderConvention(treeSummary, uid);
+    const preferences = await getDriveUserPreferences(uid);
+    const folderConvention = typeof preferences.folderConvention === "string" && preferences.folderConvention.trim() ?
+      preferences.folderConvention.trim() : DEFAULT_FOLDER_CONVENTION;
+    const convention = await detectFolderConvention(treeSummary, uid, folderConvention);
     const phaseData = {
       folderPreferences: {
         detectedConvention: convention.detected_convention,
