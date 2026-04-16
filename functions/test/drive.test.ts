@@ -8,6 +8,7 @@ import {initializeApp} from "firebase-admin/app";
 import {getFirestore} from "firebase-admin/firestore";
 import {getStorage} from "firebase-admin/storage";
 import OpenAI from "openai";
+import {google} from "googleapis";
 import type {Response} from "superagent";
 
 const chaiWithHttp = chai as typeof chai & {
@@ -55,7 +56,7 @@ import {getLastSentEmail, clearMockData} from "../src/util/resendMock";
 import {organizeProposalTestHooks} from "../src/agents/drive/handlers/organizeProposal";
 import {handleSetPreferences} from "../src/agents/drive/handlers/setPreferencesHandler";
 import {persistMovePreferenceUpdates} from "../src/agents/drive/handlers/moveHandler";
-import {buildSequentialExecutionProposal} from "../src/agents/drive/handlers/organizeExecution";
+import {buildSequentialExecutionProposal, processExecutionChunk} from "../src/agents/drive/handlers/organizeExecution";
 import {TransformedEmail} from "../src/util/types";
 import {getSkills} from "../src/agents/drive/skills";
 import {fastMatchSkill} from "../src/util/skills/matcher";
@@ -1864,6 +1865,162 @@ describe("organize sequential execution proposal builder", function() {
         .to.deep.equal(["01-Documents", "02-Travel"]);
     expect(proposal.file_actions.map((action) => action.new_folder))
         .to.deep.equal(["02-Travel", "02-Travel"]);
+  });
+
+  async function runProcessExecutionOverrideCase(options: {
+    testId: string;
+    file: DriveFileEntry;
+    approvedFolder: string;
+    llmAction: "keep" | "rename";
+    newName: string;
+    expectedAction: "move" | "move_and_rename";
+  }): Promise<{proposal: OrganizeProposalDoc; updateCalls: unknown[]}> {
+    const uid = `execution-override-${options.testId}`;
+    const sender = `${options.testId}@example.com`;
+    const proposalId = `execution-override-${options.testId}-${Date.now()}`;
+    const storagePath = `organize-proposals/${proposalId}.json`;
+    const approvedStructure = [{
+      folder_path: options.approvedFolder,
+      description: "Approved target folder",
+    }];
+    const phaseData = {
+      directoryLayout: {approvedStructure},
+      filenameConvention: {convention: "YYYY.MM.DD - Description.ext"},
+      execution: {chunkSize: 1, totalChunks: 1, completedChunks: 0},
+    };
+    await db.collection("DriveUsers").doc(uid).set({
+      access_token: "test-access-token",
+      refresh_token: "test-refresh-token",
+    });
+    await db.collection("OrganizeProposals").doc(proposalId).set({
+      uid,
+      senderEmail: sender,
+      emailId: `${options.testId}-email-id`,
+      status: "executing",
+      phase: "executing",
+      createdAt: "2026-04-16T00:00:00.000Z",
+      expiresAt: "2099-04-16T00:00:00.000Z",
+      storagePath,
+      phaseData,
+      cost: {},
+    });
+    const bucket = getStorage().bucket();
+    await bucket.file(storagePath).save(JSON.stringify({
+      fileEntries: [options.file],
+      senderEmail: sender,
+      phaseData,
+    }), {contentType: "application/json"});
+    await bucket.file(`organize-proposals/${proposalId}-execution-tree--1.json`)
+        .save(JSON.stringify(approvedStructure), {contentType: "application/json"});
+
+    setFakeStructuredCompletions([{
+      file_id: options.file.id,
+      current_name: options.file.name,
+      current_path: options.file.parentPath,
+      new_name: options.newName,
+      target_directory: options.approvedFolder,
+      action: options.llmAction,
+      needs_new_directory: false,
+      new_directory: null,
+      reason: "LLM incorrectly treated a renamed folder as equivalent",
+    }]);
+
+    const updateCalls: unknown[] = [];
+    const targetSegments = options.approvedFolder.split("/");
+    const originalDrive = google.drive;
+    (google as unknown as {drive: typeof google.drive}).drive = ((() => ({
+      files: {
+        get: async (params: {fileId: string}) => {
+          if (params.fileId === "root") {
+            return {data: {id: "root"}};
+          }
+          return {
+            data: {
+              id: options.file.id,
+              parents: ["old-parent-id"],
+              name: options.file.name,
+            },
+          };
+        },
+        list: async (params: {q?: string}) => {
+          const query = params.q || "";
+          if (query.includes(`name = '${targetSegments[0]}'`)) {
+            return {data: {files: [{id: "target-root-id"}]}};
+          }
+          if (query.includes(`name = '${targetSegments[1]}'`)) {
+            return {data: {files: [{id: "target-leaf-id"}]}};
+          }
+          return {data: {files: []}};
+        },
+        create: async () => ({data: {id: "created-folder-id"}}),
+        update: async (params: unknown) => {
+          updateCalls.push(params);
+          return {data: {id: options.file.id, webViewLink: "", parents: ["target-leaf-id"]}};
+        },
+      },
+    })) as unknown) as typeof google.drive;
+
+    try {
+      await processExecutionChunk(makeTestEmail("execute"), {
+        proposalId,
+        emailId: `${options.testId}-email-id`,
+        uid,
+        chunkIndex: 0,
+      });
+      const proposal = await getOrganizeProposal(proposalId) as unknown as OrganizeProposalDoc;
+      return {proposal, updateCalls};
+    } finally {
+      (google as unknown as {drive: typeof google.drive}).drive = originalDrive;
+    }
+  }
+
+  it("DT00ubg overrides keep when the file is in an unapproved old-convention folder", async function() {
+    const {proposal} = await runProcessExecutionOverrideCase({
+      testId: "keep-old-folder",
+      file: {
+        id: "photo-file",
+        name: "photo.pdf",
+        mimeType: "application/pdf",
+        parentId: "old-parent-id",
+        parentPath: "01-Personal/Photos",
+        createdTime: "2026-04-10T00:00:00.000Z",
+        size: 999999999,
+        webViewLink: "",
+        isFolder: false,
+      },
+      approvedFolder: "01 | Personal/Photos",
+      llmAction: "keep",
+      newName: "photo.pdf",
+      expectedAction: "move",
+    });
+
+    expect(proposal.proposal?.file_actions[0].action).to.equal("move");
+    expect(proposal.snapshot?.[0].newParentId).to.equal("target-leaf-id");
+  });
+
+  it("DT00ubh overrides rename when the target folder differs from the current folder", async function() {
+    const {proposal} = await runProcessExecutionOverrideCase({
+      testId: "rename-different-folder",
+      file: {
+        id: "project-file",
+        name: "brief.pdf",
+        mimeType: "application/pdf",
+        parentId: "old-parent-id",
+        parentPath: "03-Projects/Active",
+        createdTime: "2026-04-10T00:00:00.000Z",
+        size: 999999999,
+        webViewLink: "",
+        isFolder: false,
+      },
+      approvedFolder: "03 | Projects/Active",
+      llmAction: "rename",
+      newName: "2026.04.10 - Brief.pdf",
+      expectedAction: "move_and_rename",
+    });
+
+    expect(proposal.proposal?.file_actions[0].action).to.equal("move_and_rename");
+    expect(proposal.snapshot?.[0].newParentId).to.equal("target-leaf-id");
+    expect(proposal.snapshot?.[0].newName).to.equal("2026.04.10 - Brief.pdf");
   });
 });
 

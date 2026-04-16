@@ -28,8 +28,10 @@ Rules:
 - Use the approved filename convention and preserve the file extension when possible.
 - Use needs_new_directory only when no existing directory fits.
 - If adding a directory, include new_directory with folder_path and description.
+- The file's current_path may reference a folder that is NOT in the Approved Directory Tree (for example, leftover from a prior organize run). Treat such paths as invalid destinations. When current_path is not one of the Approved Directory Tree entries, you MUST emit "move" or "move_and_rename" — never "keep" or "rename".
+- target_directory must exactly match one of the Approved Directory Tree entries, unless supplied via new_directory with needs_new_directory: true. Do not invent paths. Two folder paths that differ by even one character (hyphens vs. spaces vs. pipes) are DIFFERENT folders.
 - Choosing the action:
-  - "keep" — ONLY when BOTH the folder and filename already match the approved system exactly. If in doubt, do not use "keep".
+  - "keep" — ONLY when BOTH the folder and filename already match the approved system exactly. Never use "keep" when current_path is not in the Approved Directory Tree. If in doubt, do not use "keep".
   - "rename" — when the file is already in the correct target folder but the filename does not match the approved convention.
   - "move" — only when the file needs a folder change AND the current filename already matches the approved convention exactly.
   - "move_and_rename" — when the file needs both a folder change and a filename update. This is the DEFAULT action for most files — assume the filename needs to match the convention unless it already does.

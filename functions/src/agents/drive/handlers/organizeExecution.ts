@@ -61,11 +61,57 @@ type FileActionProposer = (
   contentSummary: string,
   uid: string,
 ) => Promise<ProposeFileActionResult>;
+type OrganizeFileActionType = DriveOrganizeProposal["file_actions"][number]["action"];
 
 const getExecutionTreePath = (proposalId: string, chunkIndex: number) =>
   `organize-proposals/${proposalId}-execution-tree-${chunkIndex}.json`;
 const getExecutionChunkPath = (proposalId: string, chunkIndex: number) =>
   `organize-proposals/${proposalId}-execution-chunk-${chunkIndex}.json`;
+
+/** Corrects contradictory LLM action labels using the actual source and target paths. */
+function deriveEffectiveAction(
+    proposed: ProposeFileActionResult,
+    file: DriveFileEntry,
+    knownDirectories: Set<string>,
+): {
+  action: OrganizeFileActionType;
+  currentPath: string;
+  newFolder: string;
+  currentInApprovedTree: boolean;
+} {
+  const currentPath = proposed.current_path || file.parentPath;
+  const newFolder = proposed.target_directory || file.parentPath;
+  const currentName = proposed.current_name || file.name;
+  const newName = proposed.new_name || file.name;
+  const currentInApprovedTree = knownDirectories.has(currentPath);
+  const targetDiffersFromCurrent = newFolder !== currentPath;
+  const nameDiffers = newName !== currentName;
+
+  if (proposed.action === "keep" && !currentInApprovedTree) {
+    return {
+      action: nameDiffers ? "move_and_rename" : "move",
+      currentPath,
+      newFolder,
+      currentInApprovedTree,
+    };
+  }
+
+  if (proposed.action === "rename" && targetDiffersFromCurrent) {
+    return {
+      action: "move_and_rename",
+      currentPath,
+      newFolder,
+      currentInApprovedTree,
+    };
+  }
+
+  return {
+    action: proposed.action,
+    currentPath,
+    newFolder,
+    currentInApprovedTree,
+  };
+}
 
 /** Builds content-aware actions sequentially while carrying forward newly-created directories. */
 export async function buildSequentialExecutionProposal(
@@ -89,13 +135,14 @@ export async function buildSequentialExecutionProposal(
       runningTree.push(action.new_directory);
       knownDirectories.add(action.new_directory.folder_path);
     }
+    const effective = deriveEffectiveAction(action, file, knownDirectories);
     fileActions.push({
       file_id: action.file_id || file.id,
       current_name: action.current_name || file.name,
-      current_path: action.current_path || file.parentPath,
+      current_path: effective.currentPath,
       new_name: action.new_name || file.name,
-      new_folder: action.target_directory || file.parentPath,
-      action: action.action,
+      new_folder: effective.newFolder,
+      action: effective.action,
       reason: action.reason,
     });
   }
@@ -264,14 +311,27 @@ export async function processExecutionChunk(
         runningTree.push(proposed.new_directory);
         knownDirectories.add(proposed.new_directory.folder_path);
       }
+      const effective = deriveEffectiveAction(proposed, file, knownDirectories);
+      if (effective.action !== proposed.action) {
+        logger.warn("Drive organize: LLM action overridden", {
+          proposalId,
+          chunkIndex,
+          fileId: file.id,
+          llmAction: proposed.action,
+          effectiveAction: effective.action,
+          currentPath: effective.currentPath,
+          newFolder: effective.newFolder,
+          currentInApprovedTree: effective.currentInApprovedTree,
+        });
+      }
 
       const action = {
         file_id: proposed.file_id || file.id,
         current_name: proposed.current_name || file.name,
-        current_path: proposed.current_path || file.parentPath,
+        current_path: effective.currentPath,
         new_name: proposed.new_name || file.name,
-        new_folder: proposed.target_directory || file.parentPath,
-        action: proposed.action,
+        new_folder: effective.newFolder,
+        action: effective.action,
         reason: proposed.reason,
       };
       fileActions.push(action);
