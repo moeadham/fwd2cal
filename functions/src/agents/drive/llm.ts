@@ -205,6 +205,7 @@ async function proposeFilePlacement(
     filenameConvention?: string,
     folderConvention?: string,
     folderConventionDescription?: string,
+    strictTopLevel = false,
 ): Promise<FileProposal> {
   const {prompts, versions} = getPrompts();
   let userText = `## Existing Agent-Managed Folders\n`;
@@ -214,6 +215,11 @@ async function proposeFilePlacement(
     userText += "(none — this is a new user)\n";
   }
   userText += `\nNext available folder prefix: ${nextPrefix}\n\n`;
+  if (strictTopLevel && agentFolderNames.length > 0) {
+    userText += "## Strict Top-Level\n" +
+      "The top-level category of folder_name MUST be one of the existing " +
+      "agent-managed folders listed above. Do not invent a new top-level.\n\n";
+  }
   userText += renderFolderConventionBlock(folderConvention, folderConventionDescription);
 
   userText += `## Files (${files.length} total)\n`;

@@ -15,12 +15,12 @@ You will receive:
 Return a single folder_name and a naming proposal for EACH file (matching by file_index).
 
 ## Folder naming rules:
-- If the user message includes a "## Folder Convention" section, follow that convention exactly for folder_name
-- If no folder convention block is present, use broad category folders with the provided next available prefix
-- If an existing agent-managed folder matches the file category, REUSE it and set is_existing_folder to true
-- If no match, create a new folder using the provided convention and next available prefix when that convention requires it
-- Use the file content, filename, and email context to choose an intuitive category or folder name
-- ALL files from the same email go to the SAME folder
+- If the user message includes a "## Folder Convention" section, follow that convention exactly for folder_name.
+- The top-level category is the first path segment of folder_name (before any "/").
+- Default behavior: if an existing agent-managed folder matches the file category, REUSE it and set is_existing_folder to true. Otherwise create a new folder using the provided convention and next available prefix.
+- When the user message includes a "## Strict Top-Level" block: the top-level category of folder_name MUST be one of the listed existing agent-managed folders. Do NOT invent a new top-level even if nothing fits perfectly — pick the closest match. You MAY still propose a new subfolder nested under that top-level (e.g. "02-Finance/Invoices").
+- Use the file content, filename, and email context to choose an intuitive category or folder name.
+- ALL files from the same email go to the SAME folder.
 
 ## Filename rules:
 - Keep the original extension, but improve the base name to be descriptive

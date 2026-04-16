@@ -639,6 +639,7 @@ export async function executeOrganizeProposal(
                 const placement = await proposeFilePlacement(
                     [fileInfo], "", "", agentFolderNames, nextPrefix, uid, imageUrls,
                     filenameConvention, folderConvention, folderConventionDescription,
+                    true,
                 );
                 if (placement.proposals[0]?.suggested_name) {
                   finalName = placement.proposals[0].suggested_name;
