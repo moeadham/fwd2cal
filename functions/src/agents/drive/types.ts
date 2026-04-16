@@ -332,6 +332,7 @@ export interface DrivePromptConfig {
 
 export interface DrivePrompts {
   proposeFilePlacement: DrivePromptConfig;
+  proposeOrganizePlacement: DrivePromptConfig;
   interpretMoveInstructions: DrivePromptConfig;
   reviseOrganization: DrivePromptConfig;
   setPreferences: DrivePromptConfig;

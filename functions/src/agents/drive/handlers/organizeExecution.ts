@@ -25,9 +25,9 @@ import {
 } from "../types";
 import {buildOrganizeEmbeddedData, renderFolderTree} from "../templates/folderTree";
 import {extractContentSummary, extractDocumentImageUrls} from "../fileProcessor";
-import {DEFAULT_FOLDER_CONVENTION, proposeFileAction, proposeFilePlacement} from "../llm";
+import {DEFAULT_FOLDER_CONVENTION, proposeFileAction, proposeOrganizePlacement} from "../llm";
 import {ProposeFileActionResult} from "../prompts/proposeFileAction/v1";
-import {applyTemplate, getNextFolderPrefix, toTitleCase} from "../driveUtils";
+import {applyTemplate, toTitleCase} from "../driveUtils";
 import {
   emptyResult,
   formatSummaryHtml,
@@ -301,7 +301,10 @@ export async function processExecutionChunk(
           stats.moved++;
         }
       }
-      if (action.action === "rename" || action.action === "move_and_rename") {
+      // Safety net: rename runs for every non-"keep" action. The LLM sometimes
+      // returns "move" when the filename needs an update too; rename-eligible
+      // covers that gap. "keep" is already filtered via early continue above.
+      if (action.new_name && action.new_name !== (meta.data.name || file.name)) {
         await renameFile(oauth2Client, file.id, action.new_name);
         snapshotEntry.newName = action.new_name;
         stats.renamed++;
@@ -588,7 +591,11 @@ export async function executeOrganizeProposal(
         }
       }
 
-      if (action.action === "rename" || action.action === "move_and_rename") {
+      // Safety net: rename path runs for every non-"keep" action. The LLM
+      // sometimes returns "move" when the filename needs an update too;
+      // falling into the content-aware naming path covers that gap.
+      // "keep" is already filtered via early continue above.
+      {
         // For folder rename actions, use renameFolder.
         const isFolder = action.current_path === "My Drive" &&
           proposal.proposed_folders.some((f) => f.folder_path === action.new_name);
@@ -634,12 +641,17 @@ export async function executeOrganizeProposal(
                   fileSize: meta.size,
                   contentSummary,
                 };
-                const agentFolderNames = [...folderMap.keys()];
-                const nextPrefix = getNextFolderPrefix(agentFolderNames);
-                const placement = await proposeFilePlacement(
-                    [fileInfo], "", "", agentFolderNames, nextPrefix, uid, imageUrls,
-                    filenameConvention, folderConvention, folderConventionDescription,
-                    true,
+                const approvedFolders = proposal.proposed_folders.map((f) => f.folder_path);
+                const placement = await proposeOrganizePlacement(
+                    fileInfo,
+                    approvedFolders,
+                    action.new_folder,
+                    action.new_name,
+                    uid,
+                    imageUrls,
+                    filenameConvention,
+                    folderConvention,
+                    folderConventionDescription,
                 );
                 if (placement.proposals[0]?.suggested_name) {
                   finalName = placement.proposals[0].suggested_name;
@@ -648,6 +660,34 @@ export async function executeOrganizeProposal(
                     metadataName: action.new_name,
                     contentName: finalName,
                   });
+                }
+                // Relocate the file if the content-aware placement chose a different folder.
+                if (placement.folder_name && placement.folder_name !== action.new_folder) {
+                  const approvedTopLevels = new Set(
+                      approvedFolders.map((p) => p.split("/")[0]).filter(Boolean),
+                  );
+                  const newTopLevel = placement.folder_name.split("/")[0];
+                  if (approvedTopLevels.has(newTopLevel)) {
+                    logger.info("Drive organize: Content-aware relocation", {
+                      fileId: action.file_id,
+                      fromFolder: action.new_folder,
+                      toFolder: placement.folder_name,
+                    });
+                    const newTargetId = await resolveFolderPath(
+                        oauth2Client, folderMap, placement.folder_name,
+                    );
+                    const currentParentId = snapshotEntry.newParentId ||
+                      snapshotEntry.originalParentId;
+                    if (newTargetId && newTargetId !== currentParentId) {
+                      await moveFile(oauth2Client, action.file_id, newTargetId, currentParentId);
+                      snapshotEntry.newParentId = newTargetId;
+                    }
+                  } else {
+                    logger.warn("Drive organize: ignoring content-aware relocation with invalid top-level", {
+                      fileId: action.file_id,
+                      proposedFolder: placement.folder_name,
+                    });
+                  }
                 }
               }
             }

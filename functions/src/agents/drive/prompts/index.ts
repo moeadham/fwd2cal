@@ -6,6 +6,11 @@ import {
   VERSION_PARAM as PROPOSE_FILE_PLACEMENT_VERSION_PARAM,
 } from "./proposeFilePlacement";
 import {
+  versions as proposeOrganizePlacementVersions,
+  VERSION_KEY as PROPOSE_ORGANIZE_PLACEMENT_VERSION_KEY,
+  VERSION_PARAM as PROPOSE_ORGANIZE_PLACEMENT_VERSION_PARAM,
+} from "./proposeOrganizePlacement";
+import {
   versions as interpretMoveInstructionsVersions,
   VERSION_KEY as INTERPRET_MOVE_INSTRUCTIONS_VERSION_KEY,
   VERSION_PARAM as INTERPRET_MOVE_INSTRUCTIONS_VERSION_PARAM,
@@ -62,6 +67,10 @@ function getPrompts(): { prompts: DrivePrompts; versions: Record<string, string>
       PROPOSE_FILE_PLACEMENT_VERSION_PARAM,
       proposeFilePlacementVersions,
   );
+  const proposeOrganizePlacement = resolvePrompt(
+      PROPOSE_ORGANIZE_PLACEMENT_VERSION_PARAM,
+      proposeOrganizePlacementVersions,
+  );
   const interpretMoveInstructions = resolvePrompt(
       INTERPRET_MOVE_INSTRUCTIONS_VERSION_PARAM,
       interpretMoveInstructionsVersions,
@@ -105,6 +114,7 @@ function getPrompts(): { prompts: DrivePrompts; versions: Record<string, string>
 
   const prompts: DrivePrompts = {
     proposeFilePlacement: proposeFilePlacement.prompt,
+    proposeOrganizePlacement: proposeOrganizePlacement.prompt,
     interpretMoveInstructions: interpretMoveInstructions.prompt,
     reviseOrganization: reviseOrganization.prompt,
     setPreferences: setPreferences.prompt,
@@ -119,6 +129,7 @@ function getPrompts(): { prompts: DrivePrompts; versions: Record<string, string>
 
   const versions: Record<string, string> = {
     [PROPOSE_FILE_PLACEMENT_VERSION_KEY]: proposeFilePlacement.version,
+    [PROPOSE_ORGANIZE_PLACEMENT_VERSION_KEY]: proposeOrganizePlacement.version,
     [INTERPRET_MOVE_INSTRUCTIONS_VERSION_KEY]: interpretMoveInstructions.version,
     [REVISE_ORGANIZATION_VERSION_KEY]: reviseOrganization.version,
     [SET_PREFERENCES_VERSION_KEY]: setPreferences.version,

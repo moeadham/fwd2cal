@@ -205,7 +205,6 @@ async function proposeFilePlacement(
     filenameConvention?: string,
     folderConvention?: string,
     folderConventionDescription?: string,
-    strictTopLevel = false,
 ): Promise<FileProposal> {
   const {prompts, versions} = getPrompts();
   let userText = `## Existing Agent-Managed Folders\n`;
@@ -215,11 +214,6 @@ async function proposeFilePlacement(
     userText += "(none — this is a new user)\n";
   }
   userText += `\nNext available folder prefix: ${nextPrefix}\n\n`;
-  if (strictTopLevel && agentFolderNames.length > 0) {
-    userText += "## Strict Top-Level\n" +
-      "The top-level category of folder_name MUST be one of the existing " +
-      "agent-managed folders listed above. Do not invent a new top-level.\n\n";
-  }
   userText += renderFolderConventionBlock(folderConvention, folderConventionDescription);
 
   userText += `## Files (${files.length} total)\n`;
@@ -275,6 +269,82 @@ async function proposeFilePlacement(
       FileProposalSchema,
       uid,
       {promptVersion: versions.PROMPT_PROPOSE_FILE_PLACEMENT_VERSION},
+  );
+
+  return result as FileProposal;
+}
+
+/**
+ * Placement pass run during organize-drive execution against the APPROVED folder tree.
+ * Strict: top-level folder must come from the approved tree; new subfolders allowed.
+ * Accepts current proposal (target folder + proposed name) as context so the LLM can
+ * refine placement with file content while respecting the approved structure.
+ */
+async function proposeOrganizePlacement(
+    file: FileInfo,
+    approvedFolders: string[],
+    currentTargetFolder: string,
+    currentProposedName: string,
+    uid: string | null = null,
+    imageUrls: string[] = [],
+    filenameConvention?: string,
+    folderConvention?: string,
+    folderConventionDescription?: string,
+): Promise<FileProposal> {
+  const {prompts, versions} = getPrompts();
+  let userText = "## Approved Folder Tree\n";
+  if (approvedFolders.length > 0) {
+    userText += approvedFolders.map((f) => `- ${f}`).join("\n") + "\n";
+  } else {
+    userText += "(empty)\n";
+  }
+  userText += "\n";
+  userText += renderFolderConventionBlock(folderConvention, folderConventionDescription);
+
+  userText += "## File\n";
+  userText += `Filename: ${file.fileName}\n`;
+  userText += `MIME Type: ${file.mimeType}\n`;
+  userText += `Size: ${file.fileSize} bytes\n`;
+  if (file.contentSummary) {
+    userText += `Content Summary: ${file.contentSummary}\n`;
+  }
+
+  userText += "\n## Current Proposal\n";
+  userText += `Target folder: ${currentTargetFolder}\n`;
+  userText += `Proposed name: ${currentProposedName}\n`;
+  userText += renderFilenameConventionBlock(filenameConvention);
+
+  let userContent: string | Array<TextContent | ImageURLContent>;
+  if (imageUrls.length > 0) {
+    const contentArray: Array<TextContent | ImageURLContent> = [
+      {type: "text", text: userText},
+    ];
+    imageUrls.forEach((url) => {
+      contentArray.push({type: "image_url", image_url: {url}});
+    });
+    userContent = contentArray;
+  } else {
+    userContent = userText;
+  }
+
+  const messages: ChatMessage[] = [
+    {role: "system", content: prompts.proposeOrganizePlacement.prompt},
+    {role: "user", content: userContent},
+  ];
+
+  logger.info("Organize placement proposal prompt", {
+    system: prompts.proposeOrganizePlacement.prompt,
+    user: userText,
+    imageCount: imageUrls.length,
+  });
+
+  const result = await defaultCompletion<FileProposal>(
+      messages,
+      prompts.proposeOrganizePlacement.model,
+      prompts.proposeOrganizePlacement.temperature ?? DEFAULT_TEMP,
+      FileProposalSchema,
+      uid,
+      {promptVersion: versions.PROMPT_PROPOSE_ORGANIZE_PLACEMENT_VERSION},
   );
 
   return result as FileProposal;
@@ -1574,6 +1644,7 @@ function mergeRevisedProposal(
 
 export {
   proposeFilePlacement,
+  proposeOrganizePlacement,
   DEFAULT_FOLDER_CONVENTION,
   DEFAULT_FILENAME_CONVENTION,
   renderFolderConventionBlock,

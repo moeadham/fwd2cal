@@ -28,7 +28,12 @@ Rules:
 - Use the approved filename convention and preserve the file extension when possible.
 - Use needs_new_directory only when no existing directory fits.
 - If adding a directory, include new_directory with folder_path and description.
-- Use "keep" only when both the folder and filename already match the approved system.`,
+- Choosing the action:
+  - "keep" — ONLY when BOTH the folder and filename already match the approved system exactly. If in doubt, do not use "keep".
+  - "rename" — when the file is already in the correct target folder but the filename does not match the approved convention.
+  - "move" — only when the file needs a folder change AND the current filename already matches the approved convention exactly.
+  - "move_and_rename" — when the file needs both a folder change and a filename update. This is the DEFAULT action for most files — assume the filename needs to match the convention unless it already does.
+- Whenever the current filename does not already match the approved filename convention, the action MUST be "rename" or "move_and_rename". Never return "move" or "keep" when the filename needs updating.`,
 };
 
 export {prompt, ProposeFileActionSchema, ProposeFileActionResult};
