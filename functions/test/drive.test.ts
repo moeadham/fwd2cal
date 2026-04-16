@@ -1622,19 +1622,29 @@ describe("organize phased proposal flow", function() {
         .to.equal("Client - Project folder names");
   });
 
-  it("DT00uba routes directory_analysis approval to directory_placement", async function() {
+  it("DT00uba routes directory_analysis approval directly to filename_convention", async function() {
     const proposalId = `phase-1a-${Date.now()}`;
     const proposalDoc = makePhaseDoc("directory_analysis");
     await seedPhaseProposal(proposalId, proposalDoc);
-    setFakeStructuredCompletions([{
-      directory_moves: [{
-        current_path: "Inbox",
-        proposed_path: "01-Documents/Inbox",
-        reason: "Keep loose files under Documents",
-      }],
-      no_changes_needed: false,
-      summary: "Move Inbox under Documents.",
-    }]);
+    setFakeStructuredCompletions([
+      {
+        directory_moves: [{
+          current_path: "Inbox",
+          proposed_path: "01-Documents/Inbox",
+          reason: "Keep loose files under Documents",
+        }],
+        no_changes_needed: false,
+        summary: "Move Inbox under Documents.",
+      },
+      {
+        final_directories: [
+          {folder_path: "01-Documents", description: "Documents"},
+          {folder_path: "01-Documents/Inbox", description: "Imported inbox documents"},
+        ],
+        added_directories: ["01-Documents/Inbox"],
+        summary: "Finalized folder map.",
+      },
+    ]);
 
     await organizeProposalTestHooks.handleOrganizePhaseReply(
         makeTestEmail("approve"),
@@ -1648,28 +1658,25 @@ describe("organize phased proposal flow", function() {
 
     const stored = (await db.collection("OrganizeProposals").doc(proposalId).get()).data();
     if (stored) stored.phaseData = await getOrganizePhaseData(proposalId);
-    expect(stored?.phase).to.equal("directory_placement");
+    expect(stored?.phase).to.equal("filename_convention");
     expect(stored?.phaseData.directoryLayout.directoryMoves).to.deep.equal([{
       current_path: "Inbox",
       proposed_path: "01-Documents/Inbox",
       reason: "Keep loose files under Documents",
     }]);
-    expect(getLastSentEmail(sender)?.html).to.include("existing folders could fit");
+    expect(stored?.phaseData.directoryLayout.approvedStructure).to.deep.equal([
+      {folder_path: "01-Documents", description: "Documents"},
+      {folder_path: "01-Documents/Inbox", description: "Imported inbox documents"},
+    ]);
+    expect(stored?.phaseData.directoryLayout.addedDirectories).to.deep.equal(["01-Documents/Inbox"]);
+    expect(stored?.phaseData.filenameConvention.convention).to.equal("YYYY.MM.DD - Description.ext");
+    expect(getLastSentEmail(sender)?.html).to.include("filename convention");
   });
 
-  it("DT00ubb routes directory_placement revision and stays in that phase", async function() {
+  it("DT00ubb routes in-flight directory_placement replies to filename_convention", async function() {
     const proposalId = `phase-1b-${Date.now()}`;
     const proposalDoc = makePhaseDoc("directory_placement");
     await seedPhaseProposal(proposalId, proposalDoc);
-    setFakeStructuredCompletions([{
-      directory_moves: [{
-        current_path: "Work",
-        proposed_path: "03-Work",
-        reason: "Use the Work root requested by the user",
-      }],
-      no_changes_needed: false,
-      summary: "Updated the placement recommendation.",
-    }]);
 
     await organizeProposalTestHooks.handleOrganizePhaseReply(
         makeTestEmail("put Work under the Work root"),
@@ -1683,12 +1690,14 @@ describe("organize phased proposal flow", function() {
 
     const stored = (await db.collection("OrganizeProposals").doc(proposalId).get()).data();
     if (stored) stored.phaseData = await getOrganizePhaseData(proposalId);
-    expect(stored?.phase).to.equal("directory_placement");
-    expect(stored?.phaseData.directoryLayout.directoryMoves[0].proposed_path).to.equal("03-Work");
-    expect(getLastSentEmail(sender)?.html).to.include("Updated the placement recommendation");
+    expect(stored?.phase).to.equal("filename_convention");
+    expect(stored?.phaseData.directoryLayout.approvedStructure).to.deep.equal([
+      {folder_path: "01-Documents", description: "Documents"},
+    ]);
+    expect(getLastSentEmail(sender)?.html).to.include("filename convention");
   });
 
-  it("DT00ubc persists approved structure and advances to filename_convention", async function() {
+  it("DT00ubc routes in-flight directory_additions replies to filename_convention", async function() {
     const proposalId = `phase-1c-${Date.now()}`;
     const proposalDoc = makePhaseDoc("directory_additions");
     await seedPhaseProposal(proposalId, proposalDoc);
@@ -1758,6 +1767,27 @@ describe("organize phased proposal flow", function() {
     const stored = (await db.collection("OrganizeProposals").doc(proposalId).get()).data();
     if (stored) stored.phaseData = await getOrganizePhaseData(proposalId);
     expect(stored?.phase).to.equal("filename_convention");
+  });
+
+  it("DT00ubeA routes cost_estimate folder revisions back to directory_analysis", async function() {
+    const proposalId = `phase-cost-folders-${Date.now()}`;
+    const proposalDoc = makePhaseDoc("cost_estimate");
+    await seedPhaseProposal(proposalId, proposalDoc);
+
+    const result = await organizeProposalTestHooks.handleOrganizePhaseReply(
+        makeTestEmail("change the folders"),
+        sender,
+        uid,
+        proposalId,
+        proposalDoc,
+        "change the folders",
+        false,
+    );
+
+    expect(result?.proposalSent).to.equal(false);
+    const stored = (await db.collection("OrganizeProposals").doc(proposalId).get()).data();
+    expect(stored?.phase).to.equal("directory_analysis");
+    expect(getLastSentEmail(sender)?.html).to.include("revised folder structure");
   });
 
 });

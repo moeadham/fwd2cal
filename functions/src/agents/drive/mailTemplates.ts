@@ -224,36 +224,6 @@ Reply with changes, or reply &quot;approve&quot; to continue.
 %EMBEDDED_DATA%
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
   },
-  organizePhase1bProposal: {
-    html: `Here's how your existing folders could fit the proposed structure:
-<br><br>
-<b>Summary:</b> %SUMMARY%
-<br><br>
-<b>Directory moves:</b>
-<br><br>
-%DIRECTORY_MOVES%
-<br>
-Reply with changes, or reply &quot;approve&quot; to continue.
-%EMBEDDED_DATA%
-<br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
-  },
-  organizePhase1cProposal: {
-    html: `Here's the final folder structure:
-<br><br>
-<b>Summary:</b> %SUMMARY%
-<br><br>
-<div style="font-family:monospace;background:#f7f7f7;padding:16px;border-radius:8px;font-size:13px;line-height:1.6;">
-%FOLDER_TREE%
-</div>
-<br>
-<b>Added directories:</b>
-<br><br>
-%ADDED_DIRECTORIES%
-<br>
-Reply with changes, or reply &quot;approve&quot; to approve this final structure.
-%EMBEDDED_DATA%
-<br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
-  },
   organizePhase2Proposal: {
     html: `Let's use this filename convention:
 <br><br>

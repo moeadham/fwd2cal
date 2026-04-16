@@ -25,8 +25,6 @@ import {
   sendOrganizeEmailResponse,
   sendOrganizeFolderPreferencesEmail,
   sendOrganizePhase1aEmail,
-  sendOrganizePhase1bEmail,
-  sendOrganizePhase1cEmail,
   sendOrganizePhase2Email,
   sendOrganizeProposalEmail,
   signActionToken,
@@ -66,6 +64,45 @@ function getNonEmptyString(value: unknown): string | undefined {
 async function loadTreeSummary(proposalId: string): Promise<string> {
   const state = await getOrganizeIntermediateState(proposalId);
   return String(state.driveStructureSummary || "");
+}
+
+/** Advances a phased organize proposal to filename convention selection. */
+async function advanceToFilenameConvention(
+    email: TransformedEmail,
+    sender: string,
+    uid: string,
+    proposalId: string,
+    proposalDoc: OrganizeProposalDoc,
+    approvedStructure = proposalDoc.phaseData?.directoryLayout?.approvedStructure ||
+      proposalDoc.phaseData?.directoryLayout?.proposedStructure ||
+      [],
+): Promise<OrganizeProcessingResult> {
+  const layout = proposalDoc.phaseData?.directoryLayout;
+  if (!layout) {
+    return emptyResult("Directory layout state missing");
+  }
+  const preferences = await getDriveUserPreferences(uid);
+  const convention =
+    getNonEmptyString(proposalDoc.phaseData?.filenameConvention?.convention) ||
+    getNonEmptyString(preferences.filenameConvention) ||
+    DEFAULT_FILENAME_CONVENTION;
+  const nextPhaseData = {
+    ...proposalDoc.phaseData,
+    directoryLayout: {
+      ...layout,
+      approvedStructure,
+    },
+    filenameConvention: {
+      convention,
+    },
+  };
+  await updateOrganizeProposalStatus(proposalId, "pending", {
+    phase: "filename_convention",
+    phaseData: nextPhaseData,
+  });
+  const examples = await generateFilenameExamples(convention, uid);
+  await sendOrganizePhase2Email(sender, email, proposalId, convention, examples);
+  return emptyResult();
 }
 
 /** Handles replies during Phase 0 folder naming preference confirmation. */
@@ -278,25 +315,54 @@ async function handleDirectoryAnalysisReply(
   const treeSummary = await loadTreeSummary(proposalId);
 
   if (isApproval) {
-    const result = await evaluateDirectoryPlacement(
-        treeSummary,
-        layout.proposedStructure || [],
+    try {
+      const placement = await evaluateDirectoryPlacement(
+          treeSummary,
+          layout.proposedStructure || [],
+          uid,
+      );
+      const finalized = await finalizeDirectoryMap(
+          layout.proposedStructure || [],
+          placement.directory_moves,
+          treeSummary,
+          uid,
+      );
+      const preferences = await getDriveUserPreferences(uid);
+      const convention =
+        getNonEmptyString(proposalDoc.phaseData?.filenameConvention?.convention) ||
+        getNonEmptyString(preferences.filenameConvention) ||
+        DEFAULT_FILENAME_CONVENTION;
+      const nextPhaseData = {
+        ...proposalDoc.phaseData,
+        directoryLayout: {
+          ...layout,
+          directoryMoves: placement.directory_moves,
+          approvedStructure: finalized.final_directories,
+          addedDirectories: finalized.added_directories,
+          summary: finalized.summary,
+        },
+        filenameConvention: {
+          convention,
+        },
+      };
+      await updateOrganizeProposalStatus(proposalId, "pending", {
+        phase: "filename_convention",
+        phaseData: nextPhaseData,
+      });
+      const examples = await generateFilenameExamples(convention, uid);
+      await sendOrganizePhase2Email(sender, email, proposalId, convention, examples);
+      return emptyResult();
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      logger.error("Drive organize: Failed to finalize directory analysis approval", {
+        proposalId,
         uid,
-    );
-    const nextPhaseData = {
-      ...proposalDoc.phaseData,
-      directoryLayout: {
-        ...layout,
-        directoryMoves: result.directory_moves,
-        summary: result.summary,
-      },
-    };
-    await updateOrganizeProposalStatus(proposalId, "pending", {
-      phase: "directory_placement",
-      phaseData: nextPhaseData,
-    });
-    await sendOrganizePhase1bEmail(sender, email, proposalId, result.summary, result.directory_moves);
-    return emptyResult();
+        error: errMsg,
+      });
+      const html = applyTemplate(driveMailTemplates.organizeError.html, {});
+      await sendOrganizeEmailResponse(sender, email, html);
+      return emptyResult("Directory analysis approval failed");
+    }
   }
 
   const currentProposedTree = (layout.proposedStructure || [])
@@ -349,66 +415,15 @@ async function handleDirectoryPlacementReply(
     uid: string,
     proposalId: string,
     proposalDoc: OrganizeProposalDoc,
-    replyBody: string,
-    isApproval: boolean,
+    _replyBody: string,
+    _isApproval: boolean,
 ): Promise<OrganizeProcessingResult> {
   const layout = proposalDoc.phaseData?.directoryLayout;
   if (!layout) {
     return emptyResult("Directory placement state missing");
   }
-  const treeSummary = await loadTreeSummary(proposalId);
-
-  if (isApproval) {
-    const result = await finalizeDirectoryMap(
-        layout.proposedStructure || [],
-        layout.directoryMoves || [],
-        treeSummary,
-        uid,
-    );
-    const nextPhaseData = {
-      ...proposalDoc.phaseData,
-      directoryLayout: {
-        ...layout,
-        approvedStructure: result.final_directories,
-        addedDirectories: result.added_directories,
-        summary: result.summary,
-      },
-    };
-    await updateOrganizeProposalStatus(proposalId, "pending", {
-      phase: "directory_additions",
-      phaseData: nextPhaseData,
-    });
-    await sendOrganizePhase1cEmail(
-        sender,
-        email,
-        proposalId,
-        result.summary,
-        result.final_directories,
-        result.added_directories,
-    );
-    return emptyResult();
-  }
-
-  const result = await evaluateDirectoryPlacement(
-      treeSummary,
-      layout.proposedStructure || [],
-      uid,
-      replyBody,
-  );
-  const nextPhaseData = {
-    ...proposalDoc.phaseData,
-    directoryLayout: {
-      ...layout,
-      directoryMoves: result.directory_moves,
-      summary: result.summary,
-    },
-  };
-  await updateOrganizeProposalStatus(proposalId, "pending", {
-    phase: "directory_placement",
-    phaseData: nextPhaseData,
-  });
-  await sendOrganizePhase1bEmail(sender, email, proposalId, result.summary, result.directory_moves);
-  return emptyResult();
+  const approvedStructure = layout.approvedStructure || layout.proposedStructure || [];
+  return advanceToFilenameConvention(email, sender, uid, proposalId, proposalDoc, approvedStructure);
 }
 
 /** Handles replies during Phase 1c final directory additions. */
@@ -418,70 +433,16 @@ async function handleDirectoryAdditionsReply(
     uid: string,
     proposalId: string,
     proposalDoc: OrganizeProposalDoc,
-    replyBody: string,
-    isApproval: boolean,
+    _replyBody: string,
+    _isApproval: boolean,
 ): Promise<OrganizeProcessingResult> {
   const layout = proposalDoc.phaseData?.directoryLayout;
   if (!layout) {
     return emptyResult("Directory additions state missing");
   }
 
-  if (isApproval) {
-    const approvedStructure = layout.approvedStructure || layout.proposedStructure || [];
-    const preferences = await getDriveUserPreferences(uid);
-    const convention =
-      getNonEmptyString(proposalDoc.phaseData?.filenameConvention?.convention) ||
-      getNonEmptyString(preferences.filenameConvention) ||
-      DEFAULT_FILENAME_CONVENTION;
-    const nextPhaseData = {
-      ...proposalDoc.phaseData,
-      directoryLayout: {
-        ...layout,
-        approvedStructure,
-      },
-      filenameConvention: {
-        convention,
-      },
-    };
-    await updateOrganizeProposalStatus(proposalId, "pending", {
-      phase: "filename_convention",
-      phaseData: nextPhaseData,
-    });
-    const examples = await generateFilenameExamples(convention, uid);
-    await sendOrganizePhase2Email(sender, email, proposalId, convention, examples);
-    return emptyResult();
-  }
-
-  const treeSummary = await loadTreeSummary(proposalId);
-  const result = await finalizeDirectoryMap(
-      layout.proposedStructure || [],
-      layout.directoryMoves || [],
-      treeSummary,
-      uid,
-      replyBody,
-  );
-  const nextPhaseData = {
-    ...proposalDoc.phaseData,
-    directoryLayout: {
-      ...layout,
-      approvedStructure: result.final_directories,
-      addedDirectories: result.added_directories,
-      summary: result.summary,
-    },
-  };
-  await updateOrganizeProposalStatus(proposalId, "pending", {
-    phase: "directory_additions",
-    phaseData: nextPhaseData,
-  });
-  await sendOrganizePhase1cEmail(
-      sender,
-      email,
-      proposalId,
-      result.summary,
-      result.final_directories,
-      result.added_directories,
-  );
-  return emptyResult();
+  const approvedStructure = layout.approvedStructure || layout.proposedStructure || [];
+  return advanceToFilenameConvention(email, sender, uid, proposalId, proposalDoc, approvedStructure);
 }
 
 /** Handles replies during Phase 2 filename convention selection. */
@@ -572,15 +533,28 @@ async function handleCostEstimateReply(
 
   const lowered = replyBody.toLowerCase();
   if (lowered.includes("folder") || lowered.includes("director")) {
-    await updateOrganizeProposalStatus(proposalId, "pending", {
-      phase: "directory_additions",
-    });
+    const layout = proposalDoc.phaseData?.directoryLayout;
+    if (layout?.proposedStructure) {
+      await updateOrganizeProposalStatus(proposalId, "pending", {
+        phase: "directory_analysis",
+      });
+      await sendOrganizePhase1aEmail(
+          sender,
+          email,
+          proposalId,
+          layout.conventionDescription || "",
+          layout.summary || "",
+          layout.proposedStructure,
+          true,
+      );
+      return emptyResult("Returned to directory analysis");
+    }
     await sendOrganizeEmailResponse(
         sender,
         email,
         "No problem. Reply with the folder structure changes you'd like, or reply &quot;approve&quot; to keep it.",
     );
-    return emptyResult("Returned to directory additions");
+    return emptyResult("Directory analysis state missing");
   }
 
   await updateOrganizeProposalStatus(proposalId, "pending", {

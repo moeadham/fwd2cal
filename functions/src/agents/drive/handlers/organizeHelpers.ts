@@ -13,7 +13,6 @@ import {applyTemplate} from "../driveUtils";
 import {
   DriveFileEntry,
   DriveOrganizeProposal,
-  DirectoryMoveData,
   OrganizeCostBreakdown,
   OrganizeEmbeddedData,
   OrganizeProcessingResult,
@@ -393,17 +392,6 @@ function renderDirectoryList(
   render(root, "");
   return html;
 }
-/** Renders directory move recommendations for phase emails. */
-function renderDirectoryMoves(moves: DirectoryMoveData[]): string {
-  if (moves.length === 0) {
-    return "No directory moves needed.";
-  }
-  return moves
-      .map((move) => `<div><b>${escapeHtml(move.current_path)}</b> -> ` +
-        `<b>${escapeHtml(move.proposed_path)}</b><br>` +
-        `${escapeHtml(move.reason)}</div>`)
-      .join("<br>");
-}
 /** Builds embedded proposal metadata for phase emails. */
 function phaseEmbeddedHtml(proposalId: string): string {
   const embeddedData: OrganizeEmbeddedData = {proposalId};
@@ -427,41 +415,6 @@ export async function sendOrganizePhase1aEmail(
     CONVENTION_SUMMARY: escapeHtml(conventionSummary || "No existing convention detected."),
     SUMMARY: formatSummaryHtml(escapeHtml(summary || "")),
     FOLDER_TREE: renderDirectoryList(folders),
-    EMBEDDED_DATA: phaseEmbeddedHtml(proposalId),
-  });
-  await sendOrganizeEmailResponse(sender, email, html);
-}
-/** Sends the directory placement phase email. */
-export async function sendOrganizePhase1bEmail(
-    sender: string,
-    email: TransformedEmail,
-    proposalId: string,
-    summary: string,
-    moves: DirectoryMoveData[],
-): Promise<void> {
-  const html = applyTemplate(driveMailTemplates.organizePhase1bProposal.html, {
-    SUMMARY: formatSummaryHtml(escapeHtml(summary || "")),
-    DIRECTORY_MOVES: renderDirectoryMoves(moves),
-    EMBEDDED_DATA: phaseEmbeddedHtml(proposalId),
-  });
-  await sendOrganizeEmailResponse(sender, email, html);
-}
-/** Sends the final directory structure phase email. */
-export async function sendOrganizePhase1cEmail(
-    sender: string,
-    email: TransformedEmail,
-    proposalId: string,
-    summary: string,
-    folders: DriveOrganizeProposal["proposed_folders"],
-    addedDirectories: string[],
-): Promise<void> {
-  const addedHtml = addedDirectories.length > 0 ?
-    addedDirectories.map((path) => `- ${escapeHtml(path)}`).join("<br>") :
-    "No additional directories.";
-  const html = applyTemplate(driveMailTemplates.organizePhase1cProposal.html, {
-    SUMMARY: formatSummaryHtml(escapeHtml(summary || "")),
-    FOLDER_TREE: renderDirectoryList(folders),
-    ADDED_DIRECTORIES: addedHtml,
     EMBEDDED_DATA: phaseEmbeddedHtml(proposalId),
   });
   await sendOrganizeEmailResponse(sender, email, html);

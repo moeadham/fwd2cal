@@ -374,8 +374,6 @@ export interface DriveMailTemplates {
   organizeProposal: DriveMailTemplate;
   organizeFolderPreferences: DriveMailTemplate;
   organizePhase1aProposal: DriveMailTemplate;
-  organizePhase1bProposal: DriveMailTemplate;
-  organizePhase1cProposal: DriveMailTemplate;
   organizePhase2Proposal: DriveMailTemplate;
   organizeCostEstimate: DriveMailTemplate;
   organizeError: DriveMailTemplate;
