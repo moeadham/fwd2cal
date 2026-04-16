@@ -101,8 +101,11 @@ async function handleFolderPreferencesReply(
     return emptyResult("Empty folder convention");
   }
 
-  // For revisions, extract the clean convention from the user's natural language reply
-  let resolvedConvention = confirmedConvention;
+  // Determine the convention to use for downstream analysis.
+  // Only treat the reply as a convention change when classify says so; otherwise reuse
+  // the previously-suggested convention and leave the user's stored preference alone.
+  let resolvedConvention = folderPreferences.suggestedConvention;
+  let conventionChanged = isApproval;
   if (!isApproval) {
     const parsed = await classifyConventionChange(
         folderPreferences.suggestedConvention,
@@ -111,6 +114,7 @@ async function handleFolderPreferencesReply(
     );
     if (parsed.is_change && parsed.new_convention) {
       resolvedConvention = parsed.new_convention;
+      conventionChanged = true;
     }
   }
   const analysis = await analyzeDirectoryStructure(
@@ -119,12 +123,14 @@ async function handleFolderPreferencesReply(
       email.text || email.html || "",
       uid,
   );
-  await saveDriveUserPreferences(uid, {
-    folderConvention: resolvedConvention,
-    folderConventionDescription: analysis.convention_description ||
-      folderPreferences.conventionDescription ||
-      "",
-  });
+  if (conventionChanged) {
+    await saveDriveUserPreferences(uid, {
+      folderConvention: resolvedConvention,
+      folderConventionDescription: analysis.convention_description ||
+        folderPreferences.conventionDescription ||
+        "",
+    });
+  }
   const proposedStructure = analysis.proposed_structure.map((folder) => ({
     folder_path: folder.folder_path,
     description: folder.description,
@@ -194,7 +200,7 @@ export async function handleOrganizeRevision(
         proposalDoc.proposal!,
         revisedProposal,
     );
-    renumberFoldersContiguously(mergedProposal, preservedRootPaths);
+    renumberFoldersContiguously(mergedProposal, preservedRootPaths, folderConvention);
     const state = await getOrganizeIntermediateState(proposalId);
     const fileEntries = (Array.isArray(state.fileEntries) ? state.fileEntries : []) as DriveFileEntry[];
     const mimeTypesByFileId = Object.fromEntries(

@@ -300,7 +300,7 @@ describe("renumberFoldersContiguously", function() {
         ["05-Projects", "06-Personal", "12-Important", "16-Trading"],
     );
 
-    renumberFoldersContiguously(proposal);
+    renumberFoldersContiguously(proposal, undefined, "NN-Category");
 
     expect(proposal.proposed_folders.map((folder) => folder.folder_path))
         .to.deep.equal(["01-Projects", "02-Personal", "03-Important", "04-Trading"]);
@@ -315,7 +315,7 @@ describe("renumberFoldersContiguously", function() {
         ["02-Foo", "Bar", "Apple"],
     );
 
-    renumberFoldersContiguously(proposal);
+    renumberFoldersContiguously(proposal, undefined, "NN-Category");
 
     expect(proposal.proposed_folders.map((folder) => folder.folder_path))
         .to.deep.equal(["01-Foo", "02-Apple", "03-Bar"]);
@@ -332,7 +332,7 @@ describe("renumberFoldersContiguously", function() {
     const beforeFolders = proposal.proposed_folders.map((folder) => folder.folder_path);
     const beforeActions = proposal.file_actions.map((action) => action.new_folder);
 
-    renumberFoldersContiguously(proposal);
+    renumberFoldersContiguously(proposal, undefined, "NN-Category");
 
     expect(proposal.proposed_folders.map((folder) => folder.folder_path)).to.deep.equal(beforeFolders);
     expect(proposal.file_actions.map((action) => action.new_folder)).to.deep.equal(beforeActions);
@@ -348,7 +348,7 @@ describe("renumberFoldersContiguously", function() {
         ["12-Important", "12-Important/Sub", "16-Trading", "16-Trading/Nested/Deep"],
     );
 
-    renumberFoldersContiguously(proposal);
+    renumberFoldersContiguously(proposal, undefined, "NN-Category");
 
     expect(proposal.proposed_folders.map((folder) => folder.folder_path))
         .to.deep.equal([
@@ -368,7 +368,7 @@ describe("renumberFoldersContiguously", function() {
         ["Documents", "01-Documents"],
     );
 
-    renumberFoldersContiguously(proposal);
+    renumberFoldersContiguously(proposal, undefined, "NN-Category");
 
     expect(proposal.proposed_folders.map((folder) => folder.folder_path))
         .to.deep.equal(["01-Documents", "02-Documents"]);
@@ -392,7 +392,7 @@ describe("renumberFoldersContiguously", function() {
       reason: "Reason 2",
     });
 
-    renumberFoldersContiguously(proposal);
+    renumberFoldersContiguously(proposal, undefined, "NN-Category");
 
     expect(proposal.proposed_folders.map((folder) => folder.folder_path))
         .to.deep.equal(["01-Projects"]);
@@ -400,6 +400,19 @@ describe("renumberFoldersContiguously", function() {
         .to.equal("01-Projects");
     expect(proposal.file_actions.find((action) => action.file_id === "2")?.new_folder)
         .to.equal("99-Unknown");
+  });
+
+  it("DT00r7 skips renumbering when convention has no numeric prefix", function() {
+    const proposal = makeOrganizeProposal(
+        ["1", "2"],
+        {"1": "Acme-Contracts", "2": "BigCo-Invoices"},
+        ["Acme-Contracts", "BigCo-Invoices"],
+    );
+    const beforeFolders = proposal.proposed_folders.map((folder) => folder.folder_path);
+
+    renumberFoldersContiguously(proposal, undefined, "ClientName-Project");
+
+    expect(proposal.proposed_folders.map((folder) => folder.folder_path)).to.deep.equal(beforeFolders);
   });
 });
 

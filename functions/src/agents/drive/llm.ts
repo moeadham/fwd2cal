@@ -395,7 +395,7 @@ async function reviseOrganization(
       result.folder_operations,
       result.summary,
   );
-  normalizeFolderPrefixes(revisedProposal, preservedRootPaths);
+  normalizeFolderPrefixes(revisedProposal, preservedRootPaths, folderConvention);
   return {proposal: revisedProposal, preservedRootPaths};
 }
 
@@ -799,9 +799,13 @@ function renderOriginalFolderTree(proposal: DriveOrganizeProposal): string {
 function normalizeFolderPrefixes(
     proposal: DriveOrganizeProposal,
     skipPaths?: Set<string>,
+    folderConvention?: string,
 ): void {
+  const width = conventionPrefixWidth(folderConvention);
+  if (width === 0) return;
+  const paddingWidth = width;
   let maxPrefix = 0;
-  const prefixedFolderPattern = /^(\d{2,3})-/;
+  const prefixedFolderPattern = /^(\d+)-/;
 
   for (const folder of proposal.proposed_folders) {
     const rootSegment = folder.folder_path.split("/")[0];
@@ -829,7 +833,7 @@ function normalizeFolderPrefixes(
 
     const oldName = folder.folder_path;
     maxPrefix += 1;
-    const newName = `${String(maxPrefix).padStart(2, "0")}-${oldName}`;
+    const newName = `${String(maxPrefix).padStart(paddingWidth, "0")}-${oldName}`;
     renameMap.set(oldName, newName);
     folder.folder_path = newName;
   }
@@ -1173,11 +1177,26 @@ function applyFolderOperations(
 }
 
 /** Renumbers proposal folders while preserving requested roots. */
+/**
+ * Parse the digit width from a folder convention token (e.g. "N-Category" → 1,
+ * "NN-Category" → 2, "NNN-Category" → 3). Returns 0 if the convention doesn't
+ * start with N-tokens.
+ */
+function conventionPrefixWidth(folderConvention?: string): number {
+  if (!folderConvention) return 0;
+  const m = folderConvention.trim().match(/^(N+)[^A-Za-z0-9]/);
+  return m ? m[1].length : 0;
+}
+
 function renumberFoldersContiguously(
     proposal: DriveOrganizeProposal,
     skipPaths?: Set<string>,
+    folderConvention?: string,
 ): void {
-  const prefixedFolderPattern = /^(\d{2,3})-/;
+  const width = conventionPrefixWidth(folderConvention);
+  if (width === 0) return;
+  const paddingWidth = width;
+  const prefixedFolderPattern = /^(\d+)-/;
   const compareFolderPaths = (left: string, right: string): number => {
     const leftSegments = getFolderSegments(left);
     const rightSegments = getFolderSegments(right);
@@ -1223,7 +1242,7 @@ function renumberFoldersContiguously(
 
   for (let index = 0; index < orderedSegments.length; index++) {
     const segment = orderedSegments[index];
-    const newPrefix = String(index + 1).padStart(2, "0");
+    const newPrefix = String(index + 1).padStart(paddingWidth, "0");
     const renamed = `${newPrefix}-${segment.replace(prefixedFolderPattern, "")}`;
     if (renamed !== segment) {
       renameMap.set(segment, renamed);
