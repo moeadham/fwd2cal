@@ -1692,10 +1692,9 @@ describe("organize phased proposal flow", function() {
 
     const stored = (await db.collection("OrganizeProposals").doc(proposalId).get()).data();
     if (stored) stored.phaseData = await getOrganizePhaseData(proposalId);
-    const userDoc = (await db.collection("DriveUsers").doc(uid).get()).data();
     expect(stored?.phase).to.equal("filename_convention");
     expect(stored?.phaseData.filenameConvention.convention).to.equal("YYYY.MM.DD - Description.ext");
-    expect(userDoc?.preferences.approvedDirectoryStructure).to.deep.equal([
+    expect(stored?.phaseData.directoryLayout.approvedStructure).to.deep.equal([
       {folder_path: "01-Documents", description: "Documents"},
     ]);
     expect(getLastSentEmail(sender)?.html).to.include("filename convention");

@@ -227,8 +227,9 @@ export interface OrganizePhaseData {
 
 export interface DriveUserPreferences {
   folderConvention?: string;
-  approvedDirectoryStructure?: z.infer<typeof OrganizeFolderSchema>[];
+  folderConventionDescription?: string;
   filenameConvention?: string;
+  filenameConventionDescription?: string;
 }
 
 export const FolderOperationSchema = z.object({

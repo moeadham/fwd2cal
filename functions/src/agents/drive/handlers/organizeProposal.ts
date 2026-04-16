@@ -422,9 +422,6 @@ async function handleDirectoryAdditionsReply(
 
   if (isApproval) {
     const approvedStructure = layout.approvedStructure || layout.proposedStructure || [];
-    await saveDriveUserPreferences(uid, {
-      approvedDirectoryStructure: approvedStructure,
-    });
     const preferences = await getDriveUserPreferences(uid);
     const convention =
       getNonEmptyString(proposalDoc.phaseData?.filenameConvention?.convention) ||
