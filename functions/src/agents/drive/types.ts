@@ -341,6 +341,7 @@ export interface DrivePrompts {
   evaluateDirectoryPlacement: DrivePromptConfig;
   finalizeDirectoryMap: DrivePromptConfig;
   classifyConventionChange: DrivePromptConfig;
+  classifyFolderConventionChange: DrivePromptConfig;
   proposeFileAction: DrivePromptConfig;
   generateFilenameExamples: DrivePromptConfig;
 }

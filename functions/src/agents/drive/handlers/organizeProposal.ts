@@ -46,11 +46,13 @@ import {
 import {
   analyzeDirectoryStructure,
   classifyConventionChange,
+  classifyFolderConventionChange,
   DEFAULT_FOLDER_CONVENTION,
   evaluateDirectoryPlacement,
   finalizeDirectoryMap,
   generateFilenameExamples,
   mergeRevisedProposal,
+  normalizeFolderConventionSeparators,
   renumberFoldersContiguously,
   reviseOrganization,
 } from "../llm";
@@ -142,16 +144,18 @@ async function handleFolderPreferencesReply(
   // Only treat the reply as a convention change when classify says so; otherwise reuse
   // the previously-suggested convention and leave the user's stored preference alone.
   let resolvedConvention = folderPreferences.suggestedConvention;
-  let conventionChanged = isApproval;
+  let resolvedConventionDescription = folderPreferences.conventionDescription || "";
+  let shouldSaveConvention = isApproval;
   if (!isApproval) {
-    const parsed = await classifyConventionChange(
+    const parsed = await classifyFolderConventionChange(
         folderPreferences.suggestedConvention,
         confirmedConvention,
         uid,
     );
     if (parsed.is_change && parsed.new_convention) {
       resolvedConvention = parsed.new_convention;
-      conventionChanged = true;
+      resolvedConventionDescription = parsed.new_description || resolvedConventionDescription;
+      shouldSaveConvention = true;
     }
   }
   const analysis = await analyzeDirectoryStructure(
@@ -159,16 +163,21 @@ async function handleFolderPreferencesReply(
       resolvedConvention,
       email.text || email.html || "",
       uid,
+      resolvedConventionDescription,
   );
-  if (conventionChanged) {
+  if (!resolvedConventionDescription) {
+    resolvedConventionDescription = analysis.convention_description || "";
+  }
+  if (shouldSaveConvention) {
     await saveDriveUserPreferences(uid, {
       folderConvention: resolvedConvention,
-      folderConventionDescription: analysis.convention_description ||
-        folderPreferences.conventionDescription ||
-        "",
+      folderConventionDescription: resolvedConventionDescription,
     });
   }
-  const proposedStructure = analysis.proposed_structure.map((folder) => ({
+  const proposedStructure = normalizeFolderConventionSeparators(
+      analysis.proposed_structure,
+      resolvedConvention,
+  ).map((folder) => ({
     folder_path: folder.folder_path,
     description: folder.description,
   }));
@@ -181,7 +190,7 @@ async function handleFolderPreferencesReply(
     directoryLayout: {
       userPrompt: email.text || email.html || "",
       folderConvention: resolvedConvention,
-      conventionDescription: analysis.convention_description,
+      conventionDescription: resolvedConventionDescription,
       proposedStructure,
       summary: analysis.summary,
     },
@@ -195,7 +204,7 @@ async function handleFolderPreferencesReply(
       sender,
       email,
       proposalId,
-      analysis.convention_description,
+      resolvedConventionDescription,
       analysis.summary,
       proposedStructure,
   );
@@ -378,8 +387,17 @@ async function handleDirectoryAnalysisReply(
       layout.folderConvention || proposalDoc.phaseData?.folderPreferences?.confirmedConvention || "",
       revisionPrompt,
       uid,
+      layout.conventionDescription || "",
   );
-  const proposedStructure = result.proposed_structure.map((folder) => ({
+  const folderConvention =
+    layout.folderConvention ||
+    proposalDoc.phaseData?.folderPreferences?.confirmedConvention ||
+    "";
+  const conventionDescription = layout.conventionDescription || result.convention_description || "";
+  const proposedStructure = normalizeFolderConventionSeparators(
+      result.proposed_structure,
+      folderConvention,
+  ).map((folder) => ({
     folder_path: folder.folder_path,
     description: folder.description,
   }));
@@ -387,7 +405,7 @@ async function handleDirectoryAnalysisReply(
     ...proposalDoc.phaseData,
     directoryLayout: {
       ...layout,
-      conventionDescription: result.convention_description,
+      conventionDescription,
       proposedStructure,
       summary: result.summary,
     },
@@ -400,7 +418,7 @@ async function handleDirectoryAnalysisReply(
       sender,
       email,
       proposalId,
-      result.convention_description,
+      conventionDescription,
       result.summary,
       proposedStructure,
       true,

@@ -51,6 +51,11 @@ import {
   VERSION_PARAM as CLASSIFY_CONVENTION_CHANGE_VERSION_PARAM,
 } from "./classifyConventionChange";
 import {
+  versions as classifyFolderConventionChangeVersions,
+  VERSION_KEY as CLASSIFY_FOLDER_CONVENTION_CHANGE_VERSION_KEY,
+  VERSION_PARAM as CLASSIFY_FOLDER_CONVENTION_CHANGE_VERSION_PARAM,
+} from "./classifyFolderConventionChange";
+import {
   versions as proposeFileActionVersions,
   VERSION_KEY as PROPOSE_FILE_ACTION_VERSION_KEY,
   VERSION_PARAM as PROPOSE_FILE_ACTION_VERSION_PARAM,
@@ -103,6 +108,10 @@ function getPrompts(): { prompts: DrivePrompts; versions: Record<string, string>
       CLASSIFY_CONVENTION_CHANGE_VERSION_PARAM,
       classifyConventionChangeVersions,
   );
+  const classifyFolderConventionChange = resolvePrompt(
+      CLASSIFY_FOLDER_CONVENTION_CHANGE_VERSION_PARAM,
+      classifyFolderConventionChangeVersions,
+  );
   const proposeFileAction = resolvePrompt(
       PROPOSE_FILE_ACTION_VERSION_PARAM,
       proposeFileActionVersions,
@@ -123,6 +132,7 @@ function getPrompts(): { prompts: DrivePrompts; versions: Record<string, string>
     evaluateDirectoryPlacement: evaluateDirectoryPlacement.prompt,
     finalizeDirectoryMap: finalizeDirectoryMap.prompt,
     classifyConventionChange: classifyConventionChange.prompt,
+    classifyFolderConventionChange: classifyFolderConventionChange.prompt,
     proposeFileAction: proposeFileAction.prompt,
     generateFilenameExamples: generateFilenameExamples.prompt,
   };
@@ -138,6 +148,7 @@ function getPrompts(): { prompts: DrivePrompts; versions: Record<string, string>
     [EVALUATE_DIRECTORY_PLACEMENT_VERSION_KEY]: evaluateDirectoryPlacement.version,
     [FINALIZE_DIRECTORY_MAP_VERSION_KEY]: finalizeDirectoryMap.version,
     [CLASSIFY_CONVENTION_CHANGE_VERSION_KEY]: classifyConventionChange.version,
+    [CLASSIFY_FOLDER_CONVENTION_CHANGE_VERSION_KEY]: classifyFolderConventionChange.version,
     [PROPOSE_FILE_ACTION_VERSION_KEY]: proposeFileAction.version,
     [GENERATE_FILENAME_EXAMPLES_VERSION_KEY]: generateFilenameExamples.version,
   };

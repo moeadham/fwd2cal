@@ -31,6 +31,7 @@ import {
   DEFAULT_FOLDER_CONVENTION,
   detectFolderConvention,
   mergeRevisedProposal,
+  normalizeFolderConventionSeparators,
   normalizeFolderPrefixes,
   proposeFilePlacement,
   renumberFoldersContiguously,
@@ -414,6 +415,41 @@ describe("renumberFoldersContiguously", function() {
     renumberFoldersContiguously(proposal, undefined, "ClientName-Project");
 
     expect(proposal.proposed_folders.map((folder) => folder.folder_path)).to.deep.equal(beforeFolders);
+  });
+
+  it("DT00r8 preserves the separator from numeric folder convention tokens", function() {
+    const proposal = makeOrganizeProposal(
+        ["1", "2", "3"],
+        {
+          "1": "05|Projects",
+          "2": "06|Personal",
+          "3": "12|Important",
+        },
+        ["05|Projects", "06|Personal", "12|Important"],
+    );
+
+    renumberFoldersContiguously(proposal, undefined, "NN|Category");
+
+    expect(proposal.proposed_folders.map((folder) => folder.folder_path))
+        .to.deep.equal(["01|Projects", "02|Personal", "03|Important"]);
+    expect(proposal.file_actions.map((action) => action.new_folder))
+        .to.deep.equal(["01|Projects", "02|Personal", "03|Important"]);
+  });
+});
+
+describe("normalizeFolderConventionSeparators", function() {
+  it("DT00s1 rewrites drifted root separators to match the convention token", function() {
+    const folders = normalizeFolderConventionSeparators([
+      {folder_path: "01-Personal", description: "Personal"},
+      {folder_path: "02-Work/Nested", description: "Nested"},
+      {folder_path: "Archive", description: "Archive"},
+    ], "NN|Category");
+
+    expect(folders).to.deep.equal([
+      {folder_path: "01|Personal", description: "Personal"},
+      {folder_path: "02|Work/Nested", description: "Nested"},
+      {folder_path: "Archive", description: "Archive"},
+    ]);
   });
 });
 
@@ -1518,7 +1554,8 @@ describe("organize phased proposal flow", function() {
       phaseData: {
         folderPreferences: {
           detectedConvention: "",
-          suggestedConvention: "NN-Category root folders like 01-Documents",
+          suggestedConvention: "NN-Category",
+          conventionDescription: "Two-digit zero-padded prefix, a dash, then the category name (e.g. 01-Documents).",
           topLevelFolderNames: ["Inbox", "Work", "Receipts", "Travel"],
         },
         directoryLayout: {
@@ -1572,42 +1609,45 @@ describe("organize phased proposal flow", function() {
     const userDoc = (await db.collection("DriveUsers").doc(uid).get()).data();
     expect(stored?.phase).to.equal("directory_analysis");
     expect(stored?.phaseData.folderPreferences.confirmedConvention)
-        .to.equal("NN-Category root folders like 01-Documents");
+        .to.equal("NN-Category");
     expect(stored?.phaseData.directoryLayout.folderConvention)
-        .to.equal("NN-Category root folders like 01-Documents");
+        .to.equal("NN-Category");
+    expect(stored?.phaseData.directoryLayout.conventionDescription)
+        .to.equal("Two-digit zero-padded prefix, a dash, then the category name (e.g. 01-Documents).");
     expect(userDoc?.preferences.folderConvention)
-        .to.equal("NN-Category root folders like 01-Documents");
+        .to.equal("NN-Category");
     expect(getLastSentEmail(sender)?.html).to.include("first pass");
   });
 
-  it("DT00ub1 treats a folder_preferences revision as the confirmed convention", async function() {
+  it("DT00ub1 stores a folder_preferences convention revision as a token with description", async function() {
     const proposalId = `phase-0-revision-${Date.now()}`;
     const proposalDoc = makePhaseDoc("folder_preferences");
     await seedPhaseProposal(proposalId, proposalDoc);
     setFakeStructuredCompletions([
       {
         is_change: true,
-        new_convention: "Client - Project folder names",
+        new_convention: "NN|Category",
+        new_description: "Two-digit zero-padded prefix, a pipe, then the category name (e.g. 01|Finance).",
       },
       {
         has_existing_convention: true,
-        convention_description: "Client - Project folders",
+        convention_description: "Two-digit zero-padded prefix, a dash, then the category name (e.g. 01-Finance).",
         proposed_structure: [{
-          folder_path: "Acme - Contracts",
-          description: "Client contract documents",
+          folder_path: "01-Finance",
+          description: "Financial documents",
           source: "proposed",
         }],
-        summary: "Use client-project folder names.",
+        summary: "Use pipe folders.",
       },
     ]);
 
     await organizeProposalTestHooks.handleOrganizePhaseReply(
-        makeTestEmail("Use Client - Project folder names"),
+        makeTestEmail("Use pipe instead of dash"),
         sender,
         uid,
         proposalId,
         proposalDoc,
-        "Use Client - Project folder names",
+        "Use pipe instead of dash",
         false,
     );
 
@@ -1616,11 +1656,17 @@ describe("organize phased proposal flow", function() {
     const userDoc = (await db.collection("DriveUsers").doc(uid).get()).data();
     expect(stored?.phase).to.equal("directory_analysis");
     expect(stored?.phaseData.folderPreferences.confirmedConvention)
-        .to.equal("Client - Project folder names");
+        .to.equal("NN|Category");
     expect(stored?.phaseData.directoryLayout.folderConvention)
-        .to.equal("Client - Project folder names");
+        .to.equal("NN|Category");
+    expect(stored?.phaseData.directoryLayout.conventionDescription)
+        .to.equal("Two-digit zero-padded prefix, a pipe, then the category name (e.g. 01|Finance).");
+    expect(stored?.phaseData.directoryLayout.proposedStructure)
+        .to.deep.equal([{folder_path: "01|Finance", description: "Financial documents"}]);
     expect(userDoc?.preferences.folderConvention)
-        .to.equal("Client - Project folder names");
+        .to.equal("NN|Category");
+    expect(userDoc?.preferences.folderConventionDescription)
+        .to.equal("Two-digit zero-padded prefix, a pipe, then the category name (e.g. 01|Finance).");
   });
 
   it("DT00uba routes directory_analysis approval directly to filename_convention", async function() {
@@ -1672,6 +1718,49 @@ describe("organize phased proposal flow", function() {
     expect(stored?.phaseData.directoryLayout.addedDirectories).to.deep.equal(["01-Documents/Inbox"]);
     expect(stored?.phaseData.filenameConvention.convention).to.equal("YYYY.MM.DD - Description.ext");
     expect(getLastSentEmail(sender)?.html).to.include("filename convention");
+  });
+
+  it("DT00ubc preserves folder convention description during directory_analysis revisions", async function() {
+    const proposalId = `phase-1a-revision-${Date.now()}`;
+    const proposalDoc = makePhaseDoc("directory_analysis");
+    proposalDoc.phaseData!.folderPreferences!.confirmedConvention = "NN|Category";
+    proposalDoc.phaseData!.directoryLayout!.folderConvention = "NN|Category";
+    proposalDoc.phaseData!.directoryLayout!.conventionDescription =
+      "Two-digit zero-padded prefix, a pipe, then the category name (e.g. 01|Finance).";
+    await seedPhaseProposal(proposalId, proposalDoc);
+    setFakeStructuredCompletions([{
+      has_existing_convention: true,
+      convention_description: "Two-digit zero-padded prefix, a dash, then the category name (e.g. 01-Personal).",
+      proposed_structure: [
+        {folder_path: "01-Personal", description: "Personal", source: "proposed"},
+        {folder_path: "02-Work", description: "Work", source: "proposed"},
+        {folder_path: "03-Trading", description: "Trading", source: "proposed"},
+      ],
+      summary: "Keep only the requested roots.",
+    }]);
+
+    await organizeProposalTestHooks.handleOrganizePhaseReply(
+        makeTestEmail("Only keep Personal, Work, Trading"),
+        sender,
+        uid,
+        proposalId,
+        proposalDoc,
+        "Only keep Personal, Work, Trading",
+        false,
+    );
+
+    const stored = (await db.collection("OrganizeProposals").doc(proposalId).get()).data();
+    if (stored) stored.phaseData = await getOrganizePhaseData(proposalId);
+    expect(stored?.phase).to.equal("directory_analysis");
+    expect(stored?.phaseData.directoryLayout.conventionDescription)
+        .to.equal("Two-digit zero-padded prefix, a pipe, then the category name (e.g. 01|Finance).");
+    expect(stored?.phaseData.directoryLayout.proposedStructure).to.deep.equal([
+      {folder_path: "01|Personal", description: "Personal"},
+      {folder_path: "02|Work", description: "Work"},
+      {folder_path: "03|Trading", description: "Trading"},
+    ]);
+    expect(getLastSentEmail(sender)?.html).to.include("01|Personal");
+    expect(getLastSentEmail(sender)?.html).to.include("pipe");
   });
 
   it("DT00ubb routes in-flight directory_placement replies to filename_convention", async function() {

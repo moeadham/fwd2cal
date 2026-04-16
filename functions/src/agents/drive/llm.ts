@@ -38,6 +38,10 @@ import {
   ClassifyConventionChangeResult,
 } from "./prompts/classifyConventionChange/v1";
 import {
+  ClassifyFolderConventionChangeSchema,
+  ClassifyFolderConventionChangeResult,
+} from "./prompts/classifyFolderConventionChange/v1";
+import {
   ProposeFileActionSchema,
   ProposeFileActionResult,
 } from "./prompts/proposeFileAction/v1";
@@ -110,6 +114,10 @@ function fallbackFilenameExamples(convention: string): string[] {
   return FILENAME_EXAMPLE_INPUTS.map((input) =>
     fallbackFilenameExample(fallbackConvention, input.description, input.extension, today),
   );
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /** Formats one folder path segment for display. */
@@ -602,13 +610,16 @@ async function analyzeDirectoryStructure(
     folderConvention: string,
     userPrompt: string,
     uid: string | null = null,
+    conventionDescription = "",
 ): Promise<AnalyzeDirectoryStructureResult> {
   const {prompts, versions} = getPrompts();
   const userText = `## Current Drive Tree\n${treeSummary}\n\n` +
     `## Confirmed Folder Naming Convention\n${folderConvention || "(none)"}\n\n` +
+    `## Confirmed Convention Description\n${conventionDescription || "(none)"}\n\n` +
     `## User Instructions\n${userPrompt || "(none)"}\n`;
   logger.info("analyzeDirectoryStructure LLM input", {
     folderConvention: folderConvention || "(empty)",
+    conventionDescription: conventionDescription || "(empty)",
     userPromptPreview: userPrompt.slice(0, 200),
     treeSummaryLength: treeSummary.length,
   });
@@ -708,6 +719,29 @@ async function classifyConventionChange(
       uid,
       {promptVersion: versions.PROMPT_CLASSIFY_CONVENTION_CHANGE_VERSION},
   ) as ClassifyConventionChangeResult;
+}
+
+/** Classify whether a reply updates the folder convention. */
+async function classifyFolderConventionChange(
+    convention: string,
+    userReply: string,
+    uid: string | null = null,
+): Promise<ClassifyFolderConventionChangeResult> {
+  const {prompts, versions} = getPrompts();
+  const userText = `## Current Convention\n${convention}\n\n` +
+    `## User Reply\n${userReply}\n`;
+  const messages: ChatMessage[] = [
+    {role: "system", content: prompts.classifyFolderConventionChange.prompt},
+    {role: "user", content: userText},
+  ];
+  return await defaultCompletion<ClassifyFolderConventionChangeResult>(
+      messages,
+      prompts.classifyFolderConventionChange.model,
+      prompts.classifyFolderConventionChange.temperature ?? DEFAULT_TEMP,
+      ClassifyFolderConventionChangeSchema,
+      uid,
+      {promptVersion: versions.PROMPT_CLASSIFY_FOLDER_CONVENTION_CHANGE_VERSION},
+  ) as ClassifyFolderConventionChangeResult;
 }
 
 /** Propose the action for one file using the evolving directory tree. */
@@ -877,11 +911,11 @@ function normalizeFolderPrefixes(
     skipPaths?: Set<string>,
     folderConvention?: string,
 ): void {
-  const width = conventionPrefixWidth(folderConvention);
-  if (width === 0) return;
-  const paddingWidth = width;
+  const convention = parseNumericCategoryConvention(folderConvention);
+  if (!convention) return;
+  const paddingWidth = convention.width;
   let maxPrefix = 0;
-  const prefixedFolderPattern = /^(\d+)-/;
+  const prefixedFolderPattern = new RegExp(`^(\\d+)${escapeRegExp(convention.separator)}`);
 
   for (const folder of proposal.proposed_folders) {
     const rootSegment = folder.folder_path.split("/")[0];
@@ -909,7 +943,7 @@ function normalizeFolderPrefixes(
 
     const oldName = folder.folder_path;
     maxPrefix += 1;
-    const newName = `${String(maxPrefix).padStart(paddingWidth, "0")}-${oldName}`;
+    const newName = `${String(maxPrefix).padStart(paddingWidth, "0")}${convention.separator}${oldName}`;
     renameMap.set(oldName, newName);
     folder.folder_path = newName;
   }
@@ -960,7 +994,7 @@ function normalizeFolderPath(folderPath: string): string {
 
 /** Removes a numeric prefix from a folder path segment. */
 function stripFolderPrefix(segment: string): string {
-  return segment.replace(/^\d{2,3}-/, "");
+  return segment.replace(/^\d{1,4}[^A-Za-z0-9]+/, "");
 }
 
 /** Splits a normalized folder path into path segments. */
@@ -1253,15 +1287,52 @@ function applyFolderOperations(
 }
 
 /** Renumbers proposal folders while preserving requested roots. */
+interface NumericCategoryConvention {
+  width: number;
+  separator: string;
+}
+
 /**
- * Parse the digit width from a folder convention token (e.g. "N-Category" → 1,
- * "NN-Category" → 2, "NNN-Category" → 3). Returns 0 if the convention doesn't
- * start with N-tokens.
+ * Parse numeric category folder convention tokens (e.g. "NN-Category" or
+ * "NN|Category"). Returns null for non-numeric conventions.
  */
-function conventionPrefixWidth(folderConvention?: string): number {
-  if (!folderConvention) return 0;
-  const m = folderConvention.trim().match(/^(N+)[^A-Za-z0-9]/);
-  return m ? m[1].length : 0;
+function parseNumericCategoryConvention(folderConvention?: string): NumericCategoryConvention | null {
+  if (!folderConvention) return null;
+  const m = folderConvention.trim().match(/^(N+)(.+?)Category\b/);
+  if (!m || !m[2]) return null;
+  return {
+    width: m[1].length,
+    separator: m[2],
+  };
+}
+
+function rewriteRootSeparator(root: string, convention: NumericCategoryConvention): string {
+  const prefixMatch = root.match(new RegExp(`^(\\d{${convention.width}})(.*)$`));
+  if (!prefixMatch) return root;
+  const [, prefix, rest] = prefixMatch;
+  if (rest.startsWith(convention.separator)) return root;
+  if (!/^[^A-Za-z0-9]+/.test(rest)) return root;
+  const category = rest.replace(/^[^A-Za-z0-9]+/, "");
+  return category ? `${prefix}${convention.separator}${category}` : root;
+}
+
+function normalizeFolderConventionSeparators<T extends {folder_path: string}>(
+    folders: T[],
+    folderConvention?: string,
+): T[] {
+  const convention = parseNumericCategoryConvention(folderConvention);
+  if (!convention) return folders;
+
+  return folders.map((folder) => {
+    const segments = getFolderSegments(folder.folder_path);
+    if (segments.length === 0) return folder;
+    const rewrittenRoot = rewriteRootSeparator(segments[0], convention);
+    if (rewrittenRoot === segments[0]) return folder;
+    return {
+      ...folder,
+      folder_path: [rewrittenRoot, ...segments.slice(1)].join("/"),
+    };
+  });
 }
 
 function renumberFoldersContiguously(
@@ -1269,10 +1340,11 @@ function renumberFoldersContiguously(
     skipPaths?: Set<string>,
     folderConvention?: string,
 ): void {
-  const width = conventionPrefixWidth(folderConvention);
-  if (width === 0) return;
-  const paddingWidth = width;
-  const prefixedFolderPattern = /^(\d+)-/;
+  const convention = parseNumericCategoryConvention(folderConvention);
+  if (!convention) return;
+  const paddingWidth = convention.width;
+  const escapedSeparator = escapeRegExp(convention.separator);
+  const prefixedFolderPattern = new RegExp(`^(\\d+)${escapedSeparator}`);
   const compareFolderPaths = (left: string, right: string): number => {
     const leftSegments = getFolderSegments(left);
     const rightSegments = getFolderSegments(right);
@@ -1319,7 +1391,7 @@ function renumberFoldersContiguously(
   for (let index = 0; index < orderedSegments.length; index++) {
     const segment = orderedSegments[index];
     const newPrefix = String(index + 1).padStart(paddingWidth, "0");
-    const renamed = `${newPrefix}-${segment.replace(prefixedFolderPattern, "")}`;
+    const renamed = `${newPrefix}${convention.separator}${segment.replace(prefixedFolderPattern, "")}`;
     if (renamed !== segment) {
       renameMap.set(segment, renamed);
     }
@@ -1652,6 +1724,7 @@ export {
   reviseOrganization,
   renderFolderTreePlainText,
   normalizeFolderPrefixes,
+  normalizeFolderConventionSeparators,
   renumberFoldersContiguously,
   mergeRevisedProposal,
   applyFolderOperations,
@@ -1661,6 +1734,7 @@ export {
   evaluateDirectoryPlacement,
   finalizeDirectoryMap,
   classifyConventionChange,
+  classifyFolderConventionChange,
   proposeFileAction,
   generateFilenameExamples,
 };
