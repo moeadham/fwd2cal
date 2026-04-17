@@ -31,6 +31,7 @@ Rules:
 - Echo the confirmed convention description verbatim in convention_description. Only derive a fresh description if no input description was provided.
 - The separator character in the convention between digit prefix and category name must appear verbatim in every proposed root folder name. If the token is NN|Category, every proposed root folder starts with two digits followed by a pipe.
 - Prefer stable, broad root categories over one-off folders.
+- Include subfolders if applicable.
 - Mark folders that already exist as source "existing" and new folders as source "proposed".
 - Keep paths relative to My Drive. Do not include "My Drive/" in folder_path.
 - Include descriptions that explain what belongs in each folder.
