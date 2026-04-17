@@ -18,7 +18,7 @@ type DetectFolderConventionResult = z.infer<typeof DetectFolderConventionSchema>
 
 const prompt: DrivePromptConfig = {
   model: "openai/o4-mini",
-  temperature: 0.2,
+  temperature: 0.1,
   prompt: `You analyze a flat list of the user's top-level Google Drive folder names and decide whether they share a naming convention.
 
 You will receive a "## Top-Level Folders" list. That list is the ONLY source of truth. A "## Fallback Convention" block may also appear — use it only for suggested_convention when the folders show no detectable pattern, and never let it override what the folders actually show.

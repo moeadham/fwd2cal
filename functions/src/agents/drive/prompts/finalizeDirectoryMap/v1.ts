@@ -12,7 +12,7 @@ type FinalizeDirectoryMapResult = z.infer<typeof FinalizeDirectoryMapSchema>;
 
 const prompt: DrivePromptConfig = {
   model: "openai/o4-mini",
-  temperature: 0.2,
+  temperature: 0.1,
   prompt: `You are finalizing the user's Google Drive directory map.
 
 You will receive the proposed structure, recommended directory moves, a file summary, and optional user feedback. Add only directories needed for completeness, then return the complete final directory list.

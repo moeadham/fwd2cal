@@ -18,7 +18,7 @@ type ProposeFileActionResult = z.infer<typeof ProposeFileActionSchema>;
 
 const prompt: DrivePromptConfig = {
   model: "openai/o4-mini",
-  temperature: 0.2,
+  temperature: 0.1,
   prompt: `You are organizing one Google Drive file at a time.
 
 You will receive the current evolving directory tree, the approved filename convention, metadata for one file, and any available content summary. Pick the best target directory and filename.

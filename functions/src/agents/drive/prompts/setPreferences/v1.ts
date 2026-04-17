@@ -24,7 +24,7 @@ type SetPreferencesResult = z.infer<typeof SetPreferencesSchema>;
 
 const prompt: DrivePromptConfig = {
   model: "openai/gpt-4.1-mini",
-  temperature: 0.2,
+  temperature: 0.1,
   prompt: `You are updating fwd2drive preferences from an email.
 
 The user may ask to set folder naming conventions, filename conventions, or both.

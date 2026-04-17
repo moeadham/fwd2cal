@@ -15,7 +15,7 @@ type AnalyzeDirectoryStructureResult = z.infer<typeof AnalyzeDirectoryStructureS
 
 const prompt: DrivePromptConfig = {
   model: "openai/o4-mini",
-  temperature: 0.2,
+  temperature: 0.1,
   prompt: `You are designing a clean Google Drive directory map before any file moves happen.
 
 You will receive:

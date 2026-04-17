@@ -18,7 +18,7 @@ type EvaluateDirectoryPlacementResult = z.infer<typeof EvaluateDirectoryPlacemen
 
 const prompt: DrivePromptConfig = {
   model: "openai/o4-mini",
-  temperature: 0.2,
+  temperature: 0.1,
   prompt: `You are reviewing whether the user's existing Google Drive folders should be moved or renamed to fit an approved directory structure.
 
 You will receive the current folder tree, the proposed directory structure, and optional user feedback. Recommend only directory-level moves or renames that clearly improve consistency. Do not invent file moves.
