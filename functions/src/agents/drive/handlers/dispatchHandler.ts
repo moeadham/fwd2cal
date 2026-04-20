@@ -205,9 +205,7 @@ export async function dispatchOrganizeActionTask(
   const isLocal = ENVIRONMENT_NAME.value() === "local" ||
     ENVIRONMENT_NAME.value() === "test";
   if (isLocal) {
-    const {transformedEmail} = await fetchEmailById(data.emailId);
-    transformedEmail.text = data.action;
-    await handleOrganizeProposalReply(transformedEmail, data.proposalId);
+    await handleOrganizeActionTask(data);
     return;
   }
   const queue = getFunctions().taskQueue(
@@ -478,7 +476,7 @@ export async function handleOrganizeActionTask(
 
   const {transformedEmail} = await fetchEmailById(emailId);
   transformedEmail.text = action;
-  await handleOrganizeProposalReply(transformedEmail, proposalId);
+  await handleOrganizeProposalReply(transformedEmail, proposalId, true);
 
   logger.info("Drive organize action task: Complete", {proposalId, action});
 }

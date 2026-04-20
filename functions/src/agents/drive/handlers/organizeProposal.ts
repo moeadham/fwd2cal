@@ -611,9 +611,48 @@ async function handleCostEstimateReply(
     proposalDoc: OrganizeProposalDoc,
     replyBody: string,
     isApproval: boolean,
+    fromActionTask = false,
 ): Promise<OrganizeProcessingResult> {
   if (isApproval) {
-    return startChunkedExecution(email, sender, uid, proposalId, proposalDoc);
+    if (fromActionTask) {
+      return startChunkedExecution(email, sender, uid, proposalId, proposalDoc);
+    }
+
+    const approvedStructure =
+      proposalDoc.phaseData?.directoryLayout?.approvedStructure ||
+      proposalDoc.phaseData?.directoryLayout?.proposedStructure ||
+      [];
+    if (approvedStructure.length === 0) {
+      await sendOrganizeEmailResponse(
+          sender,
+          email,
+          "No problem. Reply with the folder structure changes you'd like, or reply &quot;approve&quot; to keep it.",
+      );
+      return emptyResult("Directory analysis state missing");
+    }
+
+    const convention =
+      proposalDoc.phaseData?.filenameConvention?.convention ||
+      DEFAULT_FILENAME_CONVENTION;
+    const cost = proposalDoc.cost;
+    if (!cost) {
+      logger.warn("Drive organize: Cost estimate missing for reply approval", {proposalId});
+      return emptyResult("Cost estimate missing");
+    }
+
+    let examples: string[] = [];
+    try {
+      examples = await generateFilenameExamples(convention, uid);
+    } catch (error) {
+      logger.warn("Drive organize: Filename examples unavailable for cost estimate resend", {
+        proposalId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    await sendOrganizeCostEstimateEmail(
+        sender, email, proposalId, approvedStructure, convention, cost, examples,
+    );
+    return emptyResult("Awaiting button click");
   }
 
   const layout = proposalDoc.phaseData?.directoryLayout;
@@ -662,6 +701,7 @@ async function handleOrganizePhaseReply(
     proposalDoc: OrganizeProposalDoc,
     replyBody: string,
     isApproval: boolean,
+    fromActionTask = false,
 ): Promise<OrganizeProcessingResult | null> {
   switch (proposalDoc.phase) {
     case "folder_preferences":
@@ -675,7 +715,9 @@ async function handleOrganizePhaseReply(
     case "filename_convention":
       return handleFilenameConventionReply(email, sender, uid, proposalId, proposalDoc, replyBody, isApproval);
     case "cost_estimate":
-      return handleCostEstimateReply(email, sender, uid, proposalId, proposalDoc, replyBody, isApproval);
+      return handleCostEstimateReply(
+          email, sender, uid, proposalId, proposalDoc, replyBody, isApproval, fromActionTask,
+      );
     default:
       return null;
   }
@@ -701,6 +743,7 @@ export const organizeProposalTestHooks = {
 export async function handleOrganizeProposalReply(
     email: TransformedEmail,
     proposalId: string,
+    fromActionTask = false,
 ): Promise<OrganizeProcessingResult> {
   const sender = getSenderFromRawEmail(email);
   if (!sender) {
@@ -801,6 +844,7 @@ export async function handleOrganizeProposalReply(
       proposalDoc,
       replyBody,
       isApproval,
+      fromActionTask,
   );
   if (phaseResult) {
     return phaseResult;

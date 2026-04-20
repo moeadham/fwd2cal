@@ -1991,6 +1991,108 @@ describe("organize phased proposal flow", function() {
     expect(getLastSentEmail(sender)?.html).to.not.include("07-Personal");
   });
 
+  it("DT00ubeD resends cost estimate for email-reply approval without executing", async function() {
+    const proposalId = `phase-cost-reply-approval-${Date.now()}`;
+    const proposalDoc = makePhaseDoc("cost_estimate");
+    proposalDoc.cost = {
+      totalFiles: 2,
+      filesToMove: 1,
+      filesToRename: 1,
+      filesToKeep: 0,
+      textFiles: 2,
+      imageFiles: 0,
+      costPerTextFile: 0.01,
+      costPerImageFile: 0.03,
+      totalCost: 0.02,
+    };
+    proposalDoc.phaseData!.costEstimate = {
+      totalFiles: 2,
+      textFiles: 2,
+      imageFiles: 0,
+      totalCost: 0.02,
+    };
+    proposalDoc.phaseData!.directoryLayout!.approvedStructure = [
+      {folder_path: "01-Documents", description: "Documents"},
+      {folder_path: "02-Photos", description: "Photos"},
+    ];
+    proposalDoc.phaseData!.filenameConvention!.convention = "YYYY-MM-DD_description.ext";
+    await seedPhaseProposal(proposalId, proposalDoc);
+    setFakeStructuredCompletions([{
+      examples: [
+        "2026-04-20_tax_return.pdf",
+        "2026-04-20_project_plan.docx",
+        "2026-04-20_receipt.jpg",
+      ],
+    }]);
+
+    const result = await organizeProposalTestHooks.handleOrganizePhaseReply(
+        makeTestEmail("approve"),
+        sender,
+        uid,
+        proposalId,
+        proposalDoc,
+        "approve",
+        true,
+    );
+
+    const stored = (await db.collection("OrganizeProposals").doc(proposalId).get()).data();
+    if (stored) stored.phaseData = await getOrganizePhaseData(proposalId);
+    expect(result?.proposalSent).to.equal(false);
+    expect(result?.error).to.equal("Awaiting button click");
+    expect(stored?.status).to.equal("pending");
+    expect(stored?.phase).to.equal("cost_estimate");
+    expect(stored?.phaseData.execution).to.equal(undefined);
+    expect(getLastSentEmail(sender)?.html).to.include("final check");
+    expect(getLastSentEmail(sender)?.html).to.include("Approve &amp; Organize");
+    expect(getLastSentEmail(sender)?.html).to.not.include("reorganizing your Google Drive now");
+  });
+
+  it("DT00ubeE executes cost estimate approval from action task", async function() {
+    const proposalId = `phase-cost-button-approval-${Date.now()}`;
+    const proposalDoc = makePhaseDoc("cost_estimate");
+    proposalDoc.cost = {
+      totalFiles: 0,
+      filesToMove: 0,
+      filesToRename: 0,
+      filesToKeep: 0,
+      textFiles: 0,
+      imageFiles: 0,
+      costPerTextFile: 0.01,
+      costPerImageFile: 0.03,
+      totalCost: 0,
+    };
+    proposalDoc.phaseData!.costEstimate = {
+      totalFiles: 0,
+      textFiles: 0,
+      imageFiles: 0,
+      totalCost: 0,
+    };
+    proposalDoc.phaseData!.directoryLayout!.approvedStructure = [
+      {folder_path: "01-Documents", description: "Documents"},
+    ];
+    proposalDoc.phaseData!.filenameConvention!.convention = "YYYY-MM-DD_description.ext";
+    await seedPhaseProposal(proposalId, proposalDoc);
+
+    const result = await organizeProposalTestHooks.handleOrganizePhaseReply(
+        makeTestEmail("approve"),
+        sender,
+        uid,
+        proposalId,
+        proposalDoc,
+        "approve",
+        true,
+        true,
+    );
+
+    const stored = (await db.collection("OrganizeProposals").doc(proposalId).get()).data();
+    if (stored) stored.phaseData = await getOrganizePhaseData(proposalId);
+    expect(result?.proposalSent).to.equal(false);
+    expect(stored?.status).to.equal("completed");
+    expect(stored?.phase).to.equal("completed");
+    expect(stored?.phaseData.execution.totalChunks).to.equal(0);
+    expect(getLastSentEmail(sender)?.html).to.include("reorganizing your Google Drive now");
+  });
+
 });
 
 describe("organize sequential execution proposal builder", function() {
