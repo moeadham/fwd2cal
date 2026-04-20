@@ -30,6 +30,7 @@ Rules:
 - Follow the confirmed folder naming convention exactly.
 - Echo the confirmed convention description verbatim in convention_description. Only derive a fresh description if no input description was provided.
 - The separator character in the convention between digit prefix and category name must appear verbatim in every proposed root folder name. If the token is NN|Category, every proposed root folder starts with two digits followed by a pipe.
+- When the convention includes a numeric prefix token such as NN-Category, assign root prefixes contiguously from 01 in proposed_structure order. Do not preserve existing prefix numbers from the current tree; the system will renumber deterministically as a safety net.
 - Prefer stable, broad root categories over one-off folders.
 - Include subfolders if applicable.
 - Mark folders that already exist as source "existing" and new folders as source "proposed".

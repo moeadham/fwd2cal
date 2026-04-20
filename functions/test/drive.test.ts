@@ -1838,46 +1838,157 @@ describe("organize phased proposal flow", function() {
     expect(getLastSentEmail(sender)?.html).to.include("YYYY-MM-DD_description.ext");
   });
 
-  it("DT00ube routes cost_estimate filename revisions back to filename_convention", async function() {
+  it("DT00ube routes cost_estimate revisions through directory_analysis", async function() {
     const proposalId = `phase-cost-${Date.now()}`;
     const proposalDoc = makePhaseDoc("cost_estimate");
+    proposalDoc.phaseData!.directoryLayout!.folderConvention = "NN-Category";
+    proposalDoc.phaseData!.directoryLayout!.conventionDescription =
+      "Two-digit zero-padded prefix, a dash, then the category name (e.g. 01-Documents).";
+    proposalDoc.phaseData!.directoryLayout!.proposedStructure = [
+      {folder_path: "01-Documents", description: "Documents"},
+      {folder_path: "02-Photos", description: "Photos"},
+    ];
     await seedPhaseProposal(proposalId, proposalDoc);
+    setFakeStructuredCompletions([{
+      has_existing_convention: true,
+      convention_description: "Two-digit zero-padded prefix, a dash, then the category name (e.g. 01-Personal).",
+      proposed_structure: [
+        {folder_path: "01-Documents", description: "Documents", source: "proposed"},
+        {folder_path: "02-Media", description: "Media files", source: "proposed"},
+      ],
+      summary: "Moved photos into Media.",
+    }]);
 
     const result = await organizeProposalTestHooks.handleOrganizePhaseReply(
-        makeTestEmail("change the filename convention"),
+        makeTestEmail("split photos into a new bucket"),
         sender,
         uid,
         proposalId,
         proposalDoc,
-        "change the filename convention",
+        "split photos into a new bucket",
         false,
     );
 
     expect(result?.proposalSent).to.equal(false);
     const stored = (await db.collection("OrganizeProposals").doc(proposalId).get()).data();
     if (stored) stored.phaseData = await getOrganizePhaseData(proposalId);
-    expect(stored?.phase).to.equal("filename_convention");
+    expect(stored?.phase).to.equal("directory_analysis");
+    expect(stored?.phaseData.directoryLayout.returnToCostEstimate).to.equal(true);
+    expect(stored?.phaseData.directoryLayout.proposedStructure).to.deep.equal([
+      {folder_path: "01-Documents", description: "Documents"},
+      {folder_path: "02-Media", description: "Media files"},
+    ]);
+    expect(stored?.phaseData.filenameConvention.convention).to.equal("YYYY.MM.DD - Description.ext");
+    expect(getLastSentEmail(sender)?.html).to.include("revised folder structure");
+    expect(getLastSentEmail(sender)?.html).to.include("02-Media");
   });
 
-  it("DT00ubeA routes cost_estimate folder revisions back to directory_analysis", async function() {
-    const proposalId = `phase-cost-folders-${Date.now()}`;
-    const proposalDoc = makePhaseDoc("cost_estimate");
+  it("DT00ubeB returns revised directory approvals to cost_estimate", async function() {
+    const proposalId = `phase-cost-approve-${Date.now()}`;
+    const proposalDoc = makePhaseDoc("directory_analysis");
+    proposalDoc.phaseData!.directoryLayout!.returnToCostEstimate = true;
+    proposalDoc.phaseData!.directoryLayout!.folderConvention = "NN-Category";
+    proposalDoc.phaseData!.directoryLayout!.proposedStructure = [
+      {folder_path: "01-Documents", description: "Documents"},
+      {folder_path: "02-Media", description: "Media files"},
+    ];
+    proposalDoc.phaseData!.filenameConvention!.convention = "YYYY-MM-DD_description.ext";
     await seedPhaseProposal(proposalId, proposalDoc);
+    setFakeStructuredCompletions([
+      {
+        directory_moves: [{
+          current_path: "Inbox",
+          proposed_path: "01-Documents/Inbox",
+          reason: "Keep loose files under Documents",
+        }],
+        no_changes_needed: false,
+        summary: "Move Inbox under Documents.",
+      },
+      {
+        final_directories: [
+          {folder_path: "04-Documents", description: "Documents"},
+          {folder_path: "04-Documents/Inbox", description: "Imported inbox documents"},
+          {folder_path: "07-Media", description: "Media files"},
+        ],
+        added_directories: ["04-Documents/Inbox"],
+        summary: "Finalized folder map.",
+      },
+    ]);
 
     const result = await organizeProposalTestHooks.handleOrganizePhaseReply(
-        makeTestEmail("change the folders"),
+        makeTestEmail("approve"),
         sender,
         uid,
         proposalId,
         proposalDoc,
-        "change the folders",
+        "approve",
+        true,
+    );
+
+    expect(result?.proposalSent).to.equal(true);
+    const stored = (await db.collection("OrganizeProposals").doc(proposalId).get()).data();
+    if (stored) stored.phaseData = await getOrganizePhaseData(proposalId);
+    expect(stored?.phase).to.equal("cost_estimate");
+    expect(stored?.phaseData.directoryLayout.returnToCostEstimate).to.equal(undefined);
+    expect(stored?.phaseData.directoryLayout.approvedStructure).to.deep.equal([
+      {folder_path: "01-Documents", description: "Documents"},
+      {folder_path: "01-Documents/Inbox", description: "Imported inbox documents"},
+      {folder_path: "02-Media", description: "Media files"},
+    ]);
+    expect(stored?.phaseData.filenameConvention.convention).to.equal("YYYY-MM-DD_description.ext");
+    expect(getLastSentEmail(sender)?.html).to.include("final check");
+    expect(getLastSentEmail(sender)?.html).to.include("01-Documents");
+    expect(getLastSentEmail(sender)?.html).to.include("Inbox");
+    expect(getLastSentEmail(sender)?.html).to.include("02-Media");
+    expect(getLastSentEmail(sender)?.html).to.not.include("04-Documents");
+    expect(getLastSentEmail(sender)?.html).to.not.include("07-Media");
+    expect(getLastSentEmail(sender)?.html).to.not.include("start generating file proposals");
+  });
+
+  it("DT00ubeC renumbers cost_estimate directory revisions contiguously", async function() {
+    const proposalId = `phase-cost-renumber-${Date.now()}`;
+    const proposalDoc = makePhaseDoc("cost_estimate");
+    proposalDoc.phaseData!.directoryLayout!.folderConvention = "NN-Category";
+    proposalDoc.phaseData!.directoryLayout!.conventionDescription =
+      "Two-digit zero-padded prefix, a dash, then the category name (e.g. 01-Documents).";
+    proposalDoc.phaseData!.directoryLayout!.proposedStructure = [
+      {folder_path: "04-Work", description: "Work"},
+      {folder_path: "07-Personal", description: "Personal"},
+    ];
+    await seedPhaseProposal(proposalId, proposalDoc);
+    setFakeStructuredCompletions([{
+      has_existing_convention: true,
+      convention_description: "Two-digit zero-padded prefix, a dash, then the category name (e.g. 01-Personal).",
+      proposed_structure: [
+        {folder_path: "04-Work", description: "Work", source: "existing"},
+        {folder_path: "07-Personal", description: "Personal", source: "existing"},
+        {folder_path: "Trading", description: "Trading", source: "proposed"},
+      ],
+      summary: "Added Trading and normalized prefixes.",
+    }]);
+
+    await organizeProposalTestHooks.handleOrganizePhaseReply(
+        makeTestEmail("add trading and make the roots contiguous"),
+        sender,
+        uid,
+        proposalId,
+        proposalDoc,
+        "add trading and make the roots contiguous",
         false,
     );
 
-    expect(result?.proposalSent).to.equal(false);
     const stored = (await db.collection("OrganizeProposals").doc(proposalId).get()).data();
-    expect(stored?.phase).to.equal("directory_analysis");
-    expect(getLastSentEmail(sender)?.html).to.include("revised folder structure");
+    if (stored) stored.phaseData = await getOrganizePhaseData(proposalId);
+    expect(stored?.phaseData.directoryLayout.proposedStructure).to.deep.equal([
+      {folder_path: "01-Work", description: "Work"},
+      {folder_path: "02-Personal", description: "Personal"},
+      {folder_path: "03-Trading", description: "Trading"},
+    ]);
+    expect(getLastSentEmail(sender)?.html).to.include("01-Work");
+    expect(getLastSentEmail(sender)?.html).to.include("02-Personal");
+    expect(getLastSentEmail(sender)?.html).to.include("03-Trading");
+    expect(getLastSentEmail(sender)?.html).to.not.include("04-Work");
+    expect(getLastSentEmail(sender)?.html).to.not.include("07-Personal");
   });
 
 });

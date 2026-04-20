@@ -188,6 +188,7 @@ export interface DirectoryLayoutData {
   approvedStructure?: z.infer<typeof OrganizeFolderSchema>[];
   addedDirectories?: string[];
   summary?: string;
+  returnToCostEstimate?: boolean;
 }
 
 export interface FolderPreferencesData {

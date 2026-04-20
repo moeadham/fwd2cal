@@ -9,6 +9,7 @@ import {applyTemplate, isDriveAuthError} from "../driveUtils";
 import {driveMailTemplates, driveOrganizeActionUrl} from "../mailTemplates";
 import {
   DriveFileEntry,
+  DriveOrganizeProposal,
   OrganizeEmbeddedData,
   OrganizeProcessingResult,
   OrganizeProposalDoc,
@@ -60,6 +61,20 @@ const DEFAULT_FILENAME_CONVENTION = "YYYY.MM.DD - Description.ext";
 
 function getNonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function renumberDirectoryStructure(
+    folders: DriveOrganizeProposal["proposed_folders"],
+    summary: string,
+    folderConvention?: string,
+): DriveOrganizeProposal["proposed_folders"] {
+  const proposal: DriveOrganizeProposal = {
+    proposed_folders: folders,
+    file_actions: [],
+    summary,
+  };
+  renumberFoldersContiguously(proposal, undefined, folderConvention);
+  return proposal.proposed_folders;
 }
 
 /** Loads the Drive tree summary from GCS intermediate state. */
@@ -336,17 +351,64 @@ async function handleDirectoryAnalysisReply(
           treeSummary,
           uid,
       );
+      const approvedStructure = renumberDirectoryStructure(
+          finalized.final_directories,
+          finalized.summary,
+          layout.folderConvention || proposalDoc.phaseData?.folderPreferences?.confirmedConvention || "",
+      );
       const preferences = await getDriveUserPreferences(uid);
       const convention =
         getNonEmptyString(proposalDoc.phaseData?.filenameConvention?.convention) ||
         getNonEmptyString(preferences.filenameConvention) ||
         DEFAULT_FILENAME_CONVENTION;
+      if (layout.returnToCostEstimate === true) {
+        const state = await getOrganizeIntermediateState(proposalId);
+        const fileEntries = (Array.isArray(state.fileEntries) ? state.fileEntries : []) as DriveFileEntry[];
+        const cost = calculateOrganizeCostEstimate(fileEntries);
+        const directoryLayout = {
+          ...layout,
+          directoryMoves: placement.directory_moves,
+          approvedStructure,
+          addedDirectories: finalized.added_directories,
+          summary: finalized.summary,
+        };
+        delete directoryLayout.returnToCostEstimate;
+        const nextPhaseData = {
+          ...proposalDoc.phaseData,
+          directoryLayout,
+          filenameConvention: {
+            convention,
+          },
+          costEstimate: {
+            totalFiles: cost.totalFiles,
+            textFiles: cost.textFiles,
+            imageFiles: cost.imageFiles,
+            totalCost: cost.totalCost,
+          },
+        };
+        await updateOrganizeProposalStatus(proposalId, "pending", {
+          phase: "cost_estimate",
+          cost,
+          phaseData: nextPhaseData,
+        });
+        const examples = await generateFilenameExamples(convention, uid);
+        await sendOrganizeCostEstimateEmail(
+            sender, email, proposalId, approvedStructure, convention, cost, examples,
+        );
+        return {
+          totalFiles: cost.totalFiles,
+          filesToMove: cost.filesToMove,
+          filesToRename: cost.filesToRename,
+          totalCost: cost.totalCost,
+          proposalSent: true,
+        };
+      }
       const nextPhaseData = {
         ...proposalDoc.phaseData,
         directoryLayout: {
           ...layout,
           directoryMoves: placement.directory_moves,
-          approvedStructure: finalized.final_directories,
+          approvedStructure,
           addedDirectories: finalized.added_directories,
           summary: finalized.summary,
         },
@@ -394,13 +456,18 @@ async function handleDirectoryAnalysisReply(
     proposalDoc.phaseData?.folderPreferences?.confirmedConvention ||
     "";
   const conventionDescription = layout.conventionDescription || result.convention_description || "";
-  const proposedStructure = normalizeFolderConventionSeparators(
+  const normalizedStructure = normalizeFolderConventionSeparators(
       result.proposed_structure,
       folderConvention,
   ).map((folder) => ({
     folder_path: folder.folder_path,
     description: folder.description,
   }));
+  const proposedStructure = renumberDirectoryStructure(
+      normalizedStructure,
+      result.summary,
+      folderConvention,
+  );
   const nextPhaseData = {
     ...proposalDoc.phaseData,
     directoryLayout: {
@@ -549,24 +616,8 @@ async function handleCostEstimateReply(
     return startChunkedExecution(email, sender, uid, proposalId, proposalDoc);
   }
 
-  const lowered = replyBody.toLowerCase();
-  if (lowered.includes("folder") || lowered.includes("director")) {
-    const layout = proposalDoc.phaseData?.directoryLayout;
-    if (layout?.proposedStructure) {
-      await updateOrganizeProposalStatus(proposalId, "pending", {
-        phase: "directory_analysis",
-      });
-      await sendOrganizePhase1aEmail(
-          sender,
-          email,
-          proposalId,
-          layout.conventionDescription || "",
-          layout.summary || "",
-          layout.proposedStructure,
-          true,
-      );
-      return emptyResult("Returned to directory analysis");
-    }
+  const layout = proposalDoc.phaseData?.directoryLayout;
+  if (!layout?.proposedStructure) {
     await sendOrganizeEmailResponse(
         sender,
         email,
@@ -575,15 +626,31 @@ async function handleCostEstimateReply(
     return emptyResult("Directory analysis state missing");
   }
 
+  const nextPhaseData = {
+    ...proposalDoc.phaseData,
+    directoryLayout: {
+      ...layout,
+      returnToCostEstimate: true,
+    },
+  };
+  const updatedProposalDoc = {
+    ...proposalDoc,
+    phase: "directory_analysis" as const,
+    phaseData: nextPhaseData,
+  };
   await updateOrganizeProposalStatus(proposalId, "pending", {
-    phase: "filename_convention",
+    phase: "directory_analysis",
+    phaseData: nextPhaseData,
   });
-  const convention =
-    proposalDoc.phaseData?.filenameConvention?.convention ||
-    DEFAULT_FILENAME_CONVENTION;
-  const examples = await generateFilenameExamples(convention, uid);
-  await sendOrganizePhase2Email(sender, email, proposalId, convention, examples);
-  return emptyResult("Returned to filename convention");
+  return handleDirectoryAnalysisReply(
+      email,
+      sender,
+      uid,
+      proposalId,
+      updatedProposalDoc,
+      replyBody,
+      false,
+  );
 }
 
 /** Routes replies to the active organize-drive phase. */
