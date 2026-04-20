@@ -264,6 +264,26 @@ Examples:
 %EMBEDDED_DATA%
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
   },
+  organizePlanReview: {
+    html: `Your organization plan is ready.
+<br><br>
+Review the attached CSV before moving files. Nothing has changed in Google Drive yet.
+<br><br>
+<b>%TOTAL_FILES% files planned</b> &nbsp;|&nbsp; <b>%FILES_TO_MOVE% moves</b> &nbsp;|&nbsp; <b>%FILES_TO_RENAME% renames</b> &nbsp;|&nbsp; <b>%FILES_TO_KEEP% unchanged</b>
+<br><br>
+<b>Preview:</b>
+<br>
+<div style="font-family:monospace;background:#f7f7f7;padding:16px;border-radius:8px;font-size:13px;line-height:1.6;">
+%ACTION_PREVIEW%
+</div>
+<br>
+<a href="%MOVE_LINK%" style="display:inline-block; padding:10px 20px; margin:5px 0; background-color:#3498db; color:white; text-align:center; text-decoration:none; font-weight:bold; border-radius:5px; border:none; cursor:pointer;">Move Files</a>
+<br><br>
+<span style="color:#999;font-size:13px;">Need changes? Reply with the exact file and the new filename or approved folder path.</span>
+%REVISION_NOTE%
+%EMBEDDED_DATA%
+<br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
+  },
   organizeError: {
     html: `Sorry &mdash; there was an error while scanning your Google Drive. Please try again by sending another &quot;organize my drive&quot; email.
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,

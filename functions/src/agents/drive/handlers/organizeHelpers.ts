@@ -41,6 +41,58 @@ export async function sendOrganizeEmailResponse(
     headers: getEmailThreadHeaders(originalEmail.headers),
   });
 }
+/** Escapes text for small HTML template fragments. */
+function escapeHtml(value: string): string {
+  return value
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+}
+/** Sends the plan-review email with an attached CSV and Move Files action link. */
+export async function sendOrganizePlanReviewEmail(
+    sender: string,
+    originalEmail: TransformedEmail,
+    proposalId: string,
+    proposal: DriveOrganizeProposal,
+    csvBuffer: Buffer,
+    counts: {totalFiles: number; filesToMove: number; filesToRename: number; filesToKeep: number},
+    revisionNote = "",
+): Promise<void> {
+  const moveToken = signActionToken(proposalId, "move");
+  const moveLink = `${driveOrganizeActionUrl()}?proposalId=${proposalId}&action=move&token=${moveToken}`;
+  const preview = proposal.file_actions.slice(0, 20).map((action) =>
+    `${escapeHtml(action.current_path)}/${escapeHtml(action.current_name)} &rarr; ` +
+    `${escapeHtml(action.new_folder)}/${escapeHtml(action.new_name)} ` +
+    `(${escapeHtml(action.action)})`,
+  ).join("<br>") || "(no file actions)";
+  const noteHtml = revisionNote ?
+    `<br><br><span style="color:#666;font-size:13px;">${escapeHtml(revisionNote)}</span>` :
+    "";
+  const html = applyTemplate(driveMailTemplates.organizePlanReview.html, {
+    TOTAL_FILES: String(counts.totalFiles),
+    FILES_TO_MOVE: String(counts.filesToMove),
+    FILES_TO_RENAME: String(counts.filesToRename),
+    FILES_TO_KEEP: String(counts.filesToKeep),
+    ACTION_PREVIEW: preview,
+    MOVE_LINK: moveLink,
+    REVISION_NOTE: noteHtml,
+    EMBEDDED_DATA: phaseEmbeddedHtml(proposalId),
+  });
+  const threadedHtml = threadEmailHtml(originalEmail, html);
+  await sendEmailResend({
+    to: sender,
+    from: AGENT_EMAIL_ADDRESS.value(),
+    subject: originalEmail.subject || "Re: Organize your Drive",
+    html: threadedHtml,
+    headers: getEmailThreadHeaders(originalEmail.headers),
+    attachments: [{
+      filename: `proposal-${proposalId}.csv`,
+      content: csvBuffer,
+      content_type: "text/csv",
+    }],
+  });
+}
 /** Checks whether a stored OAuth scope includes full Drive access. */
 export function hasFullDriveScope(tokenScope: string): boolean {
   if (!tokenScope) return false;
@@ -335,14 +387,6 @@ export function formatSummaryHtml(summary: string): string {
   let html = summary.replace(/\.\s+/g, ".<br>");
   html = html.replace(/\d{4}\.\d{2}\.\d{2}\s*-\s*\S+/g, (match) => `<b>${match}</b>`);
   return html;
-}
-/** Escapes text for small HTML template fragments. */
-function escapeHtml(value: string): string {
-  return value
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
 }
 /** Renders directory paths and descriptions for phase emails. */
 function renderDirectoryList(

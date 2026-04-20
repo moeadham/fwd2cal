@@ -57,7 +57,14 @@ import {getLastSentEmail, clearMockData} from "../src/util/resendMock";
 import {organizeProposalTestHooks} from "../src/agents/drive/handlers/organizeProposal";
 import {handleSetPreferences} from "../src/agents/drive/handlers/setPreferencesHandler";
 import {persistMovePreferenceUpdates} from "../src/agents/drive/handlers/moveHandler";
-import {buildSequentialExecutionProposal, processExecutionChunk} from "../src/agents/drive/handlers/organizeExecution";
+import {
+  applyPlanPatches,
+  buildSequentialExecutionProposal,
+  loadSavedPlan,
+  processMoveChunk,
+  processPlanningChunk,
+  writeFileActionsCsv,
+} from "../src/agents/drive/handlers/organizeExecution";
 import {TransformedEmail} from "../src/util/types";
 import {getSkills} from "../src/agents/drive/skills";
 import {fastMatchSkill} from "../src/util/skills/matcher";
@@ -2090,7 +2097,7 @@ describe("organize phased proposal flow", function() {
     expect(stored?.status).to.equal("completed");
     expect(stored?.phase).to.equal("completed");
     expect(stored?.phaseData.execution.totalChunks).to.equal(0);
-    expect(getLastSentEmail(sender)?.html).to.include("reorganizing your Google Drive now");
+    expect(getLastSentEmail(sender)).to.equal(null);
   });
 
 });
@@ -2169,6 +2176,64 @@ describe("organize sequential execution proposal builder", function() {
         .to.deep.equal(["02-Travel", "02-Travel"]);
   });
 
+  it("DT00ubi writes RFC 4180 CSV for file actions", function() {
+    const csv = writeFileActionsCsv([{
+      file_id: "file-1",
+      current_path: "My Drive",
+      current_name: "quote, draft.pdf",
+      new_folder: "01-Docs",
+      new_name: "2026.04.20 - \"Quote\"\nDraft.pdf",
+      action: "move_and_rename",
+      reason: "Comma, quote, and newline coverage",
+    }]).toString("utf8");
+
+    expect(csv).to.equal(
+        "\"file_id\",\"action\",\"current_path\",\"current_name\",\"new_folder\",\"new_name\",\"reason\"\r\n" +
+        "\"file-1\",\"move_and_rename\",\"My Drive\",\"quote, draft.pdf\",\"01-Docs\"," +
+        "\"2026.04.20 - \"\"Quote\"\"\nDraft.pdf\",\"Comma, quote, and newline coverage\"\r\n",
+    );
+  });
+
+  it("DT00ubj applies only safe plan patches and recomputes omitted actions", function() {
+    const actions: DriveOrganizeProposal["file_actions"] = [{
+      file_id: "file-1",
+      current_path: "My Drive",
+      current_name: "receipt.pdf",
+      new_folder: "01-Docs",
+      new_name: "receipt.pdf",
+      action: "move",
+      reason: "Initial",
+    }];
+    const patched = applyPlanPatches(actions, [
+      {
+        file_id: "file-1",
+        new_name: "2026.04.20 - Receipt.pdf",
+        new_folder: "01-Docs",
+        action: null,
+        reason: "User requested rename",
+      },
+      {
+        file_id: "file-2",
+        new_folder: "01-Docs",
+        action: null,
+        reason: "Unknown file",
+      },
+    ], [{folder_path: "01-Docs", description: "Documents"}]);
+
+    expect(patched).to.have.length(1);
+    expect(patched[0].new_name).to.equal("2026.04.20 - Receipt.pdf");
+    expect(patched[0].new_folder).to.equal("01-Docs");
+    expect(patched[0].action).to.equal("move_and_rename");
+
+    const unsafe = applyPlanPatches(actions, [{
+      file_id: "file-1",
+      new_folder: "99-Unsafe",
+      action: null,
+      reason: "Unapproved folder",
+    }], [{folder_path: "01-Docs", description: "Documents"}]);
+    expect(unsafe[0]).to.deep.equal(actions[0]);
+  });
+
   async function runProcessExecutionOverrideCase(options: {
     testId: string;
     file: DriveFileEntry;
@@ -2176,7 +2241,7 @@ describe("organize sequential execution proposal builder", function() {
     llmAction: "keep" | "rename";
     newName: string;
     expectedAction: "move" | "move_and_rename";
-  }): Promise<{proposal: OrganizeProposalDoc; updateCalls: unknown[]}> {
+  }): Promise<{proposal: OrganizeProposalDoc; planned: DriveOrganizeProposal; updateCalls: unknown[]}> {
     const uid = `execution-override-${options.testId}`;
     const sender = `${options.testId}@example.com`;
     const proposalId = `execution-override-${options.testId}-${Date.now()}`;
@@ -2198,8 +2263,8 @@ describe("organize sequential execution proposal builder", function() {
       uid,
       senderEmail: sender,
       emailId: `${options.testId}-email-id`,
-      status: "executing",
-      phase: "executing",
+      status: "planning",
+      phase: "plan_review",
       createdAt: "2026-04-16T00:00:00.000Z",
       expiresAt: "2099-04-16T00:00:00.000Z",
       storagePath,
@@ -2263,21 +2328,30 @@ describe("organize sequential execution proposal builder", function() {
     })) as unknown) as typeof google.drive;
 
     try {
-      await processExecutionChunk(makeTestEmail("execute"), {
+      await processPlanningChunk(makeTestEmail("plan"), {
+        proposalId,
+        emailId: `${options.testId}-email-id`,
+        uid,
+        chunkIndex: 0,
+      });
+      const planned = await loadSavedPlan(proposalId);
+      expect(updateCalls).to.deep.equal([]);
+
+      await processMoveChunk(makeTestEmail("move"), {
         proposalId,
         emailId: `${options.testId}-email-id`,
         uid,
         chunkIndex: 0,
       });
       const proposal = await getOrganizeProposal(proposalId) as unknown as OrganizeProposalDoc;
-      return {proposal, updateCalls};
+      return {proposal, planned, updateCalls};
     } finally {
       (google as unknown as {drive: typeof google.drive}).drive = originalDrive;
     }
   }
 
   it("DT00ubg overrides keep when the file is in an unapproved old-convention folder", async function() {
-    const {proposal} = await runProcessExecutionOverrideCase({
+    const {planned, proposal} = await runProcessExecutionOverrideCase({
       testId: "keep-old-folder",
       file: {
         id: "photo-file",
@@ -2296,12 +2370,13 @@ describe("organize sequential execution proposal builder", function() {
       expectedAction: "move",
     });
 
+    expect(planned.file_actions[0].action).to.equal("move");
     expect(proposal.proposal?.file_actions[0].action).to.equal("move");
     expect(proposal.snapshot?.[0].newParentId).to.equal("target-leaf-id");
   });
 
   it("DT00ubh overrides rename when the target folder differs from the current folder", async function() {
-    const {proposal} = await runProcessExecutionOverrideCase({
+    const {planned, proposal} = await runProcessExecutionOverrideCase({
       testId: "rename-different-folder",
       file: {
         id: "project-file",
@@ -2320,6 +2395,7 @@ describe("organize sequential execution proposal builder", function() {
       expectedAction: "move_and_rename",
     });
 
+    expect(planned.file_actions[0].action).to.equal("move_and_rename");
     expect(proposal.proposal?.file_actions[0].action).to.equal("move_and_rename");
     expect(proposal.snapshot?.[0].newParentId).to.equal("target-leaf-id");
     expect(proposal.snapshot?.[0].newName).to.equal("2026.04.10 - Brief.pdf");

@@ -65,6 +65,11 @@ import {
   VERSION_KEY as GENERATE_FILENAME_EXAMPLES_VERSION_KEY,
   VERSION_PARAM as GENERATE_FILENAME_EXAMPLES_VERSION_PARAM,
 } from "./generateFilenameExamples";
+import {
+  versions as revisePlanFileActionsVersions,
+  VERSION_KEY as REVISE_PLAN_FILE_ACTIONS_VERSION_KEY,
+  VERSION_PARAM as REVISE_PLAN_FILE_ACTIONS_VERSION_PARAM,
+} from "./revisePlanFileActions";
 
 /** Returns the active Drive prompt set and version metadata. */
 function getPrompts(): { prompts: DrivePrompts; versions: Record<string, string> } {
@@ -120,6 +125,10 @@ function getPrompts(): { prompts: DrivePrompts; versions: Record<string, string>
       GENERATE_FILENAME_EXAMPLES_VERSION_PARAM,
       generateFilenameExamplesVersions,
   );
+  const revisePlanFileActions = resolvePrompt(
+      REVISE_PLAN_FILE_ACTIONS_VERSION_PARAM,
+      revisePlanFileActionsVersions,
+  );
 
   const prompts: DrivePrompts = {
     proposeFilePlacement: proposeFilePlacement.prompt,
@@ -135,6 +144,7 @@ function getPrompts(): { prompts: DrivePrompts; versions: Record<string, string>
     classifyFolderConventionChange: classifyFolderConventionChange.prompt,
     proposeFileAction: proposeFileAction.prompt,
     generateFilenameExamples: generateFilenameExamples.prompt,
+    revisePlanFileActions: revisePlanFileActions.prompt,
   };
 
   const versions: Record<string, string> = {
@@ -151,6 +161,7 @@ function getPrompts(): { prompts: DrivePrompts; versions: Record<string, string>
     [CLASSIFY_FOLDER_CONVENTION_CHANGE_VERSION_KEY]: classifyFolderConventionChange.version,
     [PROPOSE_FILE_ACTION_VERSION_KEY]: proposeFileAction.version,
     [GENERATE_FILENAME_EXAMPLES_VERSION_KEY]: generateFilenameExamples.version,
+    [REVISE_PLAN_FILE_ACTIONS_VERSION_KEY]: revisePlanFileActions.version,
   };
 
   return {prompts, versions};

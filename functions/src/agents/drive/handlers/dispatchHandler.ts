@@ -8,7 +8,7 @@ import {handleDriveEmail} from "./driveHandler";
 import {processUpload} from "./uploadHandler";
 import {handleOrganizeDrive} from "./organizeMain";
 import {handleOrganizeProposalReply} from "./organizeProposal";
-import {processExecutionChunk} from "./organizeExecution";
+import {processMoveChunk, processPlanningChunk, startChunkedMove} from "./organizeExecution";
 import {signActionToken} from "./organizeHelpers";
 import {driveSignupUrl} from "../mailTemplates";
 import {ENVIRONMENT_NAME, RESEND_API_KEY} from "../../../util/config";
@@ -34,10 +34,11 @@ import {
 } from "../../../resend/emailFetcher";
 import {
   FileProposal,
-  ExecutionChunkTaskData,
+  MoveChunkTaskData,
   OrganizeProposalDoc,
   PostAuthTaskData,
   OrganizeActionTaskData,
+  PlanningChunkTaskData,
 } from "../types";
 
 // ============================================================================
@@ -219,9 +220,9 @@ export async function dispatchOrganizeActionTask(
   });
 }
 
-/** Enqueues sequential content-aware execution chunk processing. */
-export async function dispatchExecutionChunkTask(
-    data: ExecutionChunkTaskData,
+/** Enqueues LLM-only planning chunk processing. */
+export async function dispatchPlanningChunkTask(
+    data: PlanningChunkTaskData,
 ): Promise<void> {
   const isLocal = ENVIRONMENT_NAME.value() === "local" ||
     ENVIRONMENT_NAME.value() === "test";
@@ -234,17 +235,48 @@ export async function dispatchExecutionChunkTask(
     } else {
       ({transformedEmail} = await fetchEmailById(data.emailId));
     }
-    await processExecutionChunk(transformedEmail, data);
+    await processPlanningChunk(transformedEmail, data);
     return;
   }
 
   const queue = getFunctions().taskQueue(
-      "locations/us-central1/functions/v2driveExecutionChunkTask",
+      "locations/us-central1/functions/v2drivePlanningChunkTask",
   );
   await queue.enqueue(data, {
     dispatchDeadlineSeconds: 60 * 30,
   });
-  logger.info("Drive execution chunk: Dispatched task", {
+  logger.info("Drive planning chunk: Dispatched task", {
+    proposalId: data.proposalId,
+    chunkIndex: data.chunkIndex,
+  });
+}
+
+/** Enqueues reviewed-plan Drive mutation chunk processing. */
+export async function dispatchMoveChunkTask(
+    data: MoveChunkTaskData,
+): Promise<void> {
+  const isLocal = ENVIRONMENT_NAME.value() === "local" ||
+    ENVIRONMENT_NAME.value() === "test";
+  if (isLocal) {
+    let transformedEmail: TransformedEmail;
+    if (isAdminEmailId(data.emailId)) {
+      const proposal = await getOrganizeProposal(data.proposalId);
+      const senderEmail = (proposal as unknown as OrganizeProposalDoc)?.senderEmail || "";
+      transformedEmail = buildAdminSyntheticEmail(senderEmail);
+    } else {
+      ({transformedEmail} = await fetchEmailById(data.emailId));
+    }
+    await processMoveChunk(transformedEmail, data);
+    return;
+  }
+
+  const queue = getFunctions().taskQueue(
+      "locations/us-central1/functions/v2driveMoveChunkTask",
+  );
+  await queue.enqueue(data, {
+    dispatchDeadlineSeconds: 60 * 30,
+  });
+  logger.info("Drive move chunk: Dispatched task", {
     proposalId: data.proposalId,
     chunkIndex: data.chunkIndex,
   });
@@ -318,9 +350,9 @@ export async function handleOrganizeAction(
     res: Response,
 ): Promise<void> {
   const proposalId = req.query.proposalId as string;
-  const action = req.query.action as string;
+  const action = req.query.action as OrganizeActionTaskData["action"];
 
-  if (!proposalId || !action || !["approve", "undo"].includes(action)) {
+  if (!proposalId || !action || !["approve", "undo", "move"].includes(action)) {
     res.status(400).send(renderActionPage("error", "Invalid request."));
     return;
   }
@@ -363,9 +395,19 @@ export async function handleOrganizeAction(
         "This proposal cannot be undone at this time."));
     return;
   }
+  if (action === "move" && (proposalDoc.status !== "pending" || proposalDoc.phase !== "plan_review")) {
+    res.send(renderActionPage("error",
+        `This proposal has already been ${proposalDoc.status}.`));
+    return;
+  }
+  if (action !== "undo" && new Date(proposalDoc.expiresAt) < new Date()) {
+    res.send(renderActionPage("error",
+        "This proposal has expired. Send a new organize request to start over."));
+    return;
+  }
 
   // Mark as executing to prevent double-clicks
-  if (action === "approve") {
+  if (action === "approve" || action === "move") {
     await updateOrganizeProposalStatus(proposalId, "executing");
   }
 
@@ -382,7 +424,7 @@ export async function handleOrganizeAction(
       error: err instanceof Error ? err.message : String(err),
     });
     // Revert status on dispatch failure
-    if (action === "approve") {
+    if (action === "approve" || action === "move") {
       await updateOrganizeProposalStatus(proposalId, "pending");
     }
     res.status(500).send(renderActionPage("error",
@@ -392,7 +434,9 @@ export async function handleOrganizeAction(
 
   const message = action === "undo" ?
     "We're restoring your Drive to its previous state. You'll receive a confirmation email when it's done." :
-    "We're organizing your Drive now. You'll receive a confirmation email when it's done.";
+    action === "move" ?
+      "We're moving your files now. You'll receive a confirmation email when it's done." :
+      "We're preparing your Drive organization plan now. You'll receive a review email when it's ready.";
   res.send(renderActionPage("processing", message));
 }
 
@@ -474,19 +518,36 @@ export async function handleOrganizeActionTask(
   const {proposalId, action, emailId} = data;
   logger.info("Drive organize action task: Starting", {proposalId, action});
 
-  const {transformedEmail} = await fetchEmailById(emailId);
+  let transformedEmail: TransformedEmail;
+  if (isAdminEmailId(emailId)) {
+    const proposal = await getOrganizeProposal(proposalId);
+    const senderEmail = (proposal as unknown as OrganizeProposalDoc)?.senderEmail || "";
+    transformedEmail = buildAdminSyntheticEmail(senderEmail);
+  } else {
+    ({transformedEmail} = await fetchEmailById(emailId));
+  }
+  if (action === "move") {
+    const rawProposal = await getOrganizeProposal(proposalId);
+    if (!rawProposal) {
+      throw new Error("Organize proposal not found");
+    }
+    const proposalDoc = rawProposal as unknown as OrganizeProposalDoc;
+    await startChunkedMove(transformedEmail, proposalDoc.senderEmail, proposalDoc.uid, proposalId, proposalDoc);
+    logger.info("Drive organize action task: Complete", {proposalId, action});
+    return;
+  }
   transformedEmail.text = action;
   await handleOrganizeProposalReply(transformedEmail, proposalId, true);
 
   logger.info("Drive organize action task: Complete", {proposalId, action});
 }
 
-/** Processes a queued content-aware execution chunk task. */
-export async function handleExecutionChunkTask(
-    data: ExecutionChunkTaskData,
+/** Processes a queued LLM-only planning chunk task. */
+export async function handlePlanningChunkTask(
+    data: PlanningChunkTaskData,
 ): Promise<void> {
   const {proposalId, emailId, chunkIndex} = data;
-  logger.info("Drive execution chunk task: Starting", {proposalId, chunkIndex});
+  logger.info("Drive planning chunk task: Starting", {proposalId, chunkIndex});
 
   let transformedEmail: TransformedEmail;
   if (isAdminEmailId(emailId)) {
@@ -496,7 +557,27 @@ export async function handleExecutionChunkTask(
   } else {
     ({transformedEmail} = await fetchEmailById(emailId));
   }
-  await processExecutionChunk(transformedEmail, data);
+  await processPlanningChunk(transformedEmail, data);
 
-  logger.info("Drive execution chunk task: Complete", {proposalId, chunkIndex});
+  logger.info("Drive planning chunk task: Complete", {proposalId, chunkIndex});
+}
+
+/** Processes a queued reviewed-plan Drive mutation chunk task. */
+export async function handleMoveChunkTask(
+    data: MoveChunkTaskData,
+): Promise<void> {
+  const {proposalId, emailId, chunkIndex} = data;
+  logger.info("Drive move chunk task: Starting", {proposalId, chunkIndex});
+
+  let transformedEmail: TransformedEmail;
+  if (isAdminEmailId(emailId)) {
+    const proposal = await getOrganizeProposal(proposalId);
+    const senderEmail = (proposal as unknown as OrganizeProposalDoc)?.senderEmail || "";
+    transformedEmail = buildAdminSyntheticEmail(senderEmail);
+  } else {
+    ({transformedEmail} = await fetchEmailById(emailId));
+  }
+  await processMoveChunk(transformedEmail, data);
+
+  logger.info("Drive move chunk task: Complete", {proposalId, chunkIndex});
 }

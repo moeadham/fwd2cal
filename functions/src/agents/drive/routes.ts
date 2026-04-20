@@ -11,7 +11,8 @@ import {
   handleTestProcessUpload,
   handlePostAuthTask,
   handleOrganizeActionTask,
-  handleExecutionChunkTask,
+  handleMoveChunkTask,
+  handlePlanningChunkTask,
   dispatchPostAuthTask,
 } from "./dispatchHandler";
 import {signupCallbackHandler, hasRequiredScopes, oauthCronJob} from "../../auth/authHandler";
@@ -33,7 +34,8 @@ import {handleAdminOrganizeRequest, serveAdminForm} from "../../admin";
 import {
   PostAuthTaskData,
   OrganizeActionTaskData,
-  ExecutionChunkTaskData,
+  MoveChunkTaskData,
+  PlanningChunkTaskData,
 } from "./types";
 
 // Global configuration for onRequest functions
@@ -255,10 +257,17 @@ export const v2driveOrganizeActionTask = onTaskDispatched(
     }),
 );
 
-export const v2driveExecutionChunkTask = onTaskDispatched(
+export const v2drivePlanningChunkTask = onTaskDispatched(
     driveDispatchConfig,
     withErrorTracking("drive", async (req): Promise<void> => {
-      await handleExecutionChunkTask(req.data as ExecutionChunkTaskData);
+      await handlePlanningChunkTask(req.data as PlanningChunkTaskData);
+    }),
+);
+
+export const v2driveMoveChunkTask = onTaskDispatched(
+    driveDispatchConfig,
+    withErrorTracking("drive", async (req): Promise<void> => {
+      await handleMoveChunkTask(req.data as MoveChunkTaskData);
     }),
 );
 

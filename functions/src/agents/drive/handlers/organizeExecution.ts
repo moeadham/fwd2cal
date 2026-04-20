@@ -15,13 +15,14 @@ import {driveMailTemplates, driveOrganizeActionUrl} from "../mailTemplates";
 import {
   DriveFileEntry,
   DriveOrganizeProposal,
-  ExecutionChunkTaskData,
   FileInfo,
+  MoveChunkTaskData,
   OrganizeEmbeddedData,
   OrganizeIntermediateState,
   OrganizeProcessingResult,
   OrganizeProposalDoc,
   OrganizeSnapshotAction,
+  PlanningChunkTaskData,
 } from "../types";
 import {buildOrganizeEmbeddedData, renderFolderTree} from "../templates/folderTree";
 import {extractContentSummary, extractDocumentImageUrls} from "../fileProcessor";
@@ -31,6 +32,7 @@ import {applyTemplate, toTitleCase} from "../driveUtils";
 import {
   emptyResult,
   formatSummaryHtml,
+  sendOrganizePlanReviewEmail,
   sendOrganizeEmailResponse,
   signActionToken,
 } from "./organizeHelpers";
@@ -53,6 +55,11 @@ type ExecutionChunkResult = {
   stats: {moved: number; renamed: number; failed: number; skipped: number};
 };
 
+type PlanningChunkResult = {
+  file_actions: DriveOrganizeProposal["file_actions"];
+  stats: {planned: number; failed: number; skipped: number};
+};
+
 type FileSummaryProvider = (file: DriveFileEntry) => Promise<string>;
 type FileActionProposer = (
   directoryTree: DriveOrganizeProposal["proposed_folders"],
@@ -65,8 +72,14 @@ type OrganizeFileActionType = DriveOrganizeProposal["file_actions"][number]["act
 
 const getExecutionTreePath = (proposalId: string, chunkIndex: number) =>
   `organize-proposals/${proposalId}-execution-tree-${chunkIndex}.json`;
-const getExecutionChunkPath = (proposalId: string, chunkIndex: number) =>
-  `organize-proposals/${proposalId}-execution-chunk-${chunkIndex}.json`;
+const getPlanningChunkPath = (proposalId: string, chunkIndex: number) =>
+  `organize-proposals/${proposalId}-planning-chunk-${chunkIndex}.json`;
+const getMoveChunkPath = (proposalId: string, chunkIndex: number) =>
+  `organize-proposals/${proposalId}-move-chunk-${chunkIndex}.json`;
+export const getPlanStoragePath = (proposalId: string) =>
+  `organize-proposals/proposal-${proposalId}.json`;
+export const getPlanCsvStoragePath = (proposalId: string) =>
+  `organize-proposals/proposal-${proposalId}.csv`;
 
 /** Corrects contradictory LLM action labels using the actual source and target paths. */
 function deriveEffectiveAction(
@@ -167,6 +180,118 @@ async function loadExecutionJson<T>(path: string): Promise<T> {
   return JSON.parse(contents.toString()) as T;
 }
 
+/** Loads the saved combined plan from GCS. */
+export async function loadSavedPlan(proposalId: string): Promise<DriveOrganizeProposal> {
+  return loadExecutionJson<DriveOrganizeProposal>(getPlanStoragePath(proposalId));
+}
+
+/** Saves the combined plan JSON artifact. */
+export async function saveSavedPlan(proposalId: string, proposal: DriveOrganizeProposal): Promise<void> {
+  await saveExecutionJson(getPlanStoragePath(proposalId), proposal);
+}
+
+/** Writes RFC 4180 CSV for per-file plan review. */
+export function writeFileActionsCsv(fileActions: DriveOrganizeProposal["file_actions"]): Buffer {
+  const columns = ["file_id", "action", "current_path", "current_name", "new_folder", "new_name", "reason"];
+  const quote = (value: unknown): string => {
+    const text = String(value ?? "");
+    return `"${text.replace(/"/g, "\"\"")}"`;
+  };
+  const rows = [
+    columns.map(quote).join(","),
+    ...fileActions.map((action) => columns.map((column) =>
+      quote(action[column as keyof typeof action]),
+    ).join(",")),
+  ];
+  return Buffer.from(rows.join("\r\n") + "\r\n", "utf8");
+}
+
+/** Writes CSV to GCS and returns the bytes used for the outbound attachment. */
+export async function savePlanCsv(
+    proposalId: string,
+    fileActions: DriveOrganizeProposal["file_actions"],
+): Promise<Buffer> {
+  const csvBuffer = writeFileActionsCsv(fileActions);
+  await getStorage().bucket().file(getPlanCsvStoragePath(proposalId)).save(csvBuffer, {
+    contentType: "text/csv",
+  });
+  return csvBuffer;
+}
+
+function countFileActions(fileActions: DriveOrganizeProposal["file_actions"]): {
+  totalFiles: number;
+  filesToMove: number;
+  filesToRename: number;
+  filesToKeep: number;
+} {
+  return {
+    totalFiles: fileActions.length,
+    filesToMove: fileActions.filter((a) => a.action === "move" || a.action === "move_and_rename").length,
+    filesToRename: fileActions.filter((a) => a.action === "rename" || a.action === "move_and_rename").length,
+    filesToKeep: fileActions.filter((a) => a.action === "keep").length,
+  };
+}
+
+function recomputeAction(
+    currentPath: string,
+    currentName: string,
+    newFolder: string,
+    newName: string,
+): OrganizeFileActionType {
+  const folderChanged = newFolder !== currentPath;
+  const nameChanged = newName !== currentName;
+  if (folderChanged && nameChanged) return "move_and_rename";
+  if (folderChanged) return "move";
+  if (nameChanged) return "rename";
+  return "keep";
+}
+
+/** Applies per-file plan-review patches, dropping unsafe or unknown references. */
+export function applyPlanPatches(
+    fileActions: DriveOrganizeProposal["file_actions"],
+    patches: Array<{
+      file_id: string;
+      new_name?: string | null;
+      new_folder?: string | null;
+      action?: OrganizeFileActionType | null;
+      reason?: string | null;
+    }>,
+    approvedFolders: DriveOrganizeProposal["proposed_folders"],
+): DriveOrganizeProposal["file_actions"] {
+  const approvedPaths = new Set(approvedFolders.map((folder) => folder.folder_path));
+  const knownFileIds = new Set(fileActions.map((action) => action.file_id));
+  for (const patch of patches) {
+    if (!knownFileIds.has(patch.file_id)) {
+      logger.warn("Drive organize plan review: dropping patch with unknown file", {
+        fileId: patch.file_id,
+      });
+    }
+  }
+  const patchesByFileId = new Map(patches.map((patch) => [patch.file_id, patch]));
+  return fileActions.map((action) => {
+    const patch = patchesByFileId.get(action.file_id);
+    if (!patch) {
+      return action;
+    }
+    if (patch.new_folder && !approvedPaths.has(patch.new_folder)) {
+      logger.warn("Drive organize plan review: dropping patch with unapproved folder", {
+        fileId: patch.file_id,
+        newFolder: patch.new_folder,
+      });
+      return action;
+    }
+    const newFolder = patch.new_folder ?? action.new_folder;
+    const newName = patch.new_name ?? action.new_name;
+    return {
+      ...action,
+      new_folder: newFolder,
+      new_name: newName,
+      action: patch.action ?? recomputeAction(action.current_path, action.current_name, newFolder, newName),
+      reason: patch.reason || action.reason,
+    };
+  });
+}
+
 /** Reads and summarizes a Drive file for content-aware placement. */
 async function summarizeExecutionFile(
     oauth2Client: Auth.OAuth2Client,
@@ -217,8 +342,8 @@ async function resolveFolderPath(
   return parentId;
 }
 
-/** Starts chunked, content-aware execution after the final cost estimate is approved. */
-export async function startChunkedExecution(
+/** Starts chunked, content-aware planning after the final cost estimate is approved. */
+export async function startChunkedPlanning(
     email: TransformedEmail,
     sender: string,
     uid: string,
@@ -233,9 +358,11 @@ export async function startChunkedExecution(
     [];
   const chunkSize = ORGANIZE_DRIVE_CHUNK_SIZE.value();
   const totalChunks = nonFolderFiles.length === 0 ? 0 : Math.ceil(nonFolderFiles.length / chunkSize);
+  const planStoragePath = getPlanStoragePath(proposalId);
+  const csvStoragePath = getPlanCsvStoragePath(proposalId);
 
-  await updateOrganizeProposalStatus(proposalId, "executing", {
-    phase: "executing",
+  await updateOrganizeProposalStatus(proposalId, "planning", {
+    phase: "plan_review",
     generationStartedAt: new Date().toISOString(),
     phaseData: {
       ...proposalDoc.phaseData,
@@ -244,11 +371,15 @@ export async function startChunkedExecution(
         totalChunks,
         completedChunks: 0,
       },
+      planReview: {
+        totalFiles: nonFolderFiles.length,
+        csvStoragePath,
+        planStoragePath,
+        fileActionsVersion: 0,
+      },
     },
   });
 
-  const execStartedHtml = applyTemplate(driveMailTemplates.organizeExecutionStarted.html, {});
-  await sendOrganizeEmailResponse(sender, email, execStartedHtml);
   await saveExecutionJson(getExecutionTreePath(proposalId, -1), approvedStructure);
 
   if (totalChunks === 0) {
@@ -260,8 +391,8 @@ export async function startChunkedExecution(
     return emptyResult();
   }
 
-  const {dispatchExecutionChunkTask} = await import("./dispatchHandler");
-  await dispatchExecutionChunkTask({
+  const {dispatchPlanningChunkTask} = await import("./dispatchHandler");
+  await dispatchPlanningChunkTask({
     proposalId,
     emailId: proposalDoc.emailId,
     uid,
@@ -271,10 +402,10 @@ export async function startChunkedExecution(
   return emptyResult(undefined, nonFolderFiles.length);
 }
 
-/** Processes one chunk of content-aware execution and dispatches the next chunk. */
-export async function processExecutionChunk(
+/** Processes one LLM-only planning chunk and dispatches the next chunk. */
+export async function processPlanningChunk(
     email: TransformedEmail,
-    data: ExecutionChunkTaskData,
+    data: PlanningChunkTaskData,
 ): Promise<void> {
   const {proposalId, uid, chunkIndex} = data;
   const rawProposal = await getOrganizeProposal(proposalId);
@@ -295,12 +426,9 @@ export async function processExecutionChunk(
       getExecutionTreePath(proposalId, chunkIndex - 1),
   );
   const knownDirectories = new Set(runningTree.map((folder) => folder.folder_path));
-  const folderMap = new Map<string, string>();
   const fileActions: DriveOrganizeProposal["file_actions"] = [];
-  const snapshot: OrganizeSnapshotAction[] = [];
-  const stats = {moved: 0, renamed: 0, failed: 0, skipped: 0};
+  const stats = {planned: 0, failed: 0, skipped: 0};
   const oauth2Client = await getOauthClient(uid, AGENT_NAME);
-  const drive = getDriveClient(oauth2Client);
 
   for (const file of chunkFiles) {
     try {
@@ -335,44 +463,14 @@ export async function processExecutionChunk(
         reason: proposed.reason,
       };
       fileActions.push(action);
-
       if (action.action === "keep") {
         stats.skipped++;
-        continue;
+      } else {
+        stats.planned++;
       }
-
-      const meta = await drive.files.get({
-        fileId: file.id,
-        fields: "id, parents, name",
-      });
-      const currentParentId = meta.data.parents?.[0] || "";
-      const snapshotEntry: OrganizeSnapshotAction = {
-        fileId: file.id,
-        originalName: meta.data.name || file.name,
-        originalParentId: currentParentId,
-        originalParentPath: file.parentPath,
-      };
-
-      if (action.action === "move" || action.action === "move_and_rename") {
-        const targetFolderId = await resolveFolderPath(oauth2Client, folderMap, action.new_folder);
-        if (targetFolderId !== currentParentId) {
-          await moveFile(oauth2Client, file.id, targetFolderId, currentParentId);
-          snapshotEntry.newParentId = targetFolderId;
-          stats.moved++;
-        }
-      }
-      // Safety net: rename runs for every non-"keep" action. The LLM sometimes
-      // returns "move" when the filename needs an update too; rename-eligible
-      // covers that gap. "keep" is already filtered via early continue above.
-      if (action.new_name && action.new_name !== (meta.data.name || file.name)) {
-        await renameFile(oauth2Client, file.id, action.new_name);
-        snapshotEntry.newName = action.new_name;
-        stats.renamed++;
-      }
-      snapshot.push(snapshotEntry);
     } catch (error) {
       stats.failed++;
-      logger.error("Drive organize execution chunk: file failed", {
+      logger.error("Drive organize planning chunk: file failed", {
         proposalId,
         chunkIndex,
         fileId: file.id,
@@ -381,15 +479,14 @@ export async function processExecutionChunk(
     }
   }
 
-  await saveExecutionJson(getExecutionChunkPath(proposalId, chunkIndex), {
+  await saveExecutionJson(getPlanningChunkPath(proposalId, chunkIndex), {
     file_actions: fileActions,
-    snapshot,
     stats,
-  } satisfies ExecutionChunkResult);
+  } satisfies PlanningChunkResult);
   await saveExecutionJson(getExecutionTreePath(proposalId, chunkIndex), runningTree);
 
   const completedChunks = chunkIndex + 1;
-  await updateOrganizeProposalStatus(proposalId, "executing", {
+  await updateOrganizeProposalStatus(proposalId, "planning", {
     phaseData: {
       ...proposalDoc.phaseData,
       execution: {chunkSize, totalChunks, completedChunks},
@@ -397,8 +494,8 @@ export async function processExecutionChunk(
   });
 
   if (completedChunks < totalChunks) {
-    const {dispatchExecutionChunkTask} = await import("./dispatchHandler");
-    await dispatchExecutionChunkTask({
+    const {dispatchPlanningChunkTask} = await import("./dispatchHandler");
+    await dispatchPlanningChunkTask({
       proposalId,
       emailId: data.emailId,
       uid,
@@ -409,13 +506,176 @@ export async function processExecutionChunk(
 
   const chunkResults = await Promise.all(
       Array.from({length: totalChunks}, async (_value, i) =>
-        loadExecutionJson<ExecutionChunkResult>(getExecutionChunkPath(proposalId, i))),
+        loadExecutionJson<PlanningChunkResult>(getPlanningChunkPath(proposalId, i))),
   );
   const proposal: DriveOrganizeProposal = {
     proposed_folders: runningTree,
     file_actions: chunkResults.flatMap((result) => result.file_actions),
-    summary: `Organized ${nonFolderFiles.length} files using the approved folder and filename conventions.`,
+    summary: `Prepared file-by-file organization actions for ${nonFolderFiles.length} files.`,
   };
+  await saveSavedPlan(proposalId, proposal);
+  const csvBuffer = await savePlanCsv(proposalId, proposal.file_actions);
+  const counts = countFileActions(proposal.file_actions);
+  const nextPhaseData = {
+    ...proposalDoc.phaseData,
+    execution: {chunkSize, totalChunks, completedChunks},
+    planReview: {
+      totalFiles: proposal.file_actions.length,
+      csvStoragePath: getPlanCsvStoragePath(proposalId),
+      planStoragePath: getPlanStoragePath(proposalId),
+      fileActionsVersion: 1,
+      planEmailSentAt: new Date().toISOString(),
+    },
+  };
+  await updateOrganizeProposalStatus(proposalId, "pending", {
+    phase: "plan_review",
+    generationStartedAt: null,
+    phaseData: nextPhaseData,
+  });
+  await sendOrganizePlanReviewEmail(proposalDoc.senderEmail, email, proposalId, proposal, csvBuffer, counts);
+
+  sendEvent(uid, "driveOrganizePlanReady", "drive", {
+    totalFiles: String(counts.totalFiles),
+    filesToMove: String(counts.filesToMove),
+    filesToRename: String(counts.filesToRename),
+    failed: String(chunkResults.reduce((count, result) => count + result.stats.failed, 0)),
+  });
+}
+
+/** Starts chunked Drive mutations from a reviewed saved plan. */
+export async function startChunkedMove(
+    email: TransformedEmail,
+    sender: string,
+    uid: string,
+    proposalId: string,
+    proposalDoc: OrganizeProposalDoc,
+): Promise<OrganizeProcessingResult> {
+  const proposal = await loadSavedPlan(proposalId);
+  const chunkSize = proposalDoc.phaseData?.execution?.chunkSize || ORGANIZE_DRIVE_CHUNK_SIZE.value();
+  const totalChunks = proposal.file_actions.length === 0 ? 0 : Math.ceil(proposal.file_actions.length / chunkSize);
+  await updateOrganizeProposalStatus(proposalId, "executing", {
+    phase: "executing",
+    phaseData: {
+      ...proposalDoc.phaseData,
+      execution: {chunkSize, totalChunks, completedChunks: 0},
+    },
+  });
+  const execStartedHtml = applyTemplate(driveMailTemplates.organizeExecutionStarted.html, {});
+  await sendOrganizeEmailResponse(sender, email, execStartedHtml);
+
+  if (totalChunks === 0) {
+    await updateOrganizeProposalStatus(proposalId, "completed", {
+      phase: "completed",
+      snapshot: [],
+      completedAt: new Date().toISOString(),
+    });
+    return emptyResult();
+  }
+
+  const {dispatchMoveChunkTask} = await import("./dispatchHandler");
+  await dispatchMoveChunkTask({
+    proposalId,
+    emailId: proposalDoc.emailId,
+    uid,
+    chunkIndex: 0,
+  });
+  return emptyResult(undefined, proposal.file_actions.length);
+}
+
+/** Processes one Drive-mutation chunk from the saved plan and dispatches the next chunk. */
+export async function processMoveChunk(
+    email: TransformedEmail,
+    data: MoveChunkTaskData,
+): Promise<void> {
+  const {proposalId, uid, chunkIndex} = data;
+  const rawProposal = await getOrganizeProposal(proposalId);
+  if (!rawProposal) {
+    throw new Error("Organize proposal not found");
+  }
+  const proposalDoc = rawProposal as unknown as OrganizeProposalDoc;
+  const proposal = await loadSavedPlan(proposalId);
+  const chunkSize = proposalDoc.phaseData?.execution?.chunkSize || ORGANIZE_DRIVE_CHUNK_SIZE.value();
+  const totalChunks = proposalDoc.phaseData?.execution?.totalChunks ||
+    Math.ceil(proposal.file_actions.length / chunkSize);
+  const chunkActions = proposal.file_actions.slice(chunkIndex * chunkSize, (chunkIndex + 1) * chunkSize);
+  const oauth2Client = await getOauthClient(uid, AGENT_NAME);
+  const drive = getDriveClient(oauth2Client);
+  const folderMap = new Map<string, string>();
+  const snapshot: OrganizeSnapshotAction[] = [];
+  const stats = {moved: 0, renamed: 0, failed: 0, skipped: 0};
+
+  for (const action of chunkActions) {
+    if (action.action === "keep") {
+      stats.skipped++;
+      continue;
+    }
+    try {
+      const meta = await drive.files.get({
+        fileId: action.file_id,
+        fields: "id, parents, name",
+      });
+      const currentParentId = meta.data.parents?.[0] || "";
+      const snapshotEntry: OrganizeSnapshotAction = {
+        fileId: action.file_id,
+        originalName: meta.data.name || action.current_name,
+        originalParentId: currentParentId,
+        originalParentPath: action.current_path,
+      };
+
+      if (action.action === "move" || action.action === "move_and_rename") {
+        const targetFolderId = await resolveFolderPath(oauth2Client, folderMap, action.new_folder);
+        if (targetFolderId !== currentParentId) {
+          await moveFile(oauth2Client, action.file_id, targetFolderId, currentParentId);
+          snapshotEntry.newParentId = targetFolderId;
+          stats.moved++;
+        }
+      }
+      if (action.new_name && action.new_name !== (meta.data.name || action.current_name)) {
+        await renameFile(oauth2Client, action.file_id, action.new_name);
+        snapshotEntry.newName = action.new_name;
+        stats.renamed++;
+      }
+      snapshot.push(snapshotEntry);
+    } catch (error) {
+      stats.failed++;
+      logger.error("Drive organize move chunk: file failed", {
+        proposalId,
+        chunkIndex,
+        fileId: action.file_id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  await saveExecutionJson(getMoveChunkPath(proposalId, chunkIndex), {
+    file_actions: chunkActions,
+    snapshot,
+    stats,
+  } satisfies ExecutionChunkResult);
+
+  const completedChunks = chunkIndex + 1;
+  await updateOrganizeProposalStatus(proposalId, "executing", {
+    phaseData: {
+      ...proposalDoc.phaseData,
+      execution: {chunkSize, totalChunks, completedChunks},
+    },
+  });
+
+  if (completedChunks < totalChunks) {
+    const {dispatchMoveChunkTask} = await import("./dispatchHandler");
+    await dispatchMoveChunkTask({
+      proposalId,
+      emailId: data.emailId,
+      uid,
+      chunkIndex: chunkIndex + 1,
+    });
+    return;
+  }
+
+  const chunkResults = await Promise.all(
+      Array.from({length: totalChunks}, async (_value, i) =>
+        loadExecutionJson<ExecutionChunkResult>(getMoveChunkPath(proposalId, i))),
+  );
   const fullSnapshot = chunkResults.flatMap((result) => result.snapshot);
   const filesChanged = fullSnapshot.length;
 

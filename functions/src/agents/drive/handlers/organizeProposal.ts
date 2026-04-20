@@ -25,12 +25,23 @@ import {
   sendOrganizeCostEstimateEmail,
   sendOrganizeEmailResponse,
   sendOrganizeFolderPreferencesEmail,
+  sendOrganizePlanReviewEmail,
   sendOrganizePhase1aEmail,
   sendOrganizePhase2Email,
   sendOrganizeProposalEmail,
   signActionToken,
 } from "./organizeHelpers";
-import {executeOrganizeProposal, startChunkedExecution} from "./organizeExecution";
+import {
+  applyPlanPatches,
+  executeOrganizeProposal,
+  getPlanCsvStoragePath,
+  getPlanStoragePath,
+  loadSavedPlan,
+  savePlanCsv,
+  saveSavedPlan,
+  startChunkedMove,
+  startChunkedPlanning,
+} from "./organizeExecution";
 import {cleanupEmptyManagedFolders, handleOrganizeUndo, undoOrganizeActions} from "./organizeUndo";
 import {verifyOrganizeResults} from "./organizeVerify";
 import {sendOrganizeAuthRequiredEmail} from "./organizeMain";
@@ -56,6 +67,7 @@ import {
   normalizeFolderConventionSeparators,
   renumberFoldersContiguously,
   reviseOrganization,
+  revisePlanFileActions,
 } from "../llm";
 const DEFAULT_FILENAME_CONVENTION = "YYYY.MM.DD - Description.ext";
 
@@ -615,7 +627,7 @@ async function handleCostEstimateReply(
 ): Promise<OrganizeProcessingResult> {
   if (isApproval) {
     if (fromActionTask) {
-      return startChunkedExecution(email, sender, uid, proposalId, proposalDoc);
+      return startChunkedPlanning(email, sender, uid, proposalId, proposalDoc);
     }
 
     const approvedStructure =
@@ -692,6 +704,112 @@ async function handleCostEstimateReply(
   );
 }
 
+/** Handles replies during plan review after the CSV has been generated. */
+async function handlePlanReviewReply(
+    email: TransformedEmail,
+    sender: string,
+    uid: string,
+    proposalId: string,
+    proposalDoc: OrganizeProposalDoc,
+    replyBody: string,
+    isApproval: boolean,
+    fromActionTask = false,
+): Promise<OrganizeProcessingResult> {
+  const proposal = await loadSavedPlan(proposalId);
+  const counts = {
+    totalFiles: proposal.file_actions.length,
+    filesToMove: proposal.file_actions.filter((a) => a.action === "move" || a.action === "move_and_rename").length,
+    filesToRename: proposal.file_actions.filter((a) => a.action === "rename" || a.action === "move_and_rename").length,
+    filesToKeep: proposal.file_actions.filter((a) => a.action === "keep").length,
+  };
+
+  if (isApproval) {
+    if (fromActionTask) {
+      return startChunkedMove(email, sender, uid, proposalId, proposalDoc);
+    }
+    const csvBuffer = await savePlanCsv(proposalId, proposal.file_actions);
+    await sendOrganizePlanReviewEmail(
+        sender,
+        email,
+        proposalId,
+        proposal,
+        csvBuffer,
+        counts,
+        "Use the Move Files button when you're ready.",
+    );
+    return emptyResult("Awaiting Move Files button click", proposal.file_actions.length);
+  }
+
+  const approvedFolders =
+    proposalDoc.phaseData?.directoryLayout?.approvedStructure ||
+    proposalDoc.phaseData?.directoryLayout?.proposedStructure ||
+    proposal.proposed_folders;
+  const revision = await revisePlanFileActions(
+      proposal.file_actions,
+      approvedFolders,
+      replyBody,
+      uid,
+  );
+  if (revision.unclear) {
+    const csvBuffer = await savePlanCsv(proposalId, proposal.file_actions);
+    await sendOrganizePlanReviewEmail(
+        sender,
+        email,
+        proposalId,
+        proposal,
+        csvBuffer,
+        counts,
+        revision.summary || "Please name the exact file and the new filename or approved folder path.",
+    );
+    return emptyResult("Plan revision unclear", proposal.file_actions.length);
+  }
+
+  const revisedActions = applyPlanPatches(
+      proposal.file_actions,
+      revision.patches,
+      approvedFolders,
+  );
+  const revisedProposal: DriveOrganizeProposal = {
+    ...proposal,
+    file_actions: revisedActions,
+    summary: revision.summary || proposal.summary,
+  };
+  await saveSavedPlan(proposalId, revisedProposal);
+  const csvBuffer = await savePlanCsv(proposalId, revisedProposal.file_actions);
+  const nextVersion = (proposalDoc.phaseData?.planReview?.fileActionsVersion || 1) + 1;
+  await updateOrganizeProposalStatus(proposalId, "pending", {
+    phase: "plan_review",
+    phaseData: {
+      ...proposalDoc.phaseData,
+      planReview: {
+        totalFiles: revisedProposal.file_actions.length,
+        csvStoragePath: proposalDoc.phaseData?.planReview?.csvStoragePath || getPlanCsvStoragePath(proposalId),
+        planStoragePath: proposalDoc.phaseData?.planReview?.planStoragePath || getPlanStoragePath(proposalId),
+        fileActionsVersion: nextVersion,
+        planEmailSentAt: new Date().toISOString(),
+      },
+    },
+  });
+  const revisedCounts = {
+    totalFiles: revisedProposal.file_actions.length,
+    filesToMove: revisedProposal.file_actions
+        .filter((a) => a.action === "move" || a.action === "move_and_rename").length,
+    filesToRename: revisedProposal.file_actions
+        .filter((a) => a.action === "rename" || a.action === "move_and_rename").length,
+    filesToKeep: revisedProposal.file_actions.filter((a) => a.action === "keep").length,
+  };
+  await sendOrganizePlanReviewEmail(
+      sender,
+      email,
+      proposalId,
+      revisedProposal,
+      csvBuffer,
+      revisedCounts,
+      revision.summary || "Updated the plan.",
+  );
+  return emptyResult(undefined, revisedProposal.file_actions.length);
+}
+
 /** Routes replies to the active organize-drive phase. */
 async function handleOrganizePhaseReply(
     email: TransformedEmail,
@@ -718,6 +836,10 @@ async function handleOrganizePhaseReply(
       return handleCostEstimateReply(
           email, sender, uid, proposalId, proposalDoc, replyBody, isApproval, fromActionTask,
       );
+    case "plan_review":
+      return handlePlanReviewReply(
+          email, sender, uid, proposalId, proposalDoc, replyBody, isApproval, fromActionTask,
+      );
     default:
       return null;
   }
@@ -731,6 +853,7 @@ export const organizeProposalTestHooks = {
   handleDirectoryAdditionsReply,
   handleFilenameConventionReply,
   handleCostEstimateReply,
+  handlePlanReviewReply,
 };
 // ============================================================================
 // APPROVAL HANDLER
@@ -792,6 +915,14 @@ export async function handleOrganizeProposalReply(
 
   if (isUndo && proposalDoc.status === "completed") {
     return handleOrganizeUndo(email, sender, uid, proposalId, proposalDoc);
+  }
+  if (isUndo && proposalDoc.phase === "plan_review") {
+    await sendOrganizeEmailResponse(
+        sender,
+        email,
+        "Nothing has moved yet, so there is nothing to undo. Use the Move Files button when you're ready.",
+    );
+    return emptyResult("Undo requested before move");
   }
 
   const supportEmail = getSupportEmail(AGENT_EMAIL_ADDRESS.value());

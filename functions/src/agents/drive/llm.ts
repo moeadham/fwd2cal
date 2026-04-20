@@ -49,6 +49,10 @@ import {
   SetPreferencesSchema,
   SetPreferencesResult,
 } from "./prompts/setPreferences/v1";
+import {
+  RevisePlanFileActionsSchema,
+  RevisePlanFileActionsResult,
+} from "./prompts/revisePlanFileActions/v1";
 
 const DEFAULT_FOLDER_CONVENTION = "NN-Category";
 const DEFAULT_FILENAME_CONVENTION = "YYYY.MM.DD - Description.ext";
@@ -524,6 +528,45 @@ async function generateFilenameExamples(
     });
     return fallbackFilenameExamples(safeConvention);
   }
+}
+
+/** Revise saved plan-review file actions from a user reply. */
+async function revisePlanFileActions(
+    fileActions: DriveOrganizeProposal["file_actions"],
+    approvedFolders: DriveOrganizeProposal["proposed_folders"],
+    userInstructions: string,
+    uid: string | null = null,
+): Promise<RevisePlanFileActionsResult> {
+  const {prompts, versions} = getPrompts();
+  const folders = approvedFolders
+      .map((folder) => `- ${folder.folder_path}: ${folder.description}`)
+      .join("\n");
+  const actions = fileActions
+      .map((action) =>
+        `- file_id: ${action.file_id}\n` +
+        `  current_path: ${action.current_path}\n` +
+        `  current_name: ${action.current_name}\n` +
+        `  new_folder: ${action.new_folder}\n` +
+        `  new_name: ${action.new_name}\n` +
+        `  action: ${action.action}\n` +
+        `  reason: ${action.reason}`,
+      )
+      .join("\n");
+  const userText = `## User Requested Changes\n${userInstructions}\n\n` +
+    `## Approved Folder Structure\n${folders || "(none)"}\n\n` +
+    `## Current File Actions\n${actions || "(none)"}\n`;
+  const messages: ChatMessage[] = [
+    {role: "system", content: prompts.revisePlanFileActions.prompt},
+    {role: "user", content: userText},
+  ];
+  return await defaultCompletion<RevisePlanFileActionsResult>(
+      messages,
+      prompts.revisePlanFileActions.model,
+      prompts.revisePlanFileActions.temperature ?? DEFAULT_TEMP,
+      RevisePlanFileActionsSchema,
+      uid,
+      {promptVersion: versions.PROMPT_REVISE_PLAN_FILE_ACTIONS_VERSION},
+  ) as RevisePlanFileActionsResult;
 }
 
 /** Extract top-level folder names from the tree summary produced by buildDriveStructureSummary. */
@@ -1737,4 +1780,5 @@ export {
   classifyFolderConventionChange,
   proposeFileAction,
   generateFilenameExamples,
+  revisePlanFileActions,
 };

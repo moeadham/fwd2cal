@@ -169,6 +169,7 @@ export type OrganizePhase =
   "directory_additions" |
   "filename_convention" |
   "cost_estimate" |
+  "plan_review" |
   "executing" |
   "completed";
 
@@ -218,12 +219,21 @@ export interface ExecutionData {
   completedChunks: number;
 }
 
+export interface PlanReviewData {
+  totalFiles: number;
+  csvStoragePath: string;
+  planStoragePath: string;
+  fileActionsVersion: number;
+  planEmailSentAt?: string;
+}
+
 export interface OrganizePhaseData {
   folderPreferences?: FolderPreferencesData;
   directoryLayout?: DirectoryLayoutData;
   filenameConvention?: FilenameConventionData;
   costEstimate?: CostEstimateData;
   execution?: ExecutionData;
+  planReview?: PlanReviewData;
 }
 
 export interface DriveUserPreferences {
@@ -283,7 +293,7 @@ export interface OrganizeProposalDoc {
   uid: string;
   senderEmail: string;
   emailId: string;
-  status: "generating" | "pending" | "approved" | "executing" | "completed" | "failed" | "undone";
+  status: "generating" | "planning" | "pending" | "approved" | "executing" | "completed" | "failed" | "undone";
   phase?: OrganizePhase;
   phaseData?: OrganizePhaseData;
   createdAt: string;
@@ -345,6 +355,7 @@ export interface DrivePrompts {
   classifyFolderConventionChange: DrivePromptConfig;
   proposeFileAction: DrivePromptConfig;
   generateFilenameExamples: DrivePromptConfig;
+  revisePlanFileActions: DrivePromptConfig;
 }
 
 // ============================================================================
@@ -378,6 +389,7 @@ export interface DriveMailTemplates {
   organizePhase1aProposal: DriveMailTemplate;
   organizePhase2Proposal: DriveMailTemplate;
   organizeCostEstimate: DriveMailTemplate;
+  organizePlanReview: DriveMailTemplate;
   organizeError: DriveMailTemplate;
   organizeNoFiles: DriveMailTemplate;
   organizeComplete: DriveMailTemplate;
@@ -437,11 +449,18 @@ export interface PostAuthTaskData {
 
 export interface OrganizeActionTaskData {
   proposalId: string;
-  action: string;
+  action: "approve" | "undo" | "move";
   emailId: string;
 }
 
-export interface ExecutionChunkTaskData {
+export interface PlanningChunkTaskData {
+  proposalId: string;
+  emailId: string;
+  uid: string;
+  chunkIndex: number;
+}
+
+export interface MoveChunkTaskData {
   proposalId: string;
   emailId: string;
   uid: string;
