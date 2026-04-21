@@ -361,7 +361,8 @@ async function listAllDriveFiles(
   let pageToken: string | undefined;
   do {
     const response = await drive.files.list({
-      q: "trashed = false and 'me' in owners",
+      q: "trashed = false and 'me' in owners" +
+        " and name != '.sorted.by.fwd2drive.com'",
       fields: "nextPageToken, files(id, name, mimeType, parents, createdTime, size, webViewLink)",
       pageSize: 1000,
       pageToken: pageToken,
