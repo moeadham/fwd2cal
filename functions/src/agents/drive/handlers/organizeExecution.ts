@@ -48,6 +48,7 @@ import {
   renameFile,
   renameFolder,
 } from "../driveHelper";
+import {cleanupAllEmptyFolders} from "./organizeUndo";
 
 type ExecutionChunkResult = {
   file_actions: DriveOrganizeProposal["file_actions"];
@@ -690,6 +691,8 @@ export async function processMoveChunk(
     completedAt: new Date().toISOString(),
   });
 
+  await cleanupAllEmptyFolders(oauth2Client);
+
   const undoToken = signActionToken(proposalId, "undo");
   const undoLink = `${driveOrganizeActionUrl()}?proposalId=${proposalId}&action=undo&token=${undoToken}`;
   const embeddedData: OrganizeEmbeddedData = {proposalId};
@@ -735,7 +738,7 @@ export async function executeOrganizeProposal(
   do {
     const resp = await drive.files.list({
       q: "mimeType = 'application/vnd.google-apps.folder' and trashed = false" +
-        ` and 'me' in owners and '${rootFolderId}' in parents`,
+        ` and '${rootFolderId}' in parents`,
       fields: "nextPageToken, files(id, name)",
       pageSize: 1000,
       pageToken,
@@ -751,7 +754,7 @@ export async function executeOrganizeProposal(
   // Pre-populate folderMap from existing agent-managed folders (prevents
   // duplicates on repeat organizes) and from folder rename actions.
   const managedFolders = await findAgentManagedFolders(oauth2Client);
-  for (const mf of managedFolders) {
+  for (const mf of managedFolders.filter((folder) => folder.parentId === rootFolderId)) {
     folderMap.set(mf.name, mf.id);
   }
   for (const action of proposal.file_actions) {
@@ -771,19 +774,25 @@ export async function executeOrganizeProposal(
       let folderId = folderMap.get(folder.folder_path) ||
         existingRootFolders.get(folder.folder_path);
       if (!folderId) {
-        folderId = await createFolder(oauth2Client, folder.folder_path, rootFolderId);
-        await placeMarkerFile(oauth2Client, folderId);
+        folderId = await findSubfolderByName(oauth2Client, rootFolderId, folder.folder_path);
       }
+      if (!folderId) {
+        folderId = await createFolder(oauth2Client, folder.folder_path, rootFolderId);
+      }
+      await placeMarkerFile(oauth2Client, folderId);
       folderMap.set(folder.folder_path, folderId);
       continue;
     }
 
     let parentId = folderMap.get(segments[0]) || existingRootFolders.get(segments[0]);
     if (!parentId) {
-      parentId = await createFolder(oauth2Client, segments[0], rootFolderId);
-      await placeMarkerFile(oauth2Client, parentId);
-      folderMap.set(segments[0], parentId);
+      parentId = await findSubfolderByName(oauth2Client, rootFolderId, segments[0]);
     }
+    if (!parentId) {
+      parentId = await createFolder(oauth2Client, segments[0], rootFolderId);
+    }
+    await placeMarkerFile(oauth2Client, parentId);
+    folderMap.set(segments[0], parentId);
 
     let resolvedPath = segments[0];
     for (let i = 1; i < segments.length; i++) {

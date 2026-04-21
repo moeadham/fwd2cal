@@ -228,11 +228,11 @@ async function placeMarkerFile(
 
 /**
  * Find all agent-managed folders by searching for the marker file.
- * Returns folder names (e.g. ["01-Invoices", "02-Receipts"]).
+ * Returns folder metadata for each marker-bearing folder.
  */
 async function findAgentManagedFolders(
     oauth2Client: Auth.OAuth2Client,
-): Promise<Array<{id: string; name: string}>> {
+): Promise<Array<{id: string; name: string; parentId: string}>> {
   const drive = getDriveClient(oauth2Client);
 
   // Collect all parent folder IDs from marker files
@@ -260,15 +260,19 @@ async function findAgentManagedFolders(
   }
 
   // Fetch all parent folder names in parallel
-  const results: Array<{id: string; name: string}> = [];
+  const results: Array<{id: string; name: string; parentId: string}> = [];
   const fetches = [...parentIds].map(async (parentId) => {
     try {
       const folder = await drive.files.get({
         fileId: parentId,
-        fields: "id, name",
+        fields: "id, name, parents",
       });
       if (folder.data.id && folder.data.name) {
-        results.push({id: folder.data.id, name: folder.data.name});
+        results.push({
+          id: folder.data.id,
+          name: folder.data.name,
+          parentId: folder.data.parents?.[0] || "",
+        });
       }
     } catch (_err) {
       logger.warn("Drive: Could not fetch marker parent folder", {parentId});
@@ -537,6 +541,48 @@ async function getFolderChildren(
   return children;
 }
 
+/**
+ * Returns true when a folder contains no non-marker files and no non-empty subfolders.
+ */
+async function isFolderEmpty(
+    oauth2Client: Auth.OAuth2Client,
+    folderId: string,
+): Promise<boolean> {
+  const drive = getDriveClient(oauth2Client);
+  const subfolderIds: string[] = [];
+  let pageToken: string | undefined;
+
+  do {
+    const response = await drive.files.list({
+      q: `'${folderId}' in parents and trashed = false` +
+        ` and name != '.sorted.by.fwd2drive.com'`,
+      fields: "nextPageToken, files(id, mimeType)",
+      pageSize: 100,
+      pageToken,
+    });
+
+    for (const file of response.data.files || []) {
+      if (!file.id || !file.mimeType) {
+        continue;
+      }
+      if (file.mimeType !== "application/vnd.google-apps.folder") {
+        return false;
+      }
+      subfolderIds.push(file.id);
+    }
+
+    pageToken = response.data.nextPageToken || undefined;
+  } while (pageToken);
+
+  for (const subfolderId of subfolderIds) {
+    if (!(await isFolderEmpty(oauth2Client, subfolderId))) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 export {
   getDriveClient,
   getDriveFolderTree,
@@ -557,4 +603,5 @@ export {
   trashFile,
   readDriveFileContent,
   findSubfolderByName,
+  isFolderEmpty,
 };

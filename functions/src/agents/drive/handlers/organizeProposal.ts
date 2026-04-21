@@ -42,7 +42,7 @@ import {
   startChunkedMove,
   startChunkedPlanning,
 } from "./organizeExecution";
-import {cleanupEmptyManagedFolders, handleOrganizeUndo, undoOrganizeActions} from "./organizeUndo";
+import {cleanupAllEmptyFolders, handleOrganizeUndo, undoOrganizeActions} from "./organizeUndo";
 import {verifyOrganizeResults} from "./organizeVerify";
 import {sendOrganizeAuthRequiredEmail} from "./organizeMain";
 import {
@@ -1098,8 +1098,8 @@ export async function handleOrganizeProposalReply(
     completedAt: now.toISOString(),
   });
 
-  // Clean up empty managed folders left behind after reorganization
-  await cleanupEmptyManagedFolders(oauth2Client);
+  // Clean up empty folders left behind after reorganization
+  await cleanupAllEmptyFolders(oauth2Client);
 
   // Send completion email
   const folderTreeHtml = renderFolderTree(proposal);

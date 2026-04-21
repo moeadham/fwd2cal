@@ -13,6 +13,8 @@ import {
   findAgentManagedFolders,
   getFolderChildren,
   getFolderFileCount,
+  getRootFolderId,
+  isFolderEmpty,
   moveFile,
   renameFile,
 } from "../driveHelper";
@@ -130,6 +132,53 @@ export async function cleanupEmptyManagedFolders(
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     logger.warn("Drive organize: Failed to clean up empty folders", {
+      error: errMsg,
+    });
+  }
+}
+
+/**
+ * Delete every empty folder anywhere under My Drive root.
+ */
+export async function cleanupAllEmptyFolders(
+    oauth2Client: Auth.OAuth2Client,
+): Promise<void> {
+  let deleted = 0;
+
+  try {
+    const rootFolderId = await getRootFolderId(oauth2Client);
+
+    const deleteEmptyDescendants = async (parentId: string): Promise<void> => {
+      const children = await getFolderChildren(oauth2Client, parentId);
+      const subfolders = children.filter((child) => child.mimeType === "application/vnd.google-apps.folder");
+
+      for (const folder of subfolders) {
+        await deleteEmptyDescendants(folder.id);
+
+        try {
+          if (await isFolderEmpty(oauth2Client, folder.id)) {
+            await deleteFolder(oauth2Client, folder.id);
+            deleted++;
+          }
+        } catch (error) {
+          const errMsg = error instanceof Error ? error.message : String(error);
+          logger.warn("Drive organize: Failed to delete empty folder", {
+            folderId: folder.id,
+            folderName: folder.name,
+            error: errMsg,
+          });
+        }
+      }
+    };
+
+    await deleteEmptyDescendants(rootFolderId);
+
+    if (deleted > 0) {
+      logger.info("Drive organize: Deleted empty folders", {deleted});
+    }
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    logger.warn("Drive organize: Failed to clean up all empty folders", {
       error: errMsg,
     });
   }
