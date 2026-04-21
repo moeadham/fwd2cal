@@ -24,8 +24,8 @@ functions/test/bindings/ics/
 firebase-debug.log
 pubsub-debug.log
 
-# Local Netlify folder
 .netlify
+.claude
 CLAUDE.md
 .env
 .env.*

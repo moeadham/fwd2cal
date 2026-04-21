@@ -17,7 +17,7 @@ const ProposeFileActionSchema = z.object({
 type ProposeFileActionResult = z.infer<typeof ProposeFileActionSchema>;
 
 const prompt: DrivePromptConfig = {
-  model: "openai/o4-mini",
+  model: "openai/gpt-4.1-mini",
   temperature: 0.1,
   prompt: `You are organizing one Google Drive file at a time.
 
