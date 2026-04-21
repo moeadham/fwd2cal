@@ -49,8 +49,7 @@ async function getUserFromEmail(email: string): Promise<string | null> {
 async function findUsersWithExpiringTokens(
     collection: string,
 ): Promise<UserWithExpiringTokens[]> {
-  const now = new Date();
-  const twoHoursLater = new Date(now.getTime() + 2 * 60 * 60 * 1000);
+  const twoHoursLater = Date.now() + 2 * 60 * 60 * 1000;
   const users: UserWithExpiringTokens[] = [];
 
   const usersRef = getFirestore().collection(collection);
