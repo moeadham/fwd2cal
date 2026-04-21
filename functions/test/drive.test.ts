@@ -2234,6 +2234,208 @@ describe("organize sequential execution proposal builder", function() {
     expect(unsafe[0]).to.deep.equal(actions[0]);
   });
 
+  it("DT00ubk bails planning chunks when proposal status is cancelled", async function() {
+    const uid = "execution-cancelled-planning";
+    const sender = "cancelled-planning@example.com";
+    const proposalId = `execution-cancelled-planning-${Date.now()}`;
+    const storagePath = `organize-proposals/${proposalId}.json`;
+    const phaseData = {
+      directoryLayout: {
+        approvedStructure: [{
+          folder_path: "01-Docs",
+          description: "Documents",
+        }],
+      },
+      filenameConvention: {convention: "YYYY.MM.DD - Description.ext"},
+      execution: {chunkSize: 1, totalChunks: 2, completedChunks: 0},
+    };
+    await db.collection("DriveUsers").doc(uid).set({
+      access_token: "test-access-token",
+      refresh_token: "test-refresh-token",
+    });
+    await db.collection("OrganizeProposals").doc(proposalId).set({
+      uid,
+      senderEmail: sender,
+      emailId: "cancelled-planning-email-id",
+      status: "cancelled",
+      phase: "plan_review",
+      createdAt: "2026-04-16T00:00:00.000Z",
+      expiresAt: "2099-04-16T00:00:00.000Z",
+      storagePath,
+      phaseData,
+      cost: {},
+    });
+
+    const bucket = getStorage().bucket();
+    await bucket.file(storagePath).save(JSON.stringify({
+      fileEntries: [{
+        id: "file-1",
+        name: "receipt.pdf",
+        mimeType: "application/pdf",
+        parentId: "root",
+        parentPath: "My Drive",
+        createdTime: "2026-04-10T00:00:00.000Z",
+        size: 100,
+        webViewLink: "",
+        isFolder: false,
+      }],
+      senderEmail: sender,
+      phaseData,
+    }), {contentType: "application/json"});
+
+    let llmCalls = 0;
+    setOpenAIClientForTest({
+      chat: {
+        completions: {
+          create: async () => {
+            llmCalls++;
+            throw new Error("LLM should not be called for cancelled planning chunks");
+          },
+        },
+      },
+    } as unknown as OpenAI);
+
+    await processPlanningChunk(makeTestEmail("plan"), {
+      proposalId,
+      emailId: "cancelled-planning-email-id",
+      uid,
+      chunkIndex: 0,
+    });
+
+    const proposal = await getOrganizeProposal(proposalId) as unknown as OrganizeProposalDoc;
+    const [planningChunkExists] = await bucket.file(`organize-proposals/${proposalId}-planning-chunk-0.json`).exists();
+    const [nextTreeExists] = await bucket.file(`organize-proposals/${proposalId}-execution-tree-0.json`).exists();
+    const [nextChunkExists] = await bucket.file(`organize-proposals/${proposalId}-planning-chunk-1.json`).exists();
+
+    expect(llmCalls).to.equal(0);
+    expect(proposal.status).to.equal("cancelled");
+    expect((proposal.phaseData as {execution?: {completedChunks?: number}} | undefined)?.execution?.completedChunks)
+        .to.equal(0);
+    expect(planningChunkExists).to.equal(false);
+    expect(nextTreeExists).to.equal(false);
+    expect(nextChunkExists).to.equal(false);
+  });
+
+  it("DT00ubl keeps status cancelled when planning is cancelled mid-chunk", async function() {
+    const uid = "execution-cancelled-mid-chunk";
+    const sender = "cancelled-mid-chunk@example.com";
+    const proposalId = `execution-cancelled-mid-chunk-${Date.now()}`;
+    const storagePath = `organize-proposals/${proposalId}.json`;
+    const phaseData = {
+      directoryLayout: {
+        approvedStructure: [{
+          folder_path: "01-Docs",
+          description: "Documents",
+        }],
+      },
+      filenameConvention: {convention: "YYYY.MM.DD - Description.ext"},
+      execution: {chunkSize: 1, totalChunks: 2, completedChunks: 0},
+    };
+    await db.collection("DriveUsers").doc(uid).set({
+      access_token: "test-access-token",
+      refresh_token: "test-refresh-token",
+    });
+    await db.collection("OrganizeProposals").doc(proposalId).set({
+      uid,
+      senderEmail: sender,
+      emailId: "admin-organize-cancelled-mid-chunk",
+      status: "planning",
+      phase: "plan_review",
+      createdAt: "2026-04-16T00:00:00.000Z",
+      expiresAt: "2099-04-16T00:00:00.000Z",
+      storagePath,
+      phaseData,
+      cost: {},
+    });
+
+    const bucket = getStorage().bucket();
+    await bucket.file(storagePath).save(JSON.stringify({
+      fileEntries: [
+        {
+          id: "file-1",
+          name: "receipt.pdf",
+          mimeType: "application/pdf",
+          parentId: "root",
+          parentPath: "My Drive",
+          createdTime: "2026-04-10T00:00:00.000Z",
+          size: 999999999,
+          webViewLink: "",
+          isFolder: false,
+        },
+        {
+          id: "file-2",
+          name: "contract.pdf",
+          mimeType: "application/pdf",
+          parentId: "root",
+          parentPath: "My Drive",
+          createdTime: "2026-04-11T00:00:00.000Z",
+          size: 999999999,
+          webViewLink: "",
+          isFolder: false,
+        },
+      ],
+      senderEmail: sender,
+      phaseData,
+    }), {contentType: "application/json"});
+    await bucket.file(`organize-proposals/${proposalId}-execution-tree--1.json`).save(JSON.stringify([{
+      folder_path: "01-Docs",
+      description: "Documents",
+    }]), {contentType: "application/json"});
+
+    let llmCalls = 0;
+    setOpenAIClientForTest({
+      chat: {
+        completions: {
+          create: async () => {
+            llmCalls++;
+            await db.collection("OrganizeProposals").doc(proposalId).update({status: "cancelled"});
+            return {
+              choices: [{
+                message: {
+                  content: JSON.stringify({
+                    file_id: "file-1",
+                    current_name: "receipt.pdf",
+                    current_path: "My Drive",
+                    new_name: "2026.04.10 - Receipt.pdf",
+                    target_directory: "01-Docs",
+                    action: "move_and_rename",
+                    needs_new_directory: false,
+                    new_directory: null,
+                    reason: "Organize receipt",
+                  }),
+                },
+                finish_reason: "stop",
+              }],
+              usage: {total_tokens: 1},
+            };
+          },
+        },
+      },
+    } as unknown as OpenAI);
+
+    await processPlanningChunk(makeTestEmail("plan"), {
+      proposalId,
+      emailId: "admin-organize-cancelled-mid-chunk",
+      uid,
+      chunkIndex: 0,
+    });
+
+    const proposal = await getOrganizeProposal(proposalId) as unknown as OrganizeProposalDoc;
+    const [planningChunkExists] = await bucket.file(`organize-proposals/${proposalId}-planning-chunk-0.json`).exists();
+    const [treeExists] = await bucket.file(`organize-proposals/${proposalId}-execution-tree-0.json`).exists();
+    const [nextChunkExists] = await bucket.file(`organize-proposals/${proposalId}-planning-chunk-1.json`).exists();
+    const [planExists] = await bucket.file(`organize-proposals/proposal-${proposalId}.json`).exists();
+
+    expect(llmCalls).to.equal(1);
+    expect(proposal.status).to.equal("cancelled");
+    expect((proposal.phaseData as {execution?: {completedChunks?: number}} | undefined)?.execution?.completedChunks)
+        .to.equal(0);
+    expect(planningChunkExists).to.equal(true);
+    expect(treeExists).to.equal(true);
+    expect(nextChunkExists).to.equal(false);
+    expect(planExists).to.equal(false);
+  });
+
   async function runProcessExecutionOverrideCase(options: {
     testId: string;
     file: DriveFileEntry;

@@ -293,7 +293,8 @@ export interface OrganizeProposalDoc {
   uid: string;
   senderEmail: string;
   emailId: string;
-  status: "generating" | "planning" | "pending" | "approved" | "executing" | "completed" | "failed" | "undone";
+  status: "generating" | "planning" | "pending" | "approved" | "executing" |
+    "completed" | "failed" | "undone" | "cancelled";
   phase?: OrganizePhase;
   phaseData?: OrganizePhaseData;
   createdAt: string;
