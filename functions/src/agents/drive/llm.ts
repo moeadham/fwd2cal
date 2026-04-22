@@ -292,76 +292,6 @@ async function proposeFilePlacement(
  * Accepts current proposal (target folder + proposed name) as context so the LLM can
  * refine placement with file content while respecting the approved structure.
  */
-async function proposeOrganizePlacement(
-    file: FileInfo,
-    approvedFolders: string[],
-    currentTargetFolder: string,
-    currentProposedName: string,
-    uid: string | null = null,
-    imageUrls: string[] = [],
-    filenameConvention?: string,
-    folderConvention?: string,
-    folderConventionDescription?: string,
-): Promise<FileProposal> {
-  const {prompts, versions} = getPrompts();
-  let userText = "## Approved Folder Tree\n";
-  if (approvedFolders.length > 0) {
-    userText += approvedFolders.map((f) => `- ${f}`).join("\n") + "\n";
-  } else {
-    userText += "(empty)\n";
-  }
-  userText += "\n";
-  userText += renderFolderConventionBlock(folderConvention, folderConventionDescription);
-
-  userText += "## File\n";
-  userText += `Filename: ${file.fileName}\n`;
-  userText += `MIME Type: ${file.mimeType}\n`;
-  userText += `Size: ${file.fileSize} bytes\n`;
-  if (file.contentSummary) {
-    userText += `Content Summary: ${file.contentSummary}\n`;
-  }
-
-  userText += "\n## Current Proposal\n";
-  userText += `Target folder: ${currentTargetFolder}\n`;
-  userText += `Proposed name: ${currentProposedName}\n`;
-  userText += renderFilenameConventionBlock(filenameConvention);
-
-  let userContent: string | Array<TextContent | ImageURLContent>;
-  if (imageUrls.length > 0) {
-    const contentArray: Array<TextContent | ImageURLContent> = [
-      {type: "text", text: userText},
-    ];
-    imageUrls.forEach((url) => {
-      contentArray.push({type: "image_url", image_url: {url}});
-    });
-    userContent = contentArray;
-  } else {
-    userContent = userText;
-  }
-
-  const messages: ChatMessage[] = [
-    {role: "system", content: prompts.proposeOrganizePlacement.prompt},
-    {role: "user", content: userContent},
-  ];
-
-  logger.info("Organize placement proposal prompt", {
-    system: prompts.proposeOrganizePlacement.prompt,
-    user: userText,
-    imageCount: imageUrls.length,
-  });
-
-  const result = await defaultCompletion<FileProposal>(
-      messages,
-      prompts.proposeOrganizePlacement.model,
-      prompts.proposeOrganizePlacement.temperature ?? DEFAULT_TEMP,
-      FileProposalSchema,
-      uid,
-      {promptVersion: versions.PROMPT_PROPOSE_ORGANIZE_PLACEMENT_VERSION},
-  );
-
-  return result as FileProposal;
-}
-
 /**
  * Interpret a user's reply to move uploaded files to a new location.
  */
@@ -794,6 +724,7 @@ async function proposeFileAction(
     fileInfo: DriveFileEntry,
     contentSummary: string,
     uid: string | null = null,
+    imageUrls: string[] = [],
 ): Promise<ProposeFileActionResult> {
   const {prompts, versions} = getPrompts();
   const tree = directoryTree
@@ -809,9 +740,21 @@ async function proposeFileAction(
     `Created: ${fileInfo.createdTime}\n` +
     `Size: ${fileInfo.size} bytes\n\n` +
     `## Content Summary\n${contentSummary || "(none)"}\n`;
+  let userContent: string | Array<TextContent | ImageURLContent>;
+  if (imageUrls.length > 0) {
+    const contentArray: Array<TextContent | ImageURLContent> = [
+      {type: "text", text: userText},
+    ];
+    imageUrls.forEach((url) => {
+      contentArray.push({type: "image_url", image_url: {url}});
+    });
+    userContent = contentArray;
+  } else {
+    userContent = userText;
+  }
   const messages: ChatMessage[] = [
     {role: "system", content: prompts.proposeFileAction.prompt},
-    {role: "user", content: userText},
+    {role: "user", content: userContent},
   ];
   return await defaultCompletion<ProposeFileActionResult>(
       messages,
@@ -1759,7 +1702,6 @@ function mergeRevisedProposal(
 
 export {
   proposeFilePlacement,
-  proposeOrganizePlacement,
   DEFAULT_FOLDER_CONVENTION,
   DEFAULT_FILENAME_CONVENTION,
   renderFolderConventionBlock,

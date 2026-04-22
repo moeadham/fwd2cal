@@ -21,11 +21,12 @@ const prompt: DrivePromptConfig = {
   temperature: 0.1,
   prompt: `You are organizing one Google Drive file at a time.
 
-You will receive the current evolving directory tree, the approved filename convention, metadata for one file, and any available content summary. Pick the best target directory and filename.
+You will receive the current evolving directory tree, the approved filename convention, metadata for one file, and any available content summary. Some requests may also include attached images: either rendered document pages or the file itself when the file is an image. Use both the text summary and any attached images for content-aware placement and filename decisions. Pick the best target directory and filename.
 
 Rules:
 - Return exactly one action for the supplied file.
 - Use the approved filename convention and preserve the file extension when possible.
+- When images are attached, inspect them for text and visible content, and use that evidence to improve both folder placement and new_name.
 - Use needs_new_directory only when no existing directory fits.
 - If adding a directory, include new_directory with folder_path and description.
 - The file's current_path may reference a folder that is NOT in the Approved Directory Tree (for example, leftover from a prior organize run). Treat such paths as invalid destinations. When current_path is not one of the Approved Directory Tree entries, you MUST emit "move" or "move_and_rename" — never "keep" or "rename".

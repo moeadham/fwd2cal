@@ -15,7 +15,6 @@ import {driveMailTemplates, driveOrganizeActionUrl} from "../mailTemplates";
 import {
   DriveFileEntry,
   DriveOrganizeProposal,
-  FileInfo,
   MoveChunkTaskData,
   OrganizeEmbeddedData,
   OrganizeIntermediateState,
@@ -26,7 +25,7 @@ import {
 } from "../types";
 import {buildOrganizeEmbeddedData, renderFolderTree} from "../templates/folderTree";
 import {extractContentSummary, extractDocumentImageUrls} from "../fileProcessor";
-import {DEFAULT_FOLDER_CONVENTION, proposeFileAction, proposeOrganizePlacement} from "../llm";
+import {DEFAULT_FOLDER_CONVENTION, proposeFileAction} from "../llm";
 import {ProposeFileActionResult} from "../prompts/proposeFileAction/v1";
 import {applyTemplate, toTitleCase} from "../driveUtils";
 import {
@@ -61,13 +60,14 @@ type PlanningChunkResult = {
   stats: {planned: number; failed: number; skipped: number};
 };
 
-type FileSummaryProvider = (file: DriveFileEntry) => Promise<string>;
+type FileSummaryProvider = (file: DriveFileEntry) => Promise<{contentSummary: string; imageUrls: string[]}>;
 type FileActionProposer = (
   directoryTree: DriveOrganizeProposal["proposed_folders"],
   convention: string,
   file: DriveFileEntry,
   contentSummary: string,
   uid: string,
+  imageUrls?: string[],
 ) => Promise<ProposeFileActionResult>;
 type OrganizeFileActionType = DriveOrganizeProposal["file_actions"][number]["action"];
 
@@ -150,8 +150,8 @@ export async function buildSequentialExecutionProposal(
   const fileActions: DriveOrganizeProposal["file_actions"] = [];
 
   for (const file of nonFolderFiles) {
-    const contentSummary = await summarizeFile(file);
-    const action = await proposeAction(runningTree, convention, file, contentSummary, uid);
+    const {contentSummary, imageUrls} = await summarizeFile(file);
+    const action = await proposeAction(runningTree, convention, file, contentSummary, uid, imageUrls);
     if (action.needs_new_directory && action.new_directory &&
         !knownDirectories.has(action.new_directory.folder_path)) {
       runningTree.push(action.new_directory);
@@ -305,15 +305,35 @@ export function applyPlanPatches(
 async function summarizeExecutionFile(
     oauth2Client: Auth.OAuth2Client,
     file: DriveFileEntry,
-): Promise<string> {
+): Promise<{contentSummary: string; imageUrls: string[]}> {
   if (file.size > MAX_DRIVE_UPLOAD_BYTES.value()) {
-    return "";
+    return {contentSummary: "", imageUrls: []};
   }
   const fileContent = await readDriveFileContent(oauth2Client, file.id, file.mimeType);
   if (!fileContent) {
-    return "";
+    return {contentSummary: "", imageUrls: []};
   }
-  return extractContentSummary(fileContent.buffer, fileContent.parserMimeType);
+  const contentSummary = await extractContentSummary(fileContent.buffer, fileContent.parserMimeType);
+  try {
+    const docImageUrls = await extractDocumentImageUrls(fileContent.buffer, fileContent.parserMimeType);
+    const isDirectImage = [".png", ".jpg", ".jpeg", ".webp"].some((ext) => file.name.toLowerCase().endsWith(ext));
+    const directImageUrls: string[] = [];
+    if (isDirectImage && fileContent.buffer.length <= 50 * 1024 * 1024) {
+      const base64 = fileContent.buffer.toString("base64");
+      directImageUrls.push(`data:${fileContent.parserMimeType};base64,${base64}`);
+    }
+    return {
+      contentSummary,
+      imageUrls: [...docImageUrls, ...directImageUrls],
+    };
+  } catch (error) {
+    logger.warn("Drive organize planning chunk: Failed to extract images", {
+      fileId: file.id,
+      mimeType: fileContent.parserMimeType,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return {contentSummary, imageUrls: []};
+  }
 }
 
 /** Resolves or creates a folder path under My Drive. */
@@ -457,8 +477,8 @@ export async function processPlanningChunk(
 
   for (const file of chunkFiles) {
     try {
-      const contentSummary = await summarizeExecutionFile(oauth2Client, file);
-      const proposed = await proposeFileAction(runningTree, convention, file, contentSummary, uid);
+      const {contentSummary, imageUrls} = await summarizeExecutionFile(oauth2Client, file);
+      const proposed = await proposeFileAction(runningTree, convention, file, contentSummary, uid, imageUrls);
       if (proposed.needs_new_directory && proposed.new_directory &&
           !knownDirectories.has(proposed.new_directory.folder_path)) {
         runningTree.push(proposed.new_directory);
@@ -698,9 +718,17 @@ export async function processMoveChunk(
         }
       }
       if (action.new_name && action.new_name !== (meta.data.name || action.current_name)) {
-        await renameFile(oauth2Client, action.file_id, action.new_name);
-        snapshotEntry.newName = action.new_name;
-        stats.renamed++;
+        const isFolder = action.current_path === "My Drive" &&
+          proposal.proposed_folders.some((f) => f.folder_path === action.new_name);
+        if (isFolder) {
+          await renameFolder(oauth2Client, action.file_id, action.new_name);
+          snapshotEntry.newName = action.new_name;
+          stats.renamed++;
+        } else {
+          await renameFile(oauth2Client, action.file_id, action.new_name);
+          snapshotEntry.newName = action.new_name;
+          stats.renamed++;
+        }
       }
       snapshot.push(snapshotEntry);
     } catch (error) {
@@ -807,10 +835,10 @@ export async function processMoveChunk(
 export async function executeOrganizeProposal(
     oauth2Client: Auth.OAuth2Client,
     proposal: DriveOrganizeProposal,
-    uid: string | null = null,
-    filenameConvention: string = "YYYY.MM.DD - Description.ext",
-    folderConvention: string = DEFAULT_FOLDER_CONVENTION,
-    folderConventionDescription?: string,
+    _uid: string | null = null,
+    _filenameConvention: string = "YYYY.MM.DD - Description.ext",
+    _folderConvention: string = DEFAULT_FOLDER_CONVENTION,
+    _folderConventionDescription?: string,
 ): Promise<{
   folderMap: Map<string, string>;
   snapshot: OrganizeSnapshotAction[];
@@ -1012,117 +1040,15 @@ export async function executeOrganizeProposal(
         }
       }
 
-      // Safety net: rename path runs for every non-"keep" action. The LLM
-      // sometimes returns "move" when the filename needs an update too;
-      // falling into the content-aware naming path covers that gap.
-      // "keep" is already filtered via early continue above.
-      {
-        // For folder rename actions, use renameFolder.
-        const isFolder = action.current_path === "My Drive" &&
-          proposal.proposed_folders.some((f) => f.folder_path === action.new_name);
-        if (isFolder) {
-          await renameFolder(oauth2Client, action.file_id, action.new_name);
-          snapshotEntry.newName = action.new_name;
-        } else {
-          // Content-aware naming: read file, extract content, get LLM-suggested name
-          // Skip files exceeding the upload size limit (same as file proposal flow)
-          let finalName = action.new_name;
-          try {
-            let fileContent = meta.size <= MAX_DRIVE_UPLOAD_BYTES.value() ?
-              await readDriveFileContent(oauth2Client, action.file_id, meta.mimeType) :
-              null;
-            if (fileContent) {
-              const contentSummary = await extractContentSummary(
-                  fileContent.buffer, fileContent.parserMimeType,
-              );
-              // Mirror file-proposal image extraction (buildFileInfos + collectImageUrls)
-              // 1. Document page images (same as buildFileInfos → extractDocumentImageUrls)
-              const docImageUrls = await extractDocumentImageUrls(
-                  fileContent.buffer, fileContent.parserMimeType,
-              );
-              // 2. Image files directly as base64 (equivalent to collectImageUrls, but
-              //    we already have the buffer instead of a download URL)
-              const imageExtensions = [".png", ".jpg", ".jpeg", ".webp"];
-              const isImage = imageExtensions.some((ext) =>
-                action.current_name.toLowerCase().endsWith(ext));
-              const directImageUrls: string[] = [];
-              if (isImage && fileContent.buffer.length <= 50 * 1024 * 1024) {
-                const base64 = fileContent.buffer.toString("base64");
-                directImageUrls.push(`data:${meta.mimeType};base64,${base64}`);
-              }
-              const imageUrls = [...docImageUrls, ...directImageUrls];
-              // Release buffer before LLM call to avoid holding both buffer + base64 in memory
-              fileContent = null;
-
-              // Proceed if we have text content OR image data for the LLM
-              if (contentSummary || imageUrls.length > 0) {
-                const fileInfo: FileInfo = {
-                  fileName: action.current_name,
-                  mimeType: meta.mimeType,
-                  fileSize: meta.size,
-                  contentSummary,
-                };
-                const approvedFolders = proposal.proposed_folders.map((f) => f.folder_path);
-                const placement = await proposeOrganizePlacement(
-                    fileInfo,
-                    approvedFolders,
-                    action.new_folder,
-                    action.new_name,
-                    uid,
-                    imageUrls,
-                    filenameConvention,
-                    folderConvention,
-                    folderConventionDescription,
-                );
-                if (placement.proposals[0]?.suggested_name) {
-                  finalName = placement.proposals[0].suggested_name;
-                  logger.info("Drive organize: Content-aware rename", {
-                    fileId: action.file_id,
-                    metadataName: action.new_name,
-                    contentName: finalName,
-                  });
-                }
-                // Relocate the file if the content-aware placement chose a different folder.
-                if (placement.folder_name && placement.folder_name !== action.new_folder) {
-                  const approvedTopLevels = new Set(
-                      approvedFolders.map((p) => p.split("/")[0]).filter(Boolean),
-                  );
-                  const newTopLevel = placement.folder_name.split("/")[0];
-                  if (approvedTopLevels.has(newTopLevel)) {
-                    logger.info("Drive organize: Content-aware relocation", {
-                      fileId: action.file_id,
-                      fromFolder: action.new_folder,
-                      toFolder: placement.folder_name,
-                    });
-                    const newTargetId = await resolveFolderPath(
-                        oauth2Client, folderMap, placement.folder_name,
-                    );
-                    const currentParentId = snapshotEntry.newParentId ||
-                      snapshotEntry.originalParentId;
-                    if (newTargetId && newTargetId !== currentParentId) {
-                      await moveFile(oauth2Client, action.file_id, newTargetId, currentParentId);
-                      snapshotEntry.newParentId = newTargetId;
-                    }
-                  } else {
-                    logger.warn("Drive organize: ignoring content-aware relocation with invalid top-level", {
-                      fileId: action.file_id,
-                      proposedFolder: placement.folder_name,
-                    });
-                  }
-                }
-              }
-            }
-          } catch (contentErr) {
-            const msg = contentErr instanceof Error ? contentErr.message : String(contentErr);
-            logger.warn("Drive organize: Content-aware naming failed, using metadata name", {
-              fileId: action.file_id, error: msg,
-            });
-          }
-          await renameFile(oauth2Client, action.file_id, finalName);
-          snapshotEntry.newName = finalName;
-        }
-        stats.renamed++;
+      const isFolder = action.current_path === "My Drive" &&
+        proposal.proposed_folders.some((f) => f.folder_path === action.new_name);
+      if (isFolder) {
+        await renameFolder(oauth2Client, action.file_id, action.new_name);
+      } else {
+        await renameFile(oauth2Client, action.file_id, action.new_name);
       }
+      snapshotEntry.newName = action.new_name;
+      stats.renamed++;
 
       snapshot.push(snapshotEntry);
     } catch (error) {
