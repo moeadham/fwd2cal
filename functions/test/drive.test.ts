@@ -38,6 +38,7 @@ import {
   renumberFoldersContiguously,
   renderFolderTreePlainText,
 } from "../src/agents/drive/llm";
+import * as driveLlm from "../src/agents/drive/llm";
 import {
   DriveFileEntry,
   DriveOrganizeProposal,
@@ -1742,12 +1743,15 @@ describe("organize phased proposal flow", function() {
           conventionDescription: "Loose topical folders",
           proposedStructure: [
             {folder_path: "01-Documents", description: "Documents"},
+            {folder_path: "01-Documents/Inbox", description: "Imported inbox documents"},
           ],
           directoryMoves: [
-            {current_path: "Inbox", proposed_path: "01-Documents/Inbox", reason: "Nest inbox docs"},
+            {current_path: "Inbox", proposed_path: "01-Documents/Inbox", reason: "Keep loose files under Documents"},
           ],
+          addedDirectories: ["01-Documents/Inbox"],
           approvedStructure: [
             {folder_path: "01-Documents", description: "Documents"},
+            {folder_path: "01-Documents/Inbox", description: "Imported inbox documents"},
           ],
         },
         filenameConvention: {
@@ -1761,26 +1765,66 @@ describe("organize phased proposal flow", function() {
     const proposalId = `phase-0-${Date.now()}`;
     const proposalDoc = makePhaseDoc("folder_preferences");
     await seedPhaseProposal(proposalId, proposalDoc);
-    setFakeStructuredCompletions([{
-      has_existing_convention: false,
-      convention_description: "NN-Category root folders",
-      proposed_structure: [{
-        folder_path: "01-Documents",
-        description: "Documents",
-        source: "proposed",
-      }],
-      summary: "Use numbered root folders.",
-    }]);
+    const sentTrees: DriveOrganizeProposal["proposed_folders"][] = [];
+    const originalSendOrganizePhase1aEmail = organizeHelpers.sendOrganizePhase1aEmail;
+    (organizeHelpers as typeof organizeHelpers & {
+      sendOrganizePhase1aEmail: typeof organizeHelpers.sendOrganizePhase1aEmail;
+    }).sendOrganizePhase1aEmail = async (
+        _sender,
+        _email,
+        _proposalId,
+        _conventionSummary,
+        _summary,
+        folders,
+    ) => {
+      sentTrees.push(folders);
+    };
+    setFakeStructuredCompletions([
+      {
+        has_existing_convention: false,
+        convention_description: "NN-Category root folders",
+        proposed_structure: [{
+          folder_path: "01-Documents",
+          description: "Documents",
+          source: "proposed",
+        }],
+        summary: "Use numbered root folders.",
+      },
+      {
+        directory_moves: [{
+          current_path: "Inbox",
+          proposed_path: "02-Misc/Inbox",
+          reason: "Catch unmatched root files in a fallback bucket",
+        }],
+        no_changes_needed: false,
+        summary: "Add a fallback bucket for loose inbox files.",
+      },
+      {
+        final_directories: [
+          {folder_path: "01-Documents", description: "Documents"},
+          {folder_path: "02-Misc", description: "Fallback bucket"},
+          {folder_path: "02-Misc/Inbox", description: "Imported inbox files"},
+        ],
+        added_directories: ["02-Misc", "02-Misc/Inbox"],
+        summary: "Use numbered root folders with a fallback bucket.",
+      },
+    ]);
 
-    await organizeProposalTestHooks.handleOrganizePhaseReply(
-        makeTestEmail("approve"),
-        sender,
-        uid,
-        proposalId,
-        proposalDoc,
-        "approve",
-        true,
-    );
+    try {
+      await organizeProposalTestHooks.handleOrganizePhaseReply(
+          makeTestEmail("approve"),
+          sender,
+          uid,
+          proposalId,
+          proposalDoc,
+          "approve",
+          true,
+      );
+    } finally {
+      (organizeHelpers as typeof organizeHelpers & {
+        sendOrganizePhase1aEmail: typeof organizeHelpers.sendOrganizePhase1aEmail;
+      }).sendOrganizePhase1aEmail = originalSendOrganizePhase1aEmail;
+    }
 
     const stored = (await db.collection("OrganizeProposals").doc(proposalId).get()).data();
     if (stored) stored.phaseData = await getOrganizePhaseData(proposalId);
@@ -1792,9 +1836,22 @@ describe("organize phased proposal flow", function() {
         .to.equal("NN-Category");
     expect(stored?.phaseData.directoryLayout.conventionDescription)
         .to.equal("Two-digit zero-padded prefix, a dash, then the category name (e.g. 01-Documents).");
+    expect(stored?.phaseData.directoryLayout.proposedStructure).to.deep.equal([
+      {folder_path: "01-Documents", description: "Documents"},
+      {folder_path: "02-Misc", description: "Fallback bucket"},
+      {folder_path: "02-Misc/Inbox", description: "Imported inbox files"},
+    ]);
+    expect(stored?.phaseData.directoryLayout.directoryMoves).to.deep.equal([{
+      current_path: "Inbox",
+      proposed_path: "02-Misc/Inbox",
+      reason: "Catch unmatched root files in a fallback bucket",
+    }]);
+    expect(stored?.phaseData.directoryLayout.addedDirectories).to.deep.equal(["02-Misc", "02-Misc/Inbox"]);
+    expect(stored?.phaseData.directoryLayout.summary)
+        .to.equal("Use numbered root folders with a fallback bucket.");
+    expect(sentTrees).to.deep.equal([stored?.phaseData.directoryLayout.proposedStructure]);
     expect(userDoc?.preferences.folderConvention)
         .to.equal("NN-Category");
-    expect(getLastSentEmail(sender)?.html).to.include("first pass");
   });
 
   it("DT00ub1 stores a folder_preferences convention revision as a token with description", async function() {
@@ -1816,6 +1873,19 @@ describe("organize phased proposal flow", function() {
           source: "proposed",
         }],
         summary: "Use pipe folders.",
+      },
+      {
+        directory_moves: [],
+        no_changes_needed: true,
+        summary: "No directory moves required.",
+      },
+      {
+        final_directories: [{
+          folder_path: "01|Finance",
+          description: "Financial documents",
+        }],
+        added_directories: [],
+        summary: "Finalized directory map.",
       },
     ]);
 
@@ -1851,25 +1921,6 @@ describe("organize phased proposal flow", function() {
     const proposalId = `phase-1a-${Date.now()}`;
     const proposalDoc = makePhaseDoc("directory_analysis");
     await seedPhaseProposal(proposalId, proposalDoc);
-    setFakeStructuredCompletions([
-      {
-        directory_moves: [{
-          current_path: "Inbox",
-          proposed_path: "01-Documents/Inbox",
-          reason: "Keep loose files under Documents",
-        }],
-        no_changes_needed: false,
-        summary: "Move Inbox under Documents.",
-      },
-      {
-        final_directories: [
-          {folder_path: "01-Documents", description: "Documents"},
-          {folder_path: "01-Documents/Inbox", description: "Imported inbox documents"},
-        ],
-        added_directories: ["01-Documents/Inbox"],
-        summary: "Finalized folder map.",
-      },
-    ]);
 
     await organizeProposalTestHooks.handleOrganizePhaseReply(
         makeTestEmail("approve"),
@@ -1906,26 +1957,67 @@ describe("organize phased proposal flow", function() {
     proposalDoc.phaseData!.directoryLayout!.conventionDescription =
       "Two-digit zero-padded prefix, a pipe, then the category name (e.g. 01|Finance).";
     await seedPhaseProposal(proposalId, proposalDoc);
-    setFakeStructuredCompletions([{
-      has_existing_convention: true,
-      convention_description: "Two-digit zero-padded prefix, a dash, then the category name (e.g. 01-Personal).",
-      proposed_structure: [
-        {folder_path: "01-Personal", description: "Personal", source: "proposed"},
-        {folder_path: "02-Work", description: "Work", source: "proposed"},
-        {folder_path: "03-Trading", description: "Trading", source: "proposed"},
-      ],
-      summary: "Keep only the requested roots.",
-    }]);
+    const sentTrees: DriveOrganizeProposal["proposed_folders"][] = [];
+    const originalSendOrganizePhase1aEmail = organizeHelpers.sendOrganizePhase1aEmail;
+    (organizeHelpers as typeof organizeHelpers & {
+      sendOrganizePhase1aEmail: typeof organizeHelpers.sendOrganizePhase1aEmail;
+    }).sendOrganizePhase1aEmail = async (
+        _sender,
+        _email,
+        _proposalId,
+        _conventionSummary,
+        _summary,
+        folders,
+    ) => {
+      sentTrees.push(folders);
+    };
+    setFakeStructuredCompletions([
+      {
+        has_existing_convention: true,
+        convention_description: "Two-digit zero-padded prefix, a dash, then the category name (e.g. 01-Personal).",
+        proposed_structure: [
+          {folder_path: "01-Personal", description: "Personal", source: "proposed"},
+          {folder_path: "02-Work", description: "Work", source: "proposed"},
+          {folder_path: "03-Trading", description: "Trading", source: "proposed"},
+        ],
+        summary: "Keep only the requested roots.",
+      },
+      {
+        directory_moves: [{
+          current_path: "Inbox",
+          proposed_path: "03|Trading/Inbox",
+          reason: "Keep inbox material under the new Trading branch",
+        }],
+        no_changes_needed: false,
+        summary: "Move Inbox into Trading.",
+      },
+      {
+        final_directories: [
+          {folder_path: "01|Personal", description: "Personal"},
+          {folder_path: "02|Work", description: "Work"},
+          {folder_path: "03|Trading", description: "Trading"},
+          {folder_path: "03|Trading/Inbox", description: "Inbox files"},
+        ],
+        added_directories: ["03|Trading/Inbox"],
+        summary: "Keep only the requested roots and add Inbox under Trading.",
+      },
+    ]);
 
-    await organizeProposalTestHooks.handleOrganizePhaseReply(
-        makeTestEmail("Only keep Personal, Work, Trading"),
-        sender,
-        uid,
-        proposalId,
-        proposalDoc,
-        "Only keep Personal, Work, Trading",
-        false,
-    );
+    try {
+      await organizeProposalTestHooks.handleOrganizePhaseReply(
+          makeTestEmail("Only keep Personal, Work, Trading"),
+          sender,
+          uid,
+          proposalId,
+          proposalDoc,
+          "Only keep Personal, Work, Trading",
+          false,
+      );
+    } finally {
+      (organizeHelpers as typeof organizeHelpers & {
+        sendOrganizePhase1aEmail: typeof organizeHelpers.sendOrganizePhase1aEmail;
+      }).sendOrganizePhase1aEmail = originalSendOrganizePhase1aEmail;
+    }
 
     const stored = (await db.collection("OrganizeProposals").doc(proposalId).get()).data();
     if (stored) stored.phaseData = await getOrganizePhaseData(proposalId);
@@ -1936,9 +2028,17 @@ describe("organize phased proposal flow", function() {
       {folder_path: "01|Personal", description: "Personal"},
       {folder_path: "02|Work", description: "Work"},
       {folder_path: "03|Trading", description: "Trading"},
+      {folder_path: "03|Trading/Inbox", description: "Inbox files"},
     ]);
-    expect(getLastSentEmail(sender)?.html).to.include("01|Personal");
-    expect(getLastSentEmail(sender)?.html).to.include("pipe");
+    expect(stored?.phaseData.directoryLayout.directoryMoves).to.deep.equal([{
+      current_path: "Inbox",
+      proposed_path: "03|Trading/Inbox",
+      reason: "Keep inbox material under the new Trading branch",
+    }]);
+    expect(stored?.phaseData.directoryLayout.addedDirectories).to.deep.equal(["03|Trading/Inbox"]);
+    expect(stored?.phaseData.directoryLayout.summary)
+        .to.equal("Keep only the requested roots and add Inbox under Trading.");
+    expect(sentTrees).to.deep.equal([stored?.phaseData.directoryLayout.proposedStructure]);
   });
 
   it("DT00ubb routes in-flight directory_placement replies to filename_convention", async function() {
@@ -1961,6 +2061,7 @@ describe("organize phased proposal flow", function() {
     expect(stored?.phase).to.equal("filename_convention");
     expect(stored?.phaseData.directoryLayout.approvedStructure).to.deep.equal([
       {folder_path: "01-Documents", description: "Documents"},
+      {folder_path: "01-Documents/Inbox", description: "Imported inbox documents"},
     ]);
     expect(getLastSentEmail(sender)?.html).to.include("filename convention");
   });
@@ -1986,6 +2087,7 @@ describe("organize phased proposal flow", function() {
     expect(stored?.phaseData.filenameConvention.convention).to.equal("YYYY.MM.DD - Description.ext");
     expect(stored?.phaseData.directoryLayout.approvedStructure).to.deep.equal([
       {folder_path: "01-Documents", description: "Documents"},
+      {folder_path: "01-Documents/Inbox", description: "Imported inbox documents"},
     ]);
     expect(getLastSentEmail(sender)?.html).to.include("filename convention");
   });
@@ -2027,15 +2129,30 @@ describe("organize phased proposal flow", function() {
       {folder_path: "02-Photos", description: "Photos"},
     ];
     await seedPhaseProposal(proposalId, proposalDoc);
-    setFakeStructuredCompletions([{
-      has_existing_convention: true,
-      convention_description: "Two-digit zero-padded prefix, a dash, then the category name (e.g. 01-Personal).",
-      proposed_structure: [
-        {folder_path: "01-Documents", description: "Documents", source: "proposed"},
-        {folder_path: "02-Media", description: "Media files", source: "proposed"},
-      ],
-      summary: "Moved photos into Media.",
-    }]);
+    setFakeStructuredCompletions([
+      {
+        has_existing_convention: true,
+        convention_description: "Two-digit zero-padded prefix, a dash, then the category name (e.g. 01-Personal).",
+        proposed_structure: [
+          {folder_path: "01-Documents", description: "Documents", source: "proposed"},
+          {folder_path: "02-Media", description: "Media files", source: "proposed"},
+        ],
+        summary: "Moved photos into Media.",
+      },
+      {
+        directory_moves: [],
+        no_changes_needed: true,
+        summary: "No directory moves required.",
+      },
+      {
+        final_directories: [
+          {folder_path: "01-Documents", description: "Documents"},
+          {folder_path: "02-Media", description: "Media files"},
+        ],
+        added_directories: [],
+        summary: "Finalized directory map.",
+      },
+    ]);
 
     const result = await organizeProposalTestHooks.handleOrganizePhaseReply(
         makeTestEmail("split photos into a new bucket"),
@@ -2072,54 +2189,62 @@ describe("organize phased proposal flow", function() {
     ];
     proposalDoc.phaseData!.filenameConvention!.convention = "YYYY-MM-DD_description.ext";
     await seedPhaseProposal(proposalId, proposalDoc);
-    setFakeStructuredCompletions([
-      {
-        directory_moves: [{
-          current_path: "Inbox",
-          proposed_path: "01-Documents/Inbox",
-          reason: "Keep loose files under Documents",
-        }],
-        no_changes_needed: false,
-        summary: "Move Inbox under Documents.",
-      },
-      {
-        final_directories: [
-          {folder_path: "04-Documents", description: "Documents"},
-          {folder_path: "04-Documents/Inbox", description: "Imported inbox documents"},
-          {folder_path: "07-Media", description: "Media files"},
-        ],
-        added_directories: ["04-Documents/Inbox"],
-        summary: "Finalized folder map.",
-      },
-    ]);
+    const originalEvaluateDirectoryPlacement = driveLlm.evaluateDirectoryPlacement;
+    const originalFinalizeDirectoryMap = driveLlm.finalizeDirectoryMap;
+    let evaluateCalls = 0;
+    let finalizeCalls = 0;
+    (driveLlm as typeof driveLlm & {
+      evaluateDirectoryPlacement: typeof driveLlm.evaluateDirectoryPlacement;
+      finalizeDirectoryMap: typeof driveLlm.finalizeDirectoryMap;
+    }).evaluateDirectoryPlacement = async () => {
+      evaluateCalls++;
+      throw new Error("evaluateDirectoryPlacement should not run during approval");
+    };
+    (driveLlm as typeof driveLlm & {
+      evaluateDirectoryPlacement: typeof driveLlm.evaluateDirectoryPlacement;
+      finalizeDirectoryMap: typeof driveLlm.finalizeDirectoryMap;
+    }).finalizeDirectoryMap = async () => {
+      finalizeCalls++;
+      throw new Error("finalizeDirectoryMap should not run during approval");
+    };
 
-    const result = await organizeProposalTestHooks.handleOrganizePhaseReply(
-        makeTestEmail("approve"),
-        sender,
-        uid,
-        proposalId,
-        proposalDoc,
-        "approve",
-        true,
-    );
+    let result;
+    try {
+      result = await organizeProposalTestHooks.handleOrganizePhaseReply(
+          makeTestEmail("approve"),
+          sender,
+          uid,
+          proposalId,
+          proposalDoc,
+          "approve",
+          true,
+      );
+    } finally {
+      (driveLlm as typeof driveLlm & {
+        evaluateDirectoryPlacement: typeof driveLlm.evaluateDirectoryPlacement;
+        finalizeDirectoryMap: typeof driveLlm.finalizeDirectoryMap;
+      }).evaluateDirectoryPlacement = originalEvaluateDirectoryPlacement;
+      (driveLlm as typeof driveLlm & {
+        evaluateDirectoryPlacement: typeof driveLlm.evaluateDirectoryPlacement;
+        finalizeDirectoryMap: typeof driveLlm.finalizeDirectoryMap;
+      }).finalizeDirectoryMap = originalFinalizeDirectoryMap;
+    }
 
     expect(result?.proposalSent).to.equal(true);
     const stored = (await db.collection("OrganizeProposals").doc(proposalId).get()).data();
     if (stored) stored.phaseData = await getOrganizePhaseData(proposalId);
     expect(stored?.phase).to.equal("cost_estimate");
     expect(stored?.phaseData.directoryLayout.returnToCostEstimate).to.equal(undefined);
+    expect(evaluateCalls).to.equal(0);
+    expect(finalizeCalls).to.equal(0);
     expect(stored?.phaseData.directoryLayout.approvedStructure).to.deep.equal([
       {folder_path: "01-Documents", description: "Documents"},
-      {folder_path: "01-Documents/Inbox", description: "Imported inbox documents"},
       {folder_path: "02-Media", description: "Media files"},
     ]);
     expect(stored?.phaseData.filenameConvention.convention).to.equal("YYYY-MM-DD_description.ext");
     expect(getLastSentEmail(sender)?.html).to.include("final check");
     expect(getLastSentEmail(sender)?.html).to.include("01-Documents");
-    expect(getLastSentEmail(sender)?.html).to.include("Inbox");
     expect(getLastSentEmail(sender)?.html).to.include("02-Media");
-    expect(getLastSentEmail(sender)?.html).to.not.include("04-Documents");
-    expect(getLastSentEmail(sender)?.html).to.not.include("07-Media");
     expect(getLastSentEmail(sender)?.html).to.not.include("start generating file proposals");
   });
 
@@ -2134,16 +2259,32 @@ describe("organize phased proposal flow", function() {
       {folder_path: "07-Personal", description: "Personal"},
     ];
     await seedPhaseProposal(proposalId, proposalDoc);
-    setFakeStructuredCompletions([{
-      has_existing_convention: true,
-      convention_description: "Two-digit zero-padded prefix, a dash, then the category name (e.g. 01-Personal).",
-      proposed_structure: [
-        {folder_path: "04-Work", description: "Work", source: "existing"},
-        {folder_path: "07-Personal", description: "Personal", source: "existing"},
-        {folder_path: "Trading", description: "Trading", source: "proposed"},
-      ],
-      summary: "Added Trading and normalized prefixes.",
-    }]);
+    setFakeStructuredCompletions([
+      {
+        has_existing_convention: true,
+        convention_description: "Two-digit zero-padded prefix, a dash, then the category name (e.g. 01-Personal).",
+        proposed_structure: [
+          {folder_path: "04-Work", description: "Work", source: "existing"},
+          {folder_path: "07-Personal", description: "Personal", source: "existing"},
+          {folder_path: "Trading", description: "Trading", source: "proposed"},
+        ],
+        summary: "Added Trading and normalized prefixes.",
+      },
+      {
+        directory_moves: [],
+        no_changes_needed: true,
+        summary: "No directory moves required.",
+      },
+      {
+        final_directories: [
+          {folder_path: "04-Work", description: "Work"},
+          {folder_path: "07-Personal", description: "Personal"},
+          {folder_path: "Trading", description: "Trading"},
+        ],
+        added_directories: [],
+        summary: "Finalized directory map.",
+      },
+    ]);
 
     await organizeProposalTestHooks.handleOrganizePhaseReply(
         makeTestEmail("add trading and make the roots contiguous"),

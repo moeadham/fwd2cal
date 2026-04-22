@@ -89,6 +89,49 @@ function renumberDirectoryStructure(
   return proposal.proposed_folders;
 }
 
+async function finalizeProposedDirectoryTree({
+  proposedStructure,
+  treeSummary,
+  folderConvention,
+  userFeedback,
+  uid,
+}: {
+  proposedStructure: DriveOrganizeProposal["proposed_folders"];
+  treeSummary: string;
+  folderConvention?: string;
+  userFeedback?: string;
+  uid: string;
+}): Promise<{
+    finalStructure: DriveOrganizeProposal["proposed_folders"];
+    directoryMoves: Awaited<ReturnType<typeof evaluateDirectoryPlacement>>["directory_moves"];
+    addedDirectories: string[];
+    summary: string;
+  }> {
+  const placement = await evaluateDirectoryPlacement(
+      treeSummary,
+      proposedStructure,
+      uid,
+  );
+  const finalized = await finalizeDirectoryMap(
+      proposedStructure,
+      placement.directory_moves,
+      treeSummary,
+      uid,
+      userFeedback || "",
+  );
+  const finalStructure = renumberDirectoryStructure(
+      finalized.final_directories,
+      finalized.summary,
+      folderConvention,
+  );
+  return {
+    finalStructure,
+    directoryMoves: placement.directory_moves,
+    addedDirectories: finalized.added_directories,
+    summary: finalized.summary,
+  };
+}
+
 /** Loads the Drive tree summary from GCS intermediate state. */
 async function loadTreeSummary(proposalId: string): Promise<string> {
   const state = await getOrganizeIntermediateState(proposalId);
@@ -208,6 +251,12 @@ async function handleFolderPreferencesReply(
     folder_path: folder.folder_path,
     description: folder.description,
   }));
+  const finalizedLayout = await finalizeProposedDirectoryTree({
+    proposedStructure,
+    treeSummary,
+    folderConvention: resolvedConvention,
+    uid,
+  });
   const nextPhaseData = {
     ...proposalDoc.phaseData,
     folderPreferences: {
@@ -218,8 +267,10 @@ async function handleFolderPreferencesReply(
       userPrompt: email.text || email.html || "",
       folderConvention: resolvedConvention,
       conventionDescription: resolvedConventionDescription,
-      proposedStructure,
-      summary: analysis.summary,
+      proposedStructure: finalizedLayout.finalStructure,
+      directoryMoves: finalizedLayout.directoryMoves,
+      addedDirectories: finalizedLayout.addedDirectories,
+      summary: finalizedLayout.summary,
     },
   };
 
@@ -232,8 +283,8 @@ async function handleFolderPreferencesReply(
       email,
       proposalId,
       resolvedConventionDescription,
-      analysis.summary,
-      proposedStructure,
+      finalizedLayout.summary,
+      finalizedLayout.finalStructure,
   );
   return emptyResult();
 }
@@ -352,22 +403,7 @@ async function handleDirectoryAnalysisReply(
 
   if (isApproval) {
     try {
-      const placement = await evaluateDirectoryPlacement(
-          treeSummary,
-          layout.proposedStructure || [],
-          uid,
-      );
-      const finalized = await finalizeDirectoryMap(
-          layout.proposedStructure || [],
-          placement.directory_moves,
-          treeSummary,
-          uid,
-      );
-      const approvedStructure = renumberDirectoryStructure(
-          finalized.final_directories,
-          finalized.summary,
-          layout.folderConvention || proposalDoc.phaseData?.folderPreferences?.confirmedConvention || "",
-      );
+      const approvedStructure = layout.proposedStructure || [];
       const preferences = await getDriveUserPreferences(uid);
       const convention =
         getNonEmptyString(proposalDoc.phaseData?.filenameConvention?.convention) ||
@@ -379,10 +415,7 @@ async function handleDirectoryAnalysisReply(
         const cost = calculateOrganizeCostEstimate(fileEntries);
         const directoryLayout = {
           ...layout,
-          directoryMoves: placement.directory_moves,
           approvedStructure,
-          addedDirectories: finalized.added_directories,
-          summary: finalized.summary,
         };
         delete directoryLayout.returnToCostEstimate;
         const nextPhaseData = {
@@ -419,10 +452,7 @@ async function handleDirectoryAnalysisReply(
         ...proposalDoc.phaseData,
         directoryLayout: {
           ...layout,
-          directoryMoves: placement.directory_moves,
           approvedStructure,
-          addedDirectories: finalized.added_directories,
-          summary: finalized.summary,
         },
         filenameConvention: {
           convention,
@@ -480,13 +510,22 @@ async function handleDirectoryAnalysisReply(
       result.summary,
       folderConvention,
   );
+  const finalizedLayout = await finalizeProposedDirectoryTree({
+    proposedStructure,
+    treeSummary,
+    folderConvention,
+    userFeedback: replyBody,
+    uid,
+  });
   const nextPhaseData = {
     ...proposalDoc.phaseData,
     directoryLayout: {
       ...layout,
       conventionDescription,
-      proposedStructure,
-      summary: result.summary,
+      proposedStructure: finalizedLayout.finalStructure,
+      directoryMoves: finalizedLayout.directoryMoves,
+      addedDirectories: finalizedLayout.addedDirectories,
+      summary: finalizedLayout.summary,
     },
   };
   await updateOrganizeProposalStatus(proposalId, "pending", {
@@ -498,8 +537,8 @@ async function handleDirectoryAnalysisReply(
       email,
       proposalId,
       conventionDescription,
-      result.summary,
-      proposedStructure,
+      finalizedLayout.summary,
+      finalizedLayout.finalStructure,
       true,
   );
   return emptyResult();
