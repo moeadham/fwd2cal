@@ -3,6 +3,7 @@ import {
   DRIVE_USERS_COLLECTION,
   findGeneratingProposal,
   getDriveUserPreferences,
+  updateDriveUserTokenScope,
   getUserFromEmail,
   getUserFromUID,
   saveOrganizeIntermediateState,
@@ -151,6 +152,49 @@ export async function scanAndPropose(
     const html = applyTemplate(driveMailTemplates.organizeError.html, {});
     await sendOrganizeEmailResponse(sender, email, html);
     return emptyResult("OAuth failed");
+  }
+
+  let accessToken = oauth2Client.credentials.access_token;
+  if (!accessToken) {
+    try {
+      const refreshedAccessToken = await oauth2Client.getAccessToken();
+      accessToken = typeof refreshedAccessToken === "string" ?
+        refreshedAccessToken :
+        refreshedAccessToken?.token || undefined;
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      logger.error("Drive organize: Failed to obtain access token", {
+        uid, error: errMsg,
+      });
+      if (isDriveAuthError(errMsg)) {
+        return sendOrganizeAuthRequiredEmail(email, sender, emailId);
+      }
+      const html = applyTemplate(driveMailTemplates.organizeError.html, {});
+      await sendOrganizeEmailResponse(sender, email, html);
+      return emptyResult("Access token fetch failed");
+    }
+  }
+
+  let tokenScopes: string[] | undefined;
+  try {
+    const tokenInfo = await oauth2Client.getTokenInfo(accessToken || "");
+    tokenScopes = tokenInfo.scopes;
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    logger.error("Drive organize: Token info lookup failed", {
+      uid, error: errMsg,
+    });
+    if (isDriveAuthError(errMsg)) {
+      return sendOrganizeAuthRequiredEmail(email, sender, emailId);
+    }
+    const html = applyTemplate(driveMailTemplates.organizeError.html, {});
+    await sendOrganizeEmailResponse(sender, email, html);
+    return emptyResult("Token info lookup failed");
+  }
+
+  if (!tokenScopes?.includes("https://www.googleapis.com/auth/drive")) {
+    await updateDriveUserTokenScope(uid, (tokenScopes || []).join(" "));
+    return sendOrganizeScopeUpgradeEmail(email, sender, emailId);
   }
 
   // Scan entire Drive

@@ -81,24 +81,12 @@ async function storeUser(
 ): Promise<void> {
   try {
     const docRef = getFirestore().collection(collection).doc(user.uid);
-    const existing = await docRef.get();
-    const existingScope = existing.exists ?
-      (existing.data()?.token_scope as string | undefined) : undefined;
-
-    // Keep the broader scope: only narrow token_scope if the new scope
-    // includes full drive access, or if there is no existing scope.
-    const FULL_DRIVE = "https://www.googleapis.com/auth/drive";
-    const newScopes = (tokens.scope || "").split(/\s+/);
-    const keepExistingScope = existingScope &&
-      !newScopes.includes(FULL_DRIVE) &&
-      existingScope.includes(FULL_DRIVE);
-
     await docRef.set({
       email: user.email,
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,
       expiry_date: tokens.expiry_date,
-      token_scope: keepExistingScope ? existingScope : tokens.scope,
+      token_scope: tokens.scope,
     }, {merge: true});
   } catch (error) {
     logger.error(`Database error in storeUser for uid ${user.uid}:`, error);
@@ -117,10 +105,27 @@ async function updateUserTokens(
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,
       expiry_date: tokens.expiry_date,
+      ...(tokens.scope ? {token_scope: tokens.scope} : {}),
     });
   } catch (error) {
     logger.error(`Database error in updateUserTokens for uid ${uid}:`, error);
     sendEvent(uid, "databaseError", "system", {operation: "updateUserTokens"});
+    throw error;
+  }
+}
+
+async function updateDriveUserTokenScope(
+    uid: string,
+    scope: string,
+): Promise<void> {
+  try {
+    await getFirestore()
+        .collection(DRIVE_USERS_COLLECTION)
+        .doc(uid)
+        .update({token_scope: scope});
+  } catch (error) {
+    logger.error(`Database error in updateDriveUserTokenScope for uid ${uid}:`, error);
+    sendEvent(uid, "databaseError", "system", {operation: "updateDriveUserTokenScope"});
     throw error;
   }
 }
@@ -607,6 +612,7 @@ export {
   storeUser,
   addUserEmailAddress,
   updateUserTokens,
+  updateDriveUserTokenScope,
   saveDriveUserPreferences,
   getDriveUserPreferences,
   addPendingEmailAddress,

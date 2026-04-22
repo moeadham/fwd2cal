@@ -52,6 +52,8 @@ import {
   getOrganizePhaseData,
   getDriveUserPreferences,
   saveOrganizeProposal,
+  storeUser,
+  updateUserTokens,
 } from "../src/util/firestoreHandler";
 import {getLastSentEmail, clearMockData} from "../src/util/resendMock";
 import {organizeProposalTestHooks} from "../src/agents/drive/handlers/organizeProposal";
@@ -70,6 +72,12 @@ import {
   dispatchPlanningChunkTask,
 } from "../src/agents/drive/handlers/dispatchHandler";
 import {TransformedEmail} from "../src/util/types";
+import type {FirebaseUserRecord, OAuthTokens} from "../src/auth/types";
+import * as authHandler from "../src/auth/authHandler";
+import * as driveHelper from "../src/agents/drive/driveHelper";
+import * as firestoreHandler from "../src/util/firestoreHandler";
+import * as organizeHelpers from "../src/agents/drive/handlers/organizeHelpers";
+import * as organizeMain from "../src/agents/drive/handlers/organizeMain";
 import {getSkills} from "../src/agents/drive/skills";
 import {fastMatchSkill} from "../src/util/skills/matcher";
 
@@ -1085,6 +1093,164 @@ describe("defaultCompletion", function() {
 
     expect(result).to.equal("ok");
     expect(capturedRequest?.max_tokens).to.equal(32768);
+  });
+});
+
+describe("Drive token scope drift", function() {
+  afterEach(function() {
+    clearMockData();
+  });
+
+  it("DT00ts1 storeUser overwrites a broader stored scope during re-consent", async function() {
+    const uid = `scope-store-${Date.now()}`;
+    const user: FirebaseUserRecord = {
+      uid,
+      email: `${uid}@example.com`,
+    };
+    await db.collection("DriveUsers").doc(uid).set({
+      email: user.email,
+      access_token: "old-access",
+      refresh_token: "old-refresh",
+      expiry_date: 1,
+      token_scope: "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/userinfo.email",
+    });
+
+    const tokens: OAuthTokens = {
+      access_token: "new-access",
+      refresh_token: "new-refresh",
+      expiry_date: 2,
+      scope: "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email",
+    };
+
+    await storeUser(tokens, user, "DriveUsers");
+
+    const userDoc = (await db.collection("DriveUsers").doc(uid).get()).data();
+    expect(userDoc?.token_scope)
+        .to.equal("https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email");
+  });
+
+  it("DT00ts2 updateUserTokens writes refresh scopes when present and preserves them when absent", async function() {
+    const uid = `scope-refresh-${Date.now()}`;
+    await db.collection("DriveUsers").doc(uid).set({
+      email: `${uid}@example.com`,
+      access_token: "old-access",
+      refresh_token: "old-refresh",
+      expiry_date: 1,
+      token_scope: "https://www.googleapis.com/auth/drive",
+    });
+
+    await updateUserTokens({
+      access_token: "new-access",
+      refresh_token: "new-refresh",
+      expiry_date: 2,
+      scope: "https://www.googleapis.com/auth/drive.file",
+    }, uid, "DriveUsers");
+
+    let userDoc = (await db.collection("DriveUsers").doc(uid).get()).data();
+    expect(userDoc?.token_scope).to.equal("https://www.googleapis.com/auth/drive.file");
+
+    await updateUserTokens({
+      access_token: "newer-access",
+      refresh_token: "newer-refresh",
+      expiry_date: 3,
+    }, uid, "DriveUsers");
+
+    userDoc = (await db.collection("DriveUsers").doc(uid).get()).data();
+    expect(userDoc?.token_scope).to.equal("https://www.googleapis.com/auth/drive.file");
+  });
+
+  it("DT00ts3 scanAndPropose downgrades stale full-drive state and sends the upgrade email", async function() {
+    const originalGetOauthClient = authHandler.getOauthClient;
+    const originalListAllDriveFiles = driveHelper.listAllDriveFiles;
+    const originalUpdateDriveUserTokenScope = firestoreHandler.updateDriveUserTokenScope;
+    const originalSendOrganizeScopeUpgradeEmail = organizeMain.sendOrganizeScopeUpgradeEmail;
+    const originalSendOrganizeAuthRequiredEmail = organizeMain.sendOrganizeAuthRequiredEmail;
+    const originalSendOrganizeEmailResponse = organizeHelpers.sendOrganizeEmailResponse;
+
+    let updatedScope: {uid: string; scope: string} | null = null;
+    let upgradeCalls = 0;
+    let authRequiredCalls = 0;
+    let listCalls = 0;
+
+    const fakeOauthClient = {
+      credentials: {
+        access_token: "stale-access-token",
+      },
+      getAccessToken: async () => ({token: "fresh-access-token"}),
+      getTokenInfo: async (_accessToken: string) => ({
+        scopes: ["https://www.googleapis.com/auth/drive.file"],
+      }),
+    };
+
+    (authHandler as typeof authHandler & {
+      getOauthClient: typeof authHandler.getOauthClient;
+    }).getOauthClient = async () => fakeOauthClient as never;
+    (driveHelper as typeof driveHelper & {
+      listAllDriveFiles: typeof driveHelper.listAllDriveFiles;
+    }).listAllDriveFiles = async () => {
+      listCalls++;
+      return [];
+    };
+    (firestoreHandler as typeof firestoreHandler & {
+      updateDriveUserTokenScope: typeof firestoreHandler.updateDriveUserTokenScope;
+    }).updateDriveUserTokenScope = async (uid: string, scope: string) => {
+      updatedScope = {uid, scope};
+    };
+    (organizeMain as typeof organizeMain & {
+      sendOrganizeScopeUpgradeEmail: typeof organizeMain.sendOrganizeScopeUpgradeEmail;
+      sendOrganizeAuthRequiredEmail: typeof organizeMain.sendOrganizeAuthRequiredEmail;
+    }).sendOrganizeScopeUpgradeEmail = async () => {
+      upgradeCalls++;
+      return organizeHelpers.emptyResult("scope-upgrade");
+    };
+    (organizeMain as typeof organizeMain & {
+      sendOrganizeScopeUpgradeEmail: typeof organizeMain.sendOrganizeScopeUpgradeEmail;
+      sendOrganizeAuthRequiredEmail: typeof organizeMain.sendOrganizeAuthRequiredEmail;
+    }).sendOrganizeAuthRequiredEmail = async () => {
+      authRequiredCalls++;
+      return organizeHelpers.emptyResult("auth-required");
+    };
+    (organizeHelpers as typeof organizeHelpers & {
+      sendOrganizeEmailResponse: typeof organizeHelpers.sendOrganizeEmailResponse;
+    }).sendOrganizeEmailResponse = async () => undefined;
+
+    try {
+      const result = await organizeMain.scanAndPropose(
+          makeTestEmail("organize my drive"),
+          "tester@example.com",
+          "scope-email-id",
+          "scope-user-id",
+      );
+
+      expect(result).to.deep.equal(organizeHelpers.emptyResult());
+      expect(updatedScope).to.deep.equal({
+        uid: "scope-user-id",
+        scope: "https://www.googleapis.com/auth/drive.file",
+      });
+      expect(authRequiredCalls).to.equal(0);
+      expect(listCalls).to.equal(0);
+    } finally {
+      (authHandler as typeof authHandler & {
+        getOauthClient: typeof authHandler.getOauthClient;
+      }).getOauthClient = originalGetOauthClient;
+      (driveHelper as typeof driveHelper & {
+        listAllDriveFiles: typeof driveHelper.listAllDriveFiles;
+      }).listAllDriveFiles = originalListAllDriveFiles;
+      (firestoreHandler as typeof firestoreHandler & {
+        updateDriveUserTokenScope: typeof firestoreHandler.updateDriveUserTokenScope;
+      }).updateDriveUserTokenScope = originalUpdateDriveUserTokenScope;
+      (organizeMain as typeof organizeMain & {
+        sendOrganizeScopeUpgradeEmail: typeof organizeMain.sendOrganizeScopeUpgradeEmail;
+        sendOrganizeAuthRequiredEmail: typeof organizeMain.sendOrganizeAuthRequiredEmail;
+      }).sendOrganizeScopeUpgradeEmail = originalSendOrganizeScopeUpgradeEmail;
+      (organizeMain as typeof organizeMain & {
+        sendOrganizeScopeUpgradeEmail: typeof organizeMain.sendOrganizeScopeUpgradeEmail;
+        sendOrganizeAuthRequiredEmail: typeof organizeMain.sendOrganizeAuthRequiredEmail;
+      }).sendOrganizeAuthRequiredEmail = originalSendOrganizeAuthRequiredEmail;
+      (organizeHelpers as typeof organizeHelpers & {
+        sendOrganizeEmailResponse: typeof organizeHelpers.sendOrganizeEmailResponse;
+      }).sendOrganizeEmailResponse = originalSendOrganizeEmailResponse;
+    }
   });
 });
 
