@@ -422,6 +422,15 @@ export async function processPlanningChunk(
     throw new Error("Organize proposal not found");
   }
   const proposalDoc = rawProposal as unknown as OrganizeProposalDoc;
+  const completedChunks = proposalDoc.phaseData?.execution?.completedChunks || 0;
+  if (completedChunks > chunkIndex) {
+    logger.info("Drive organize planning chunk: Already completed, skipping chunk", {
+      proposalId,
+      chunkIndex,
+      completedChunks,
+    });
+    return;
+  }
   if (proposalDoc.status === "cancelled") {
     logger.info("Drive organize planning chunk: Proposal cancelled, skipping chunk", {
       proposalId,
@@ -501,7 +510,7 @@ export async function processPlanningChunk(
   } satisfies PlanningChunkResult);
   await saveExecutionJson(getExecutionTreePath(proposalId, chunkIndex), runningTree);
 
-  const completedChunks = chunkIndex + 1;
+  const nextCompletedChunks = chunkIndex + 1;
   const cancelledBeforeNextChunk = await isOrganizeProposalCancelled(proposalId);
   if (cancelledBeforeNextChunk) {
     logger.info("Drive organize planning chunk: Proposal cancelled after chunk, skipping status update", {
@@ -513,11 +522,11 @@ export async function processPlanningChunk(
   await updateOrganizeProposalStatus(proposalId, "planning", {
     phaseData: {
       ...proposalDoc.phaseData,
-      execution: {chunkSize, totalChunks, completedChunks},
+      execution: {chunkSize, totalChunks, completedChunks: nextCompletedChunks},
     },
   });
 
-  if (completedChunks < totalChunks) {
+  if (nextCompletedChunks < totalChunks) {
     const cancelledBeforeDispatch = await isOrganizeProposalCancelled(proposalId);
     if (cancelledBeforeDispatch) {
       logger.info("Drive organize planning chunk: Proposal cancelled, skipping next chunk dispatch", {
@@ -560,7 +569,7 @@ export async function processPlanningChunk(
   const counts = countFileActions(proposal.file_actions);
   const nextPhaseData = {
     ...proposalDoc.phaseData,
-    execution: {chunkSize, totalChunks, completedChunks},
+    execution: {chunkSize, totalChunks, completedChunks: nextCompletedChunks},
     planReview: {
       totalFiles: proposal.file_actions.length,
       csvStoragePath: getPlanCsvStoragePath(proposalId),
@@ -635,6 +644,15 @@ export async function processMoveChunk(
     throw new Error("Organize proposal not found");
   }
   const proposalDoc = rawProposal as unknown as OrganizeProposalDoc;
+  const completedChunks = proposalDoc.phaseData?.execution?.completedChunks || 0;
+  if (completedChunks > chunkIndex) {
+    logger.info("Drive organize move chunk: Already completed, skipping chunk", {
+      proposalId,
+      chunkIndex,
+      completedChunks,
+    });
+    return;
+  }
   if (proposalDoc.status === "cancelled") {
     logger.info("Drive organize move chunk: Proposal cancelled, skipping chunk", {
       proposalId,
@@ -702,7 +720,7 @@ export async function processMoveChunk(
     stats,
   } satisfies ExecutionChunkResult);
 
-  const completedChunks = chunkIndex + 1;
+  const nextCompletedChunks = chunkIndex + 1;
   const cancelledBeforeNextChunk = await isOrganizeProposalCancelled(proposalId);
   if (cancelledBeforeNextChunk) {
     logger.info("Drive organize move chunk: Proposal cancelled after chunk, skipping status update", {
@@ -714,11 +732,11 @@ export async function processMoveChunk(
   await updateOrganizeProposalStatus(proposalId, "executing", {
     phaseData: {
       ...proposalDoc.phaseData,
-      execution: {chunkSize, totalChunks, completedChunks},
+      execution: {chunkSize, totalChunks, completedChunks: nextCompletedChunks},
     },
   });
 
-  if (completedChunks < totalChunks) {
+  if (nextCompletedChunks < totalChunks) {
     const cancelledBeforeDispatch = await isOrganizeProposalCancelled(proposalId);
     if (cancelledBeforeDispatch) {
       logger.info("Drive organize move chunk: Proposal cancelled, skipping next chunk dispatch", {

@@ -65,6 +65,10 @@ import {
   processPlanningChunk,
   writeFileActionsCsv,
 } from "../src/agents/drive/handlers/organizeExecution";
+import {
+  dispatchHandlerTestHooks,
+  dispatchPlanningChunkTask,
+} from "../src/agents/drive/handlers/dispatchHandler";
 import {TransformedEmail} from "../src/util/types";
 import {getSkills} from "../src/agents/drive/skills";
 import {fastMatchSkill} from "../src/util/skills/matcher";
@@ -2103,6 +2107,11 @@ describe("organize phased proposal flow", function() {
 });
 
 describe("organize sequential execution proposal builder", function() {
+  afterEach(function() {
+    setOpenAIClientForTest(null);
+    dispatchHandlerTestHooks.setGetFunctionsClientForTest(null);
+  });
+
   it("DT00ubf carries a new directory from file N into file N+1 prompt context", async function() {
     const files: DriveFileEntry[] = [
       {
@@ -2314,6 +2323,127 @@ describe("organize sequential execution proposal builder", function() {
     expect(planningChunkExists).to.equal(false);
     expect(nextTreeExists).to.equal(false);
     expect(nextChunkExists).to.equal(false);
+  });
+
+  it("DT00ubm skips planning chunks already marked completed", async function() {
+    const uid = "execution-completed-planning";
+    const sender = "completed-planning@example.com";
+    const proposalId = `execution-completed-planning-${Date.now()}`;
+    const storagePath = `organize-proposals/${proposalId}.json`;
+    const phaseData = {
+      directoryLayout: {
+        approvedStructure: [{
+          folder_path: "01-Docs",
+          description: "Documents",
+        }],
+      },
+      filenameConvention: {convention: "YYYY.MM.DD - Description.ext"},
+      execution: {chunkSize: 1, totalChunks: 3, completedChunks: 2},
+    };
+    await db.collection("OrganizeProposals").doc(proposalId).set({
+      uid,
+      senderEmail: sender,
+      emailId: "completed-planning-email-id",
+      status: "planning",
+      phase: "plan_review",
+      createdAt: "2026-04-16T00:00:00.000Z",
+      expiresAt: "2099-04-16T00:00:00.000Z",
+      storagePath,
+      phaseData,
+      cost: {},
+    });
+
+    const bucket = getStorage().bucket();
+    await bucket.file(storagePath).save(JSON.stringify({
+      fileEntries: [],
+      senderEmail: sender,
+      phaseData,
+    }), {contentType: "application/json"});
+
+    let llmCalls = 0;
+    setOpenAIClientForTest({
+      chat: {
+        completions: {
+          create: async () => {
+            llmCalls++;
+            throw new Error("LLM should not be called for completed planning chunks");
+          },
+        },
+      },
+    } as unknown as OpenAI);
+
+    await processPlanningChunk(makeTestEmail("plan"), {
+      proposalId,
+      emailId: "completed-planning-email-id",
+      uid,
+      chunkIndex: 1,
+    });
+
+    const proposal = await getOrganizeProposal(proposalId) as unknown as OrganizeProposalDoc;
+    const [planningChunkExists] = await bucket.file(`organize-proposals/${proposalId}-planning-chunk-1.json`).exists();
+    const [treeExists] = await bucket.file(`organize-proposals/${proposalId}-execution-tree-1.json`).exists();
+    const [nextChunkExists] = await bucket.file(`organize-proposals/${proposalId}-planning-chunk-2.json`).exists();
+
+    expect(llmCalls).to.equal(0);
+    expect((proposal.phaseData as {execution?: {completedChunks?: number}} | undefined)?.execution?.completedChunks)
+        .to.equal(2);
+    expect(planningChunkExists).to.equal(false);
+    expect(treeExists).to.equal(false);
+    expect(nextChunkExists).to.equal(false);
+  });
+
+  it("DT00ubn treats ALREADY_EXISTS enqueue errors as success", async function() {
+    const enqueueCalls: Array<{data: unknown; opts?: {dispatchDeadlineSeconds?: number; id?: string}}> = [];
+    dispatchHandlerTestHooks.setGetFunctionsClientForTest(() => ({
+      taskQueue: (_path: string) => ({
+        enqueue: async (data: unknown, opts?: {dispatchDeadlineSeconds?: number; id?: string}) => {
+          enqueueCalls.push({data, opts});
+          const error = new Error("Requested entity already exists");
+          (error as Error & {code?: number}).code = 409;
+          throw error;
+        },
+      }),
+    }));
+
+    await dispatchPlanningChunkTask({
+      proposalId: "proposal id/with bad chars",
+      emailId: "email-id",
+      uid: "uid",
+      chunkIndex: 3,
+    });
+
+    expect(enqueueCalls).to.have.length(1);
+    expect(enqueueCalls[0].opts).to.deep.equal({
+      dispatchDeadlineSeconds: 60 * 30,
+      id: "proposal-id-with-bad-chars-plan-3",
+    });
+  });
+
+  it("DT00ubo re-throws non-dedupe enqueue errors", async function() {
+    dispatchHandlerTestHooks.setGetFunctionsClientForTest(() => ({
+      taskQueue: (_path: string) => ({
+        enqueue: async () => {
+          const error = new Error("queue unavailable");
+          (error as Error & {code?: number}).code = 500;
+          throw error;
+        },
+      }),
+    }));
+
+    let thrown: unknown;
+    try {
+      await dispatchPlanningChunkTask({
+        proposalId: "proposal-id",
+        emailId: "email-id",
+        uid: "uid",
+        chunkIndex: 1,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).to.be.instanceOf(Error);
+    expect((thrown as Error).message).to.equal("queue unavailable");
   });
 
   it("DT00ubl keeps status cancelled when planning is cancelled mid-chunk", async function() {
@@ -2538,6 +2668,21 @@ describe("organize sequential execution proposal builder", function() {
       });
       const planned = await loadSavedPlan(proposalId);
       expect(updateCalls).to.deep.equal([]);
+
+      await db.collection("OrganizeProposals").doc(proposalId).update({
+        status: "executing",
+        phase: "executing",
+      });
+      const postPlanBulkFile = getStorage().bucket().file(storagePath);
+      const [postPlanBulkContents] = await postPlanBulkFile.download();
+      const postPlanBulkData = JSON.parse(postPlanBulkContents.toString()) as Record<string, unknown>;
+      const postPlanPhaseData = (postPlanBulkData.phaseData || {}) as Record<string, unknown>;
+      const postPlanExecution = (postPlanPhaseData.execution || {}) as Record<string, unknown>;
+      postPlanBulkData.phaseData = {
+        ...postPlanPhaseData,
+        execution: {...postPlanExecution, completedChunks: 0},
+      };
+      await postPlanBulkFile.save(JSON.stringify(postPlanBulkData), {contentType: "application/json"});
 
       await processMoveChunk(makeTestEmail("move"), {
         proposalId,

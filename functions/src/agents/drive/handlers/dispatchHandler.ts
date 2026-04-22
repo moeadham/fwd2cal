@@ -45,6 +45,20 @@ import {
 // UTILITIES
 // ============================================================================
 
+type FunctionsClient = {
+  taskQueue: (path: string) => {
+    enqueue: (data: unknown, opts?: {dispatchDeadlineSeconds?: number; id?: string}) => Promise<unknown>;
+  };
+};
+
+let getFunctionsClient = (): FunctionsClient => getFunctions() as unknown as FunctionsClient;
+let functionsClientStubbed = false;
+
+function isLocalDispatch(): boolean {
+  if (functionsClientStubbed) return false;
+  return ENVIRONMENT_NAME.value() === "local" || ENVIRONMENT_NAME.value() === "test";
+}
+
 /**
  * Parse the OAuth state parameter (base64url-encoded JSON with emailId + proposal).
  */
@@ -73,6 +87,57 @@ function buildAdminSyntheticEmail(senderEmail: string): TransformedEmail {
     SPF: "pass",
     dkim: "pass",
   };
+}
+
+function sanitizeProposalIdForTaskId(proposalId: string): string {
+  return proposalId.replace(/[^A-Za-z0-9_-]/g, "-").slice(0, 500);
+}
+
+function isTaskAlreadyExistsError(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  const candidate = error as {
+    code?: number | string;
+    status?: number | string;
+    details?: string;
+    message?: string;
+  };
+  const code = String(candidate.code || candidate.status || "");
+  const details = candidate.details || "";
+  const message = candidate.message || "";
+  return code === "409" ||
+    code.toUpperCase() === "ALREADY_EXISTS" ||
+    details.includes("ALREADY_EXISTS") ||
+    message.includes("ALREADY_EXISTS") ||
+    details.includes("already exists") ||
+    message.includes("already exists") ||
+    details.includes("Requested entity already exists") ||
+    message.includes("Requested entity already exists");
+}
+
+async function enqueueChunkTask(
+    queuePath: string,
+    data: PlanningChunkTaskData | MoveChunkTaskData,
+    taskId: string,
+    logContext: Record<string, unknown>,
+): Promise<void> {
+  const queue = getFunctionsClient().taskQueue(queuePath);
+  try {
+    await queue.enqueue(data, {
+      dispatchDeadlineSeconds: 60 * 30,
+      id: taskId,
+    });
+  } catch (error) {
+    if (isTaskAlreadyExistsError(error)) {
+      logger.info("Drive chunk dispatch: Duplicate task enqueue suppressed", {
+        ...logContext,
+        taskId,
+      });
+      return;
+    }
+    throw error;
+  }
 }
 
 /**
@@ -224,9 +289,7 @@ export async function dispatchOrganizeActionTask(
 export async function dispatchPlanningChunkTask(
     data: PlanningChunkTaskData,
 ): Promise<void> {
-  const isLocal = ENVIRONMENT_NAME.value() === "local" ||
-    ENVIRONMENT_NAME.value() === "test";
-  if (isLocal) {
+  if (isLocalDispatch()) {
     let transformedEmail: TransformedEmail;
     if (isAdminEmailId(data.emailId)) {
       const proposal = await getOrganizeProposal(data.proposalId);
@@ -239,12 +302,12 @@ export async function dispatchPlanningChunkTask(
     return;
   }
 
-  const queue = getFunctions().taskQueue(
+  await enqueueChunkTask(
       "locations/us-central1/functions/v2drivePlanningChunkTask",
+      data,
+      `${sanitizeProposalIdForTaskId(data.proposalId)}-plan-${data.chunkIndex}`,
+      {proposalId: data.proposalId, chunkIndex: data.chunkIndex, phase: "planning"},
   );
-  await queue.enqueue(data, {
-    dispatchDeadlineSeconds: 60 * 30,
-  });
   logger.info("Drive planning chunk: Dispatched task", {
     proposalId: data.proposalId,
     chunkIndex: data.chunkIndex,
@@ -255,9 +318,7 @@ export async function dispatchPlanningChunkTask(
 export async function dispatchMoveChunkTask(
     data: MoveChunkTaskData,
 ): Promise<void> {
-  const isLocal = ENVIRONMENT_NAME.value() === "local" ||
-    ENVIRONMENT_NAME.value() === "test";
-  if (isLocal) {
+  if (isLocalDispatch()) {
     let transformedEmail: TransformedEmail;
     if (isAdminEmailId(data.emailId)) {
       const proposal = await getOrganizeProposal(data.proposalId);
@@ -270,12 +331,12 @@ export async function dispatchMoveChunkTask(
     return;
   }
 
-  const queue = getFunctions().taskQueue(
+  await enqueueChunkTask(
       "locations/us-central1/functions/v2driveMoveChunkTask",
+      data,
+      `${sanitizeProposalIdForTaskId(data.proposalId)}-move-${data.chunkIndex}`,
+      {proposalId: data.proposalId, chunkIndex: data.chunkIndex, phase: "move"},
   );
-  await queue.enqueue(data, {
-    dispatchDeadlineSeconds: 60 * 30,
-  });
   logger.info("Drive move chunk: Dispatched task", {
     proposalId: data.proposalId,
     chunkIndex: data.chunkIndex,
@@ -581,3 +642,15 @@ export async function handleMoveChunkTask(
 
   logger.info("Drive move chunk task: Complete", {proposalId, chunkIndex});
 }
+
+export const dispatchHandlerTestHooks = {
+  setGetFunctionsClientForTest(clientFactory: (() => FunctionsClient) | null): void {
+    if (clientFactory) {
+      functionsClientStubbed = true;
+      getFunctionsClient = clientFactory;
+    } else {
+      functionsClientStubbed = false;
+      getFunctionsClient = () => getFunctions() as unknown as FunctionsClient;
+    }
+  },
+};
