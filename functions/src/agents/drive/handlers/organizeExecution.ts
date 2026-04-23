@@ -234,6 +234,15 @@ export function reconcilePlanningChunkResults(
     }
 
     stats.failed++;
+    fileActions.push({
+      file_id: result.file.id,
+      current_name: result.file.name,
+      current_path: result.file.parentPath || "My Drive",
+      new_name: result.file.name,
+      new_folder: result.file.parentPath || "My Drive",
+      action: "keep",
+      reason: "Automatic analysis failed — left in place",
+    });
     logger.error("Drive organize planning chunk: file failed", {
       proposalId: context.proposalId,
       chunkIndex: context.chunkIndex,
@@ -599,26 +608,41 @@ export async function processPlanningChunk(
   const oauth2Client = await getOauthClient(uid, AGENT_NAME);
   const planConcurrency = ORGANIZE_DRIVE_PLAN_CONCURRENCY.value();
   const results = await mapWithConcurrency(chunkFiles, planConcurrency, async (file) => {
-    try {
-      const ignoredRoot = findIgnoredRoot(file.parentPath || "");
-      if (ignoredRoot) {
-        return {kind: "ignored", file, ignoredRoot} satisfies PlanningWorkerResult;
-      }
-      logger.info(`Drive organize planning chunk ${chunkIndex + 1}/${totalChunks}: processing "${file.name}"`, {
-        proposalId,
-        chunkIndex,
-        totalChunks,
-        fileId: file.id,
-        name: file.name,
-        mimeType: file.mimeType,
-        size: file.size,
-      });
-      const {contentSummary, imageUrls} = await summarizeExecutionFile(oauth2Client, file);
-      const proposed = await proposeFileAction(runningTree, convention, file, contentSummary, uid, imageUrls);
-      return {kind: "proposed", file, proposed} satisfies PlanningWorkerResult;
-    } catch (error) {
-      return {kind: "error", file, error} satisfies PlanningWorkerResult;
+    const ignoredRoot = findIgnoredRoot(file.parentPath || "");
+    if (ignoredRoot) {
+      return {kind: "ignored", file, ignoredRoot} satisfies PlanningWorkerResult;
     }
+    logger.info(`Drive organize planning chunk ${chunkIndex + 1}/${totalChunks}: processing "${file.name}"`, {
+      proposalId,
+      chunkIndex,
+      totalChunks,
+      fileId: file.id,
+      name: file.name,
+      mimeType: file.mimeType,
+      size: file.size,
+    });
+    const maxAttempts = 2;
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const {contentSummary, imageUrls} = await summarizeExecutionFile(oauth2Client, file);
+        const proposed = await proposeFileAction(runningTree, convention, file, contentSummary, uid, imageUrls);
+        return {kind: "proposed", file, proposed} satisfies PlanningWorkerResult;
+      } catch (error) {
+        lastError = error;
+        if (attempt < maxAttempts) {
+          logger.warn("Drive organize planning chunk: file retry", {
+            proposalId,
+            chunkIndex,
+            fileId: file.id,
+            attempt,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+        }
+      }
+    }
+    return {kind: "error", file, error: lastError} satisfies PlanningWorkerResult;
   });
   const fileActions = reconcilePlanningChunkResults(
       results,
