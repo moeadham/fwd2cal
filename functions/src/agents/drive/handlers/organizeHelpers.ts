@@ -61,6 +61,18 @@ export async function sendOrganizePlanReviewEmail(
 ): Promise<void> {
   const moveToken = signActionToken(proposalId, "move");
   const moveLink = `${driveOrganizeActionUrl()}?proposalId=${proposalId}&action=move&token=${moveToken}`;
+  const preservedFolderPaths = new Set(
+      (proposal.ignoredFolders || [])
+          .map((folderPath) => folderPath.split("/").map((segment) => segment.trim()).filter(Boolean).join("/"))
+          .filter(Boolean),
+  );
+  const preservedRootPaths = new Set(
+      (proposal.ignoredFolders || [])
+          .map((folderPath) => folderPath.split("/").map((segment) => segment.trim()).filter(Boolean))
+          .filter((segments) => segments.length === 1)
+          .map((segments) => segments[0])
+          .filter((root): root is string => Boolean(root && root !== "My Drive")),
+  );
   const preview = proposal.file_actions.slice(0, 20).map((action) =>
     `${escapeHtml(action.current_path)}/${escapeHtml(action.current_name)} &rarr; ` +
     `${escapeHtml(action.new_folder)}/${escapeHtml(action.new_name)} ` +
@@ -74,6 +86,7 @@ export async function sendOrganizePlanReviewEmail(
     FILES_TO_MOVE: String(counts.filesToMove),
     FILES_TO_RENAME: String(counts.filesToRename),
     FILES_TO_KEEP: String(counts.filesToKeep),
+    FOLDER_TREE: renderFolderTree(proposal, preservedRootPaths, preservedFolderPaths),
     ACTION_PREVIEW: preview,
     MOVE_LINK: moveLink,
     REVISION_NOTE: noteHtml,
@@ -391,6 +404,7 @@ export function formatSummaryHtml(summary: string): string {
 /** Renders directory paths and descriptions for phase emails. */
 function renderDirectoryList(
     folders: DriveOrganizeProposal["proposed_folders"],
+    preservedFolderPaths?: Set<string>,
 ): string {
   if (folders.length === 0) {
     return "(no folders proposed)";
@@ -399,21 +413,32 @@ function renderDirectoryList(
   type TreeNode = {
     children: Map<string, TreeNode>;
     description: string;
+    fullPath: string;
   };
 
-  const root: TreeNode = {children: new Map(), description: ""};
+  const root: TreeNode = {children: new Map(), description: "", fullPath: ""};
+  const allPaths = new Set<string>();
+  for (const folder of folders) {
+    allPaths.add(folder.folder_path);
+  }
+  for (const preserved of preservedFolderPaths || []) {
+    allPaths.add(preserved);
+  }
 
-  for (const folder of [...folders].sort((a, b) => a.folder_path.localeCompare(b.folder_path))) {
-    const segments = folder.folder_path.split("/").filter(Boolean);
+  const descriptions = new Map(folders.map((folder) => [folder.folder_path, folder.description]));
+  for (const folderPath of [...allPaths].sort((a, b) => a.localeCompare(b))) {
+    const segments = folderPath.split("/").filter(Boolean);
     let current = root;
+    let currentPath = "";
     for (let i = 0; i < segments.length; i++) {
       const seg = segments[i];
+      currentPath = currentPath ? `${currentPath}/${seg}` : seg;
       if (!current.children.has(seg)) {
-        current.children.set(seg, {children: new Map(), description: ""});
+        current.children.set(seg, {children: new Map(), description: "", fullPath: currentPath});
       }
       const child = current.children.get(seg)!;
-      if (i === segments.length - 1) {
-        child.description = folder.description;
+      if (i === segments.length - 1 && descriptions.has(folderPath)) {
+        child.description = descriptions.get(folderPath) || "";
       }
       current = child;
     }
@@ -426,9 +451,13 @@ function renderDirectoryList(
       const [name, child] = entries[i];
       const isLast = i === entries.length - 1;
       const branch = isLast ? "└── " : "├── ";
-      const desc = child.description ?
-        `&nbsp;&nbsp;<span style="color:#888">` +
-        `${escapeHtml(child.description)}</span>` : "";
+      const isPreserved = preservedFolderPaths?.has(child.fullPath);
+      const desc = isPreserved ?
+        "&nbsp;&nbsp;<span style=\"color:#888\">(preserved)</span>" :
+        child.description ?
+          `&nbsp;&nbsp;<span style="color:#888">` +
+          `${escapeHtml(child.description)}</span>` :
+          "";
       html += `${prefix}${branch}${escapeHtml(name)}/${desc}<br>`;
       render(child, `${prefix}${isLast ? "&nbsp;&nbsp;&nbsp;&nbsp;" : "│&nbsp;&nbsp;&nbsp;"}`);
     }
@@ -450,6 +479,7 @@ export async function sendOrganizePhase1aEmail(
     summary: string,
     folders: DriveOrganizeProposal["proposed_folders"],
     isRevision = false,
+    preservedFolderPaths?: Set<string>,
 ): Promise<void> {
   const header = isRevision ?
     "Here's the revised folder structure:" :
@@ -458,7 +488,7 @@ export async function sendOrganizePhase1aEmail(
     PHASE1A_HEADER: header,
     CONVENTION_SUMMARY: escapeHtml(conventionSummary || "No existing convention detected."),
     SUMMARY: formatSummaryHtml(escapeHtml(summary || "")),
-    FOLDER_TREE: renderDirectoryList(folders),
+    FOLDER_TREE: renderDirectoryList(folders, preservedFolderPaths),
     EMBEDDED_DATA: phaseEmbeddedHtml(proposalId),
   });
   await sendOrganizeEmailResponse(sender, email, html);
@@ -490,6 +520,7 @@ export async function sendOrganizeCostEstimateEmail(
     filenameConvention: string,
     cost: OrganizeCostBreakdown,
     filenameExamples: string[],
+    preservedFolderPaths?: Set<string>,
 ): Promise<void> {
   const examples = filenameExamples
       .map((example) => `- ${escapeHtml(example)}`)
@@ -497,7 +528,7 @@ export async function sendOrganizeCostEstimateEmail(
   const approveToken = signActionToken(proposalId, "approve");
   const approveLink = `${driveOrganizeActionUrl()}?proposalId=${proposalId}&action=approve&token=${approveToken}`;
   const html = applyTemplate(driveMailTemplates.organizeCostEstimate.html, {
-    FOLDER_TREE: renderDirectoryList(folders),
+    FOLDER_TREE: renderDirectoryList(folders, preservedFolderPaths),
     FILENAME_CONVENTION: escapeHtml(filenameConvention),
     FILENAME_EXAMPLES: examples,
     TOTAL_FILES: String(cost.totalFiles),

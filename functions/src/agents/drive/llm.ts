@@ -465,6 +465,7 @@ async function revisePlanFileActions(
     fileActions: DriveOrganizeProposal["file_actions"],
     approvedFolders: DriveOrganizeProposal["proposed_folders"],
     userInstructions: string,
+    existingIgnoredFolders: string[] = [],
     uid: string | null = null,
 ): Promise<RevisePlanFileActionsResult> {
   const {prompts, versions} = getPrompts();
@@ -482,8 +483,17 @@ async function revisePlanFileActions(
         `  reason: ${action.reason}`,
       )
       .join("\n");
+  const ignoredFolders = existingIgnoredFolders.length > 0 ?
+    `## Previously Ignored Folders\n` +
+    `These folder paths were marked as ignored in an earlier revision. Unless the user's current ` +
+    `instructions explicitly ask to reorganize one of them, keep them in folder_ignores and do ` +
+    `not emit patches for files under them.\n` +
+    existingIgnoredFolders.map((folderPath) => `- ${folderPath}`).join("\n") +
+    "\n\n" :
+    "";
   const userText = `## User Requested Changes\n${userInstructions}\n\n` +
     `## Approved Folder Structure\n${folders || "(none)"}\n\n` +
+    ignoredFolders +
     `## Current File Actions\n${actions || "(none)"}\n`;
   const messages: ChatMessage[] = [
     {role: "system", content: prompts.revisePlanFileActions.prompt},
@@ -584,11 +594,21 @@ async function analyzeDirectoryStructure(
     userPrompt: string,
     uid: string | null = null,
     conventionDescription = "",
+    existingIgnoredFolders: string[] = [],
 ): Promise<AnalyzeDirectoryStructureResult> {
   const {prompts, versions} = getPrompts();
+  const ignoredFolders = existingIgnoredFolders.length > 0 ?
+    `## Previously Ignored Folders\n` +
+    `These folder paths were marked as ignored in an earlier revision. Unless the user's current ` +
+    `instructions explicitly ask to reorganize one of them, keep them in folder_ignores and do ` +
+    `not include them (or their descendants) in proposed_structure.\n` +
+    existingIgnoredFolders.map((folderPath) => `- ${folderPath}`).join("\n") +
+    "\n\n" :
+    "";
   const userText = `## Current Drive Tree\n${treeSummary}\n\n` +
     `## Confirmed Folder Naming Convention\n${folderConvention || "(none)"}\n\n` +
     `## Confirmed Convention Description\n${conventionDescription || "(none)"}\n\n` +
+    ignoredFolders +
     `## User Instructions\n${userPrompt || "(none)"}\n`;
   logger.info("analyzeDirectoryStructure LLM input", {
     folderConvention: folderConvention || "(empty)",

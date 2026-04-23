@@ -282,7 +282,9 @@ export function applyPlanPatches(
     if (!patch) {
       return action;
     }
-    if (patch.new_folder && !approvedPaths.has(patch.new_folder)) {
+    const isKeepInCurrentFolder = patch.action === "keep" &&
+      patch.new_folder === action.current_path;
+    if (patch.new_folder && !approvedPaths.has(patch.new_folder) && !isKeepInCurrentFolder) {
       logger.warn("Drive organize plan review: dropping patch with unapproved folder", {
         fileId: patch.file_id,
         newFolder: patch.new_folder,
@@ -471,12 +473,38 @@ export async function processPlanningChunk(
       getExecutionTreePath(proposalId, chunkIndex - 1),
   );
   const knownDirectories = new Set(runningTree.map((folder) => folder.folder_path));
+  const ignoredFolders = (proposalDoc.ignoredFolders ?? [])
+      .map((folderPath) => folderPath.split("/").map((segment) => segment.trim()).filter(Boolean).join("/"))
+      .filter(Boolean);
+  const findIgnoredRoot = (folderPath: string): string | null => {
+    const normalized = folderPath.split("/").map((segment) => segment.trim()).filter(Boolean).join("/");
+    for (const root of ignoredFolders) {
+      if (normalized === root || normalized.startsWith(`${root}/`)) {
+        return root;
+      }
+    }
+    return null;
+  };
   const fileActions: DriveOrganizeProposal["file_actions"] = [];
   const stats = {planned: 0, failed: 0, skipped: 0};
   const oauth2Client = await getOauthClient(uid, AGENT_NAME);
 
   for (const file of chunkFiles) {
     try {
+      const ignoredRoot = findIgnoredRoot(file.parentPath || "");
+      if (ignoredRoot) {
+        fileActions.push({
+          file_id: file.id,
+          current_name: file.name,
+          current_path: file.parentPath || "My Drive",
+          new_name: file.name,
+          new_folder: file.parentPath || "My Drive",
+          action: "keep",
+          reason: `Preserved by user: "${ignoredRoot}" left as-is`,
+        });
+        stats.skipped++;
+        continue;
+      }
       const {contentSummary, imageUrls} = await summarizeExecutionFile(oauth2Client, file);
       const proposed = await proposeFileAction(runningTree, convention, file, contentSummary, uid, imageUrls);
       if (proposed.needs_new_directory && proposed.new_directory &&

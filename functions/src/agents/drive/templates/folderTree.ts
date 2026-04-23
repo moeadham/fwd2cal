@@ -6,6 +6,7 @@ import {DriveOrganizeProposal, OrganizeEmbeddedData} from "../types";
 export function renderFolderTree(
     proposal: DriveOrganizeProposal,
     preservedRootPaths?: Set<string>,
+    preservedFolderPaths?: Set<string>,
 ): string {
   type TreeNode = {
     children: Map<string, TreeNode>;
@@ -35,6 +36,38 @@ export function renderFolderTree(
     uniquePaths.add(normalizedPath);
   }
 
+  for (const folderPath of preservedFolderPaths || []) {
+    const normalizedPath = folderPath
+        .split("/")
+        .map((segment) => segment.trim())
+        .filter(Boolean)
+        .join("/");
+    if (!normalizedPath) {
+      continue;
+    }
+    let currentPath = "";
+    for (const segment of normalizedPath.split("/")) {
+      currentPath = currentPath ? `${currentPath}/${segment}` : segment;
+      uniquePaths.add(currentPath);
+    }
+  }
+
+  for (const action of proposal.file_actions) {
+    if (action.action !== "keep" ||
+        (!action.reason?.startsWith("Preserved by user:") &&
+         !action.reason?.startsWith("Reverted:"))) {
+      continue;
+    }
+    let currentPath = "";
+    for (const segment of action.new_folder
+        .split("/")
+        .map((part) => part.trim())
+        .filter(Boolean)) {
+      currentPath = currentPath ? `${currentPath}/${segment}` : segment;
+      uniquePaths.add(currentPath);
+    }
+  }
+
   for (const folderPath of [...uniquePaths].sort((a, b) => a.localeCompare(b))) {
     let current = root;
     let currentPath = "";
@@ -62,6 +95,17 @@ export function renderFolderTree(
       const [segment, child] = children[i];
       const isLast = i === children.length - 1;
       const branch = isLast ? "└── " : "├── ";
+
+      if (preservedFolderPaths?.has(child.fullPath)) {
+        let totalCount = 0;
+        for (const [folderPath, count] of fileCounts.entries()) {
+          if (folderPath === child.fullPath || folderPath.startsWith(`${child.fullPath}/`)) {
+            totalCount += count;
+          }
+        }
+        tree += `${prefix}${branch}${segment}/&nbsp;&nbsp;(${totalCount} files, preserved)<br>`;
+        continue;
+      }
 
       if (depth === 0 && preservedRootPaths?.has(segment)) {
         let totalCount = 0;

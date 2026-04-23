@@ -77,6 +77,10 @@ function getOpenAIClient(): OpenAI {
     openai = new OpenAI({
       apiKey: apiKey,
       baseURL: "https://openrouter.ai/api/v1",
+      defaultHeaders: {
+        "HTTP-Referer": "https://www.fwd2drive.com",
+        "X-Title": "fwd2drive",
+      },
     });
   }
   return openai;

@@ -67,6 +67,7 @@ import {
   loadSavedPlan,
   processMoveChunk,
   processPlanningChunk,
+  saveSavedPlan,
   writeFileActionsCsv,
 } from "../src/agents/drive/handlers/organizeExecution";
 import {
@@ -189,7 +190,19 @@ function makeTestEmail(text: string): TransformedEmail {
 }
 
 function setFakeStructuredCompletions(results: unknown[]): void {
-  const queue = [...results];
+  const queue = results.map((result) => {
+    if (!result || typeof result !== "object" || Array.isArray(result)) {
+      return result;
+    }
+    const normalized = {...result} as Record<string, unknown>;
+    if ("proposed_structure" in normalized && !("folder_ignores" in normalized)) {
+      normalized.folder_ignores = [];
+    }
+    if ("patches" in normalized && !("folder_ignores" in normalized)) {
+      normalized.folder_ignores = [];
+    }
+    return normalized;
+  });
   const fakeClient = {
     chat: {
       completions: {
@@ -2412,6 +2425,106 @@ describe("organize phased proposal flow", function() {
     expect(getLastSentEmail(sender)).to.equal(null);
   });
 
+  it("DT00ubeG persists ignored plan-review folders across later revisions", async function() {
+    const proposalId = `phase-plan-review-ignore-${Date.now()}`;
+    const proposalDoc = makePhaseDoc("plan_review");
+    await seedPhaseProposal(proposalId, proposalDoc);
+    await saveSavedPlan(proposalId, {
+      proposed_folders: [
+        {folder_path: "02-Work", description: "Work"},
+        {folder_path: "03-Archive", description: "Archive"},
+      ],
+      file_actions: [
+        {
+          file_id: "photo-1",
+          current_path: "01-Personal/Photos",
+          current_name: "beach.jpg",
+          new_folder: "03-Archive",
+          new_name: "beach.jpg",
+          action: "move",
+          reason: "Archive older photos",
+        },
+        {
+          file_id: "doc-1",
+          current_path: "My Drive",
+          current_name: "invoice.pdf",
+          new_folder: "02-Work",
+          new_name: "invoice.pdf",
+          action: "move",
+          reason: "Work document",
+        },
+      ],
+      summary: "Initial plan",
+    });
+
+    setFakeStructuredCompletions([{
+      patches: [],
+      folder_ignores: ["01-Personal/Photos"],
+      unclear: false,
+      summary: "Left Photos alone.",
+    }]);
+
+    await organizeProposalTestHooks.handlePlanReviewReply(
+        makeTestEmail("leave 01-Personal/Photos alone"),
+        sender,
+        uid,
+        proposalId,
+        proposalDoc,
+        "leave 01-Personal/Photos alone",
+        false,
+    );
+
+    let savedPlan = await loadSavedPlan(proposalId);
+    expect(savedPlan.ignoredFolders).to.deep.equal(["01-Personal/Photos"]);
+    expect(savedPlan.file_actions.find((action) => action.file_id === "photo-1")).to.deep.include({
+      file_id: "photo-1",
+      new_folder: "01-Personal/Photos",
+      new_name: "beach.jpg",
+      action: "keep",
+      reason: "Preserved by user: \"01-Personal/Photos\" left as-is",
+    });
+    expect(getLastSentEmail(sender)?.html).to.include("Photos/&nbsp;&nbsp;(1 files, preserved)");
+
+    setFakeStructuredCompletions([{
+      patches: [{
+        file_id: "doc-1",
+        new_name: "2026.04.22 - invoice.pdf",
+        new_folder: null,
+        action: null,
+        reason: "Rename invoice",
+      }],
+      folder_ignores: [],
+      unclear: false,
+      summary: "Renamed invoice.",
+    }]);
+
+    await organizeProposalTestHooks.handlePlanReviewReply(
+        makeTestEmail("rename invoice.pdf to 2026.04.22 - invoice.pdf"),
+        sender,
+        uid,
+        proposalId,
+        proposalDoc,
+        "rename invoice.pdf to 2026.04.22 - invoice.pdf",
+        false,
+    );
+
+    savedPlan = await loadSavedPlan(proposalId);
+    expect(savedPlan.ignoredFolders).to.deep.equal(["01-Personal/Photos"]);
+    expect(savedPlan.file_actions.find((action) => action.file_id === "photo-1")).to.deep.include({
+      file_id: "photo-1",
+      new_folder: "01-Personal/Photos",
+      action: "keep",
+      reason: "Preserved by user: \"01-Personal/Photos\" left as-is",
+    });
+    expect(savedPlan.file_actions.find((action) => action.file_id === "doc-1")).to.deep.include({
+      file_id: "doc-1",
+      new_folder: "02-Work",
+      new_name: "2026.04.22 - invoice.pdf",
+      action: "move_and_rename",
+      reason: "Rename invoice",
+    });
+  });
+
 });
 
 describe("organize sequential execution proposal builder", function() {
@@ -2658,6 +2771,36 @@ describe("organize sequential execution proposal builder", function() {
       reason: "Unapproved folder",
     }], [{folder_path: "01-Docs", description: "Documents"}]);
     expect(unsafe[0]).to.deep.equal(actions[0]);
+  });
+
+  it("DT00ubj1 allows keep patches that preserve files in their current folder", function() {
+    const actions: DriveOrganizeProposal["file_actions"] = [{
+      file_id: "file-1",
+      current_path: "01-Personal/Photos",
+      current_name: "beach.jpg",
+      new_folder: "02-Media",
+      new_name: "beach.jpg",
+      action: "move",
+      reason: "Initial",
+    }];
+
+    const patched = applyPlanPatches(actions, [{
+      file_id: "file-1",
+      new_name: "beach.jpg",
+      new_folder: "01-Personal/Photos",
+      action: "keep",
+      reason: "Preserved by user: \"01-Personal/Photos\" left as-is",
+    }], [{folder_path: "02-Media", description: "Media"}]);
+
+    expect(patched[0]).to.deep.equal({
+      file_id: "file-1",
+      current_path: "01-Personal/Photos",
+      current_name: "beach.jpg",
+      new_folder: "01-Personal/Photos",
+      new_name: "beach.jpg",
+      action: "keep",
+      reason: "Preserved by user: \"01-Personal/Photos\" left as-is",
+    });
   });
 
   it("DT00ubk bails planning chunks when proposal status is cancelled", async function() {

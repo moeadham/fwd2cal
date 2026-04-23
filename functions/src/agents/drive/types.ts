@@ -155,6 +155,9 @@ export const DriveOrganizeProposalSchema = z.object({
   file_actions: z.array(OrganizeFileActionSchema).describe(
       "Proposed action for each file in the drive",
   ),
+  ignoredFolders: z.array(z.string()).optional().describe(
+      "Folder paths the user has marked as ignored; files under these stay put",
+  ),
   summary: z.string().describe(
       "Brief natural-language summary of the proposed changes",
   ),
@@ -300,6 +303,7 @@ export interface OrganizeProposalDoc {
   createdAt: string;
   expiresAt: string;
   storagePath: string;
+  ignoredFolders?: string[];
   proposal?: DriveOrganizeProposal;
   cost?: OrganizeCostBreakdown;
   snapshot?: OrganizeSnapshotAction[];

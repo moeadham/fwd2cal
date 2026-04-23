@@ -8,6 +8,9 @@ const AnalyzeDirectoryStructureSchema = z.object({
   proposed_structure: z.array(OrganizeFolderSchema.extend({
     source: z.enum(["existing", "proposed"]).describe("Whether this folder already exists or is newly proposed"),
   })).describe("Initial directory structure proposal"),
+  folder_ignores: z.array(z.string()).describe(
+      "Folder paths the user wants left as-is; use the exact existing folder path from the current tree",
+  ),
   summary: z.string().describe("Brief explanation of the structure and why it fits the drive"),
 });
 
@@ -36,7 +39,10 @@ Rules:
 - Mark folders that already exist as source "existing" and new folders as source "proposed".
 - Keep paths relative to My Drive. Do not include "My Drive/" in folder_path.
 - Include descriptions that explain what belongs in each folder.
-- If user instructions include revisions, apply them while preserving the convention.`,
+- If user instructions include revisions, apply them while preserving the convention.
+- If the user says "ignore", "skip", "leave alone", "don't touch", or similar for a folder, add that exact folder path to folder_ignores. Do NOT propose a renamed/merged replacement for it in proposed_structure.
+- Do not include any folder in proposed_structure whose path equals or descends into a folder in folder_ignores.
+- If the user explicitly asks to reorganize a folder previously marked ignored, omit it from folder_ignores and include it in proposed_structure.`,
 };
 
 export {prompt, AnalyzeDirectoryStructureSchema, AnalyzeDirectoryStructureResult};

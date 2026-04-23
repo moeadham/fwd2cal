@@ -75,6 +75,93 @@ function getNonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+function normalizeFolderPath(folderPath: string): string {
+  return folderPath
+      .split("/")
+      .map((segment) => segment.trim())
+      .filter(Boolean)
+      .join("/");
+}
+
+function normalizeIgnoredFolderPaths(folderPaths: string[]): string[] {
+  return [...new Set(
+      folderPaths
+          .map((folderPath) => normalizeFolderPath(folderPath))
+          .filter((folderPath) => Boolean(folderPath) && folderPath !== "My Drive"),
+  )].sort((left, right) => left.localeCompare(right));
+}
+
+function findIgnoredRoot(path: string, ignoredFolders: Iterable<string>): string | null {
+  const normalizedPath = normalizeFolderPath(path);
+  if (!normalizedPath || normalizedPath === "My Drive") {
+    return null;
+  }
+  for (const ignoredFolder of ignoredFolders) {
+    if (normalizedPath === ignoredFolder || normalizedPath.startsWith(`${ignoredFolder}/`)) {
+      return ignoredFolder;
+    }
+  }
+  return null;
+}
+
+function dropIgnoredFolderEntries<T>(
+    entries: T[],
+    ignoredFolders: Iterable<string>,
+    getPath: (entry: T) => string | null | undefined,
+    proposalId: string,
+): T[] {
+  return entries.filter((entry) => {
+    const path = getPath(entry);
+    if (!path) {
+      return true;
+    }
+    const ignoredRoot = findIgnoredRoot(path, ignoredFolders);
+    if (ignoredRoot) {
+      logger.warn("Drive organize: dropping directory entry inside ignored folder", {
+        proposalId,
+        path,
+        ignoredRoot,
+      });
+    }
+    return !ignoredRoot;
+  });
+}
+
+function buildIgnoredFolderKeepPatches(
+    fileActions: DriveOrganizeProposal["file_actions"],
+    ignoredFolders: Iterable<string>,
+): Array<{
+    file_id: string;
+    new_name: string;
+    new_folder: string;
+    action: "keep";
+    reason: string;
+  }> {
+  const patches: Array<{
+    file_id: string;
+    new_name: string;
+    new_folder: string;
+    action: "keep";
+    reason: string;
+  }> = [];
+  for (const ignoredFolder of ignoredFolders) {
+    for (const action of fileActions) {
+      const currentPath = normalizeFolderPath(action.current_path || "My Drive") || "My Drive";
+      if (currentPath !== ignoredFolder && !currentPath.startsWith(`${ignoredFolder}/`)) {
+        continue;
+      }
+      patches.push({
+        file_id: action.file_id,
+        new_name: action.current_name,
+        new_folder: currentPath,
+        action: "keep",
+        reason: `Preserved by user: "${ignoredFolder}" left as-is`,
+      });
+    }
+  }
+  return patches;
+}
+
 function renumberDirectoryStructure(
     folders: DriveOrganizeProposal["proposed_folders"],
     summary: string,
@@ -439,6 +526,7 @@ async function handleDirectoryAnalysisReply(
         const examples = await generateFilenameExamples(convention, uid);
         await sendOrganizeCostEstimateEmail(
             sender, email, proposalId, approvedStructure, convention, cost, examples,
+            new Set(normalizeIgnoredFolderPaths(proposalDoc.ignoredFolders ?? [])),
         );
         return {
           totalFiles: cost.totalFiles,
@@ -486,12 +574,14 @@ async function handleDirectoryAnalysisReply(
       `${layout.userPrompt || ""}\n\n` +
       `## Current Proposed Structure (revise this)\n${currentProposedTree}\n\n` +
       `## User Revision Request\n${replyBody}`;
+  const existingIgnoredFolders = normalizeIgnoredFolderPaths(proposalDoc.ignoredFolders || []);
   const result = await analyzeDirectoryStructure(
       treeSummary,
       layout.folderConvention || proposalDoc.phaseData?.folderPreferences?.confirmedConvention || "",
       revisionPrompt,
       uid,
       layout.conventionDescription || "",
+      existingIgnoredFolders,
   );
   const folderConvention =
     layout.folderConvention ||
@@ -505,8 +595,28 @@ async function handleDirectoryAnalysisReply(
     folder_path: folder.folder_path,
     description: folder.description,
   }));
-  const proposedStructure = renumberDirectoryStructure(
+  const nextIgnoredFolders = new Set(existingIgnoredFolders);
+  for (const folderPath of result.folder_ignores || []) {
+    const normalizedPath = normalizeFolderPath(folderPath);
+    if (normalizedPath && normalizedPath !== "My Drive") {
+      nextIgnoredFolders.add(normalizedPath);
+    }
+  }
+  for (const folder of normalizedStructure) {
+    for (const ignoredFolder of [...nextIgnoredFolders]) {
+      if (folder.folder_path === ignoredFolder || folder.folder_path.startsWith(`${ignoredFolder}/`)) {
+        nextIgnoredFolders.delete(ignoredFolder);
+      }
+    }
+  }
+  const filteredNormalizedStructure = dropIgnoredFolderEntries(
       normalizedStructure,
+      nextIgnoredFolders,
+      (folder) => folder.folder_path,
+      proposalId,
+  );
+  const proposedStructure = renumberDirectoryStructure(
+      filteredNormalizedStructure,
       result.summary,
       folderConvention,
   );
@@ -517,19 +627,47 @@ async function handleDirectoryAnalysisReply(
     userFeedback: replyBody,
     uid,
   });
+  const filteredFinalStructure = dropIgnoredFolderEntries(
+      finalizedLayout.finalStructure,
+      nextIgnoredFolders,
+      (folder) => folder.folder_path,
+      proposalId,
+  );
+  const filteredDirectoryMoves = finalizedLayout.directoryMoves.filter((move) => {
+    const ignoredRoot = findIgnoredRoot(move.current_path, nextIgnoredFolders) ||
+      findIgnoredRoot(move.proposed_path, nextIgnoredFolders);
+    if (ignoredRoot) {
+      logger.warn("Drive organize: dropping directory entry inside ignored folder", {
+        proposalId,
+        path: `${move.current_path} -> ${move.proposed_path}`,
+        ignoredRoot,
+      });
+      return false;
+    }
+    return true;
+  });
+  const filteredAddedDirectories = dropIgnoredFolderEntries(
+      finalizedLayout.addedDirectories,
+      nextIgnoredFolders,
+      (folderPath) => folderPath,
+      proposalId,
+  );
+  const sortedIgnoredFolders = normalizeIgnoredFolderPaths([...nextIgnoredFolders]);
+  const preservedFolderPaths = new Set(sortedIgnoredFolders);
   const nextPhaseData = {
     ...proposalDoc.phaseData,
     directoryLayout: {
       ...layout,
       conventionDescription,
-      proposedStructure: finalizedLayout.finalStructure,
-      directoryMoves: finalizedLayout.directoryMoves,
-      addedDirectories: finalizedLayout.addedDirectories,
+      proposedStructure: filteredFinalStructure,
+      directoryMoves: filteredDirectoryMoves,
+      addedDirectories: filteredAddedDirectories,
       summary: finalizedLayout.summary,
     },
   };
   await updateOrganizeProposalStatus(proposalId, "pending", {
     phase: "directory_analysis",
+    ignoredFolders: sortedIgnoredFolders,
     phaseData: nextPhaseData,
   });
   await sendOrganizePhase1aEmail(
@@ -538,8 +676,9 @@ async function handleDirectoryAnalysisReply(
       proposalId,
       conventionDescription,
       finalizedLayout.summary,
-      finalizedLayout.finalStructure,
+      filteredFinalStructure,
       true,
+      preservedFolderPaths,
   );
   return emptyResult();
 }
@@ -621,6 +760,7 @@ async function handleFilenameConventionReply(
     const examples = await generateFilenameExamples(convention, uid);
     await sendOrganizeCostEstimateEmail(
         sender, email, proposalId, approvedStructure, convention, cost, examples,
+        new Set(normalizeIgnoredFolderPaths(proposalDoc.ignoredFolders ?? [])),
     );
     return {
       totalFiles: cost.totalFiles,
@@ -702,6 +842,7 @@ async function handleCostEstimateReply(
     }
     await sendOrganizeCostEstimateEmail(
         sender, email, proposalId, approvedStructure, convention, cost, examples,
+        new Set(normalizeIgnoredFolderPaths(proposalDoc.ignoredFolders ?? [])),
     );
     return emptyResult("Awaiting button click");
   }
@@ -783,10 +924,15 @@ async function handlePlanReviewReply(
     proposalDoc.phaseData?.directoryLayout?.approvedStructure ||
     proposalDoc.phaseData?.directoryLayout?.proposedStructure ||
     proposal.proposed_folders;
+  const existingIgnoredFolders = normalizeIgnoredFolderPaths([
+    ...(proposal.ignoredFolders || []),
+    ...(proposalDoc.ignoredFolders || []),
+  ]);
   const revision = await revisePlanFileActions(
       proposal.file_actions,
       approvedFolders,
       replyBody,
+      existingIgnoredFolders,
       uid,
   );
   if (revision.unclear) {
@@ -803,14 +949,44 @@ async function handlePlanReviewReply(
     return emptyResult("Plan revision unclear", proposal.file_actions.length);
   }
 
+  const nextIgnoredFolders = new Set(existingIgnoredFolders);
+  for (const folderPath of revision.folder_ignores || []) {
+    const normalizedPath = normalizeFolderPath(folderPath);
+    if (normalizedPath) {
+      nextIgnoredFolders.add(normalizedPath);
+    }
+  }
+  const actionsByFileId = new Map(proposal.file_actions.map((action) => [action.file_id, action]));
+  for (const patch of revision.patches) {
+    if (!patch.new_folder) {
+      continue;
+    }
+    const originalAction = actionsByFileId.get(patch.file_id);
+    if (!originalAction) {
+      continue;
+    }
+    const currentPath = normalizeFolderPath(originalAction.current_path || "My Drive") || "My Drive";
+    const newFolder = normalizeFolderPath(patch.new_folder);
+    if (!newFolder || newFolder === currentPath) {
+      continue;
+    }
+    for (const ignoredFolder of [...nextIgnoredFolders]) {
+      if (currentPath === ignoredFolder || currentPath.startsWith(`${ignoredFolder}/`)) {
+        nextIgnoredFolders.delete(ignoredFolder);
+      }
+    }
+  }
+  const syntheticKeepPatches = buildIgnoredFolderKeepPatches(proposal.file_actions, nextIgnoredFolders);
   const revisedActions = applyPlanPatches(
       proposal.file_actions,
-      revision.patches,
+      [...syntheticKeepPatches, ...revision.patches],
       approvedFolders,
   );
+  const sortedIgnoredFolders = normalizeIgnoredFolderPaths([...nextIgnoredFolders]);
   const revisedProposal: DriveOrganizeProposal = {
     ...proposal,
     file_actions: revisedActions,
+    ignoredFolders: sortedIgnoredFolders,
     summary: revision.summary || proposal.summary,
   };
   await saveSavedPlan(proposalId, revisedProposal);
@@ -818,6 +994,7 @@ async function handlePlanReviewReply(
   const nextVersion = (proposalDoc.phaseData?.planReview?.fileActionsVersion || 1) + 1;
   await updateOrganizeProposalStatus(proposalId, "pending", {
     phase: "plan_review",
+    ignoredFolders: sortedIgnoredFolders,
     phaseData: {
       ...proposalDoc.phaseData,
       planReview: {
