@@ -2938,7 +2938,7 @@ describe("organize sequential execution proposal builder", function() {
         {proposalId: "proposal-2", chunkIndex: 1},
     );
 
-    expect(fileActions).to.have.length(3);
+    expect(fileActions).to.have.length(4);
     expect(fileActions[0]).to.deep.include({
       file_id: "file-1",
       action: "keep",
@@ -2954,6 +2954,12 @@ describe("organize sequential execution proposal builder", function() {
       file_id: "file-3",
       action: "move_and_rename",
       new_folder: "01-Docs",
+    });
+    expect(fileActions[3]).to.deep.include({
+      file_id: "file-4",
+      action: "keep",
+      new_folder: "Inbox",
+      reason: "Automatic analysis failed — left in place",
     });
     expect(stats).to.deep.equal({planned: 1, failed: 1, skipped: 2});
   });
