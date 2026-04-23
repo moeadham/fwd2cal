@@ -604,6 +604,15 @@ export async function processPlanningChunk(
       if (ignoredRoot) {
         return {kind: "ignored", file, ignoredRoot} satisfies PlanningWorkerResult;
       }
+      logger.info(`Drive organize planning chunk ${chunkIndex + 1}/${totalChunks}: processing "${file.name}"`, {
+        proposalId,
+        chunkIndex,
+        totalChunks,
+        fileId: file.id,
+        name: file.name,
+        mimeType: file.mimeType,
+        size: file.size,
+      });
       const {contentSummary, imageUrls} = await summarizeExecutionFile(oauth2Client, file);
       const proposed = await proposeFileAction(runningTree, convention, file, contentSummary, uid, imageUrls);
       return {kind: "proposed", file, proposed} satisfies PlanningWorkerResult;

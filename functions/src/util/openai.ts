@@ -2,7 +2,6 @@ import OpenAI from "openai";
 import {LengthFinishReasonError} from "openai/core/error";
 import {zodResponseFormat} from "openai/helpers/zod";
 import {logger} from "firebase-functions/v2";
-import tokenHelper from "./tokenHelper";
 import {ChatMessage} from "./types";
 import {OPENROUTER_API_KEY} from "./config";
 import {sendEvent} from "./analytics";
@@ -97,13 +96,6 @@ async function defaultCompletion<T>(
     uid: string | null = null,
     options?: CompletionOptions,
 ): Promise<T | string> {
-  logger.debug(
-      `OpenAI request with ${tokenHelper.countTokens(JSON.stringify(messages))} prompt tokens`,
-      {
-        promptVersion: options?.promptVersion,
-      },
-  );
-
   const requestOptions: OpenAI.ChatCompletionCreateParams = {
     messages: messages as OpenAI.ChatCompletionMessageParam[],
     model: model,
