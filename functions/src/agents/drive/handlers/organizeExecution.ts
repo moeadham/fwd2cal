@@ -10,7 +10,12 @@ import {
 } from "../../../util/firestoreHandler";
 import {sendEvent} from "../../../util/analytics";
 import {TransformedEmail} from "../../../util/types";
-import {AGENT_NAME, MAX_DRIVE_UPLOAD_BYTES, ORGANIZE_DRIVE_CHUNK_SIZE} from "../config";
+import {
+  AGENT_NAME,
+  MAX_DRIVE_UPLOAD_BYTES,
+  ORGANIZE_DRIVE_CHUNK_SIZE,
+  ORGANIZE_DRIVE_PLAN_CONCURRENCY,
+} from "../config";
 import {driveMailTemplates, driveOrganizeActionUrl} from "../mailTemplates";
 import {
   DriveFileEntry,
@@ -70,6 +75,10 @@ type FileActionProposer = (
   imageUrls?: string[],
 ) => Promise<ProposeFileActionResult>;
 type OrganizeFileActionType = DriveOrganizeProposal["file_actions"][number]["action"];
+type PlanningWorkerResult =
+  | {kind: "ignored"; file: DriveFileEntry; ignoredRoot: string}
+  | {kind: "proposed"; file: DriveFileEntry; proposed: ProposeFileActionResult}
+  | {kind: "error"; file: DriveFileEntry; error: unknown};
 
 const getExecutionTreePath = (proposalId: string, chunkIndex: number) =>
   `organize-proposals/${proposalId}-execution-tree-${chunkIndex}.json`;
@@ -81,6 +90,31 @@ export const getPlanStoragePath = (proposalId: string) =>
   `organize-proposals/proposal-${proposalId}.json`;
 export const getPlanCsvStoragePath = (proposalId: string) =>
   `organize-proposals/proposal-${proposalId}.csv`;
+
+export async function mapWithConcurrency<T, U>(
+    items: T[],
+    limit: number,
+    fn: (item: T) => Promise<U>,
+): Promise<U[]> {
+  if (items.length === 0) {
+    return [];
+  }
+
+  const clampedLimit = Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : 1;
+  const results = new Array<U>(items.length);
+  let nextIndex = 0;
+
+  const worker = async (): Promise<void> => {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex++;
+      results[currentIndex] = await fn(items[currentIndex]);
+    }
+  };
+
+  await Promise.all(Array.from({length: Math.min(clampedLimit, items.length)}, () => worker()));
+  return results;
+}
 
 async function isOrganizeProposalCancelled(proposalId: string): Promise<boolean> {
   const latestProposal = await getOrganizeProposal(proposalId);
@@ -133,6 +167,82 @@ function deriveEffectiveAction(
     newFolder,
     currentInApprovedTree,
   };
+}
+
+export function reconcilePlanningChunkResults(
+    results: PlanningWorkerResult[],
+    runningTree: DriveOrganizeProposal["proposed_folders"],
+    knownDirectories: Set<string>,
+    stats: PlanningChunkResult["stats"],
+    context: {proposalId: string; chunkIndex: number},
+): DriveOrganizeProposal["file_actions"] {
+  const fileActions: DriveOrganizeProposal["file_actions"] = [];
+
+  for (const result of results) {
+    if (result.kind === "ignored") {
+      const {file, ignoredRoot} = result;
+      fileActions.push({
+        file_id: file.id,
+        current_name: file.name,
+        current_path: file.parentPath || "My Drive",
+        new_name: file.name,
+        new_folder: file.parentPath || "My Drive",
+        action: "keep",
+        reason: `Preserved by user: "${ignoredRoot}" left as-is`,
+      });
+      stats.skipped++;
+      continue;
+    }
+
+    if (result.kind === "proposed") {
+      const {file, proposed} = result;
+      if (proposed.needs_new_directory && proposed.new_directory &&
+          !knownDirectories.has(proposed.new_directory.folder_path)) {
+        runningTree.push(proposed.new_directory);
+        knownDirectories.add(proposed.new_directory.folder_path);
+      }
+      const effective = deriveEffectiveAction(proposed, file, knownDirectories);
+      if (effective.action !== proposed.action) {
+        logger.warn("Drive organize: LLM action overridden", {
+          proposalId: context.proposalId,
+          chunkIndex: context.chunkIndex,
+          fileId: file.id,
+          llmAction: proposed.action,
+          effectiveAction: effective.action,
+          currentPath: effective.currentPath,
+          newFolder: effective.newFolder,
+          currentInApprovedTree: effective.currentInApprovedTree,
+        });
+      }
+
+      const action = {
+        file_id: proposed.file_id || file.id,
+        current_name: proposed.current_name || file.name,
+        current_path: effective.currentPath,
+        new_name: proposed.new_name || file.name,
+        new_folder: effective.newFolder,
+        action: effective.action,
+        reason: proposed.reason,
+      };
+      fileActions.push(action);
+      if (action.action === "keep") {
+        stats.skipped++;
+      } else {
+        stats.planned++;
+      }
+      continue;
+    }
+
+    stats.failed++;
+    logger.error("Drive organize planning chunk: file failed", {
+      proposalId: context.proposalId,
+      chunkIndex: context.chunkIndex,
+      fileId: result.file.id,
+      error: result.error instanceof Error ? result.error.message : String(result.error),
+    });
+  }
+
+  return fileActions;
 }
 
 /** Builds content-aware actions sequentially while carrying forward newly-created directories. */
@@ -485,72 +595,29 @@ export async function processPlanningChunk(
     }
     return null;
   };
-  const fileActions: DriveOrganizeProposal["file_actions"] = [];
   const stats = {planned: 0, failed: 0, skipped: 0};
   const oauth2Client = await getOauthClient(uid, AGENT_NAME);
-
-  for (const file of chunkFiles) {
+  const planConcurrency = ORGANIZE_DRIVE_PLAN_CONCURRENCY.value();
+  const results = await mapWithConcurrency(chunkFiles, planConcurrency, async (file) => {
     try {
       const ignoredRoot = findIgnoredRoot(file.parentPath || "");
       if (ignoredRoot) {
-        fileActions.push({
-          file_id: file.id,
-          current_name: file.name,
-          current_path: file.parentPath || "My Drive",
-          new_name: file.name,
-          new_folder: file.parentPath || "My Drive",
-          action: "keep",
-          reason: `Preserved by user: "${ignoredRoot}" left as-is`,
-        });
-        stats.skipped++;
-        continue;
+        return {kind: "ignored", file, ignoredRoot} satisfies PlanningWorkerResult;
       }
       const {contentSummary, imageUrls} = await summarizeExecutionFile(oauth2Client, file);
       const proposed = await proposeFileAction(runningTree, convention, file, contentSummary, uid, imageUrls);
-      if (proposed.needs_new_directory && proposed.new_directory &&
-          !knownDirectories.has(proposed.new_directory.folder_path)) {
-        runningTree.push(proposed.new_directory);
-        knownDirectories.add(proposed.new_directory.folder_path);
-      }
-      const effective = deriveEffectiveAction(proposed, file, knownDirectories);
-      if (effective.action !== proposed.action) {
-        logger.warn("Drive organize: LLM action overridden", {
-          proposalId,
-          chunkIndex,
-          fileId: file.id,
-          llmAction: proposed.action,
-          effectiveAction: effective.action,
-          currentPath: effective.currentPath,
-          newFolder: effective.newFolder,
-          currentInApprovedTree: effective.currentInApprovedTree,
-        });
-      }
-
-      const action = {
-        file_id: proposed.file_id || file.id,
-        current_name: proposed.current_name || file.name,
-        current_path: effective.currentPath,
-        new_name: proposed.new_name || file.name,
-        new_folder: effective.newFolder,
-        action: effective.action,
-        reason: proposed.reason,
-      };
-      fileActions.push(action);
-      if (action.action === "keep") {
-        stats.skipped++;
-      } else {
-        stats.planned++;
-      }
+      return {kind: "proposed", file, proposed} satisfies PlanningWorkerResult;
     } catch (error) {
-      stats.failed++;
-      logger.error("Drive organize planning chunk: file failed", {
-        proposalId,
-        chunkIndex,
-        fileId: file.id,
-        error: error instanceof Error ? error.message : String(error),
-      });
+      return {kind: "error", file, error} satisfies PlanningWorkerResult;
     }
-  }
+  });
+  const fileActions = reconcilePlanningChunkResults(
+      results,
+      runningTree,
+      knownDirectories,
+      stats,
+      {proposalId, chunkIndex},
+  );
 
   await saveExecutionJson(getPlanningChunkPath(proposalId, chunkIndex), {
     file_actions: fileActions,

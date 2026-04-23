@@ -65,8 +65,10 @@ import {
   applyPlanPatches,
   buildSequentialExecutionProposal,
   loadSavedPlan,
+  mapWithConcurrency,
   processMoveChunk,
   processPlanningChunk,
+  reconcilePlanningChunkResults,
   saveSavedPlan,
   writeFileActionsCsv,
 } from "../src/agents/drive/handlers/organizeExecution";
@@ -2713,6 +2715,247 @@ describe("organize sequential execution proposal builder", function() {
         .to.deep.equal(["01-Documents", "02-Travel"]);
     expect(proposal.file_actions.map((action) => action.new_folder))
         .to.deep.equal(["02-Travel", "02-Travel"]);
+  });
+
+  it("DT00ubg preserves input order while respecting the concurrency limit", async function() {
+    const items = [0, 1, 2, 3, 4, 5];
+    const starts: number[] = [];
+    const finishes: number[] = [];
+    let inFlight = 0;
+    let maxInFlight = 0;
+
+    const results = await mapWithConcurrency(items, 2, async (item) => {
+      starts.push(item);
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5 - (item % 2)));
+      finishes.push(item);
+      inFlight--;
+      return `result-${item}`;
+    });
+
+    expect(results).to.deep.equal([
+      "result-0",
+      "result-1",
+      "result-2",
+      "result-3",
+      "result-4",
+      "result-5",
+    ]);
+    expect(starts).to.deep.equal(items);
+    expect(finishes).to.not.deep.equal(items);
+    expect(maxInFlight).to.equal(2);
+  });
+
+  it("DT00ubh handles empty input and clamps invalid concurrency to one worker", async function() {
+    const emptyResults = await mapWithConcurrency([], 8, async (_item: number) => "unreachable");
+    expect(emptyResults).to.deep.equal([]);
+
+    const callOrder: number[] = [];
+    const results = await mapWithConcurrency([1, 2, 3], Number.NaN, async (item) => {
+      callOrder.push(item);
+      return item * 10;
+    });
+
+    expect(results).to.deep.equal([10, 20, 30]);
+    expect(callOrder).to.deep.equal([1, 2, 3]);
+  });
+
+  it("DT00ubh1 dedupes parallel new folders during serial reconciliation", function() {
+    const runningTree: DriveOrganizeProposal["proposed_folders"] = [{
+      folder_path: "01-Docs",
+      description: "Documents",
+    }];
+    const knownDirectories = new Set(runningTree.map((folder) => folder.folder_path));
+    const stats = {planned: 0, failed: 0, skipped: 0};
+    const results: Parameters<typeof reconcilePlanningChunkResults>[0] = [
+      {
+        kind: "proposed",
+        file: {
+          id: "file-1",
+          name: "receipt.pdf",
+          mimeType: "application/pdf",
+          parentId: "root",
+          parentPath: "Inbox",
+          createdTime: "2026-04-10T00:00:00.000Z",
+          size: 100,
+          webViewLink: "",
+          isFolder: false,
+        },
+        proposed: {
+          file_id: "file-1",
+          current_name: "receipt.pdf",
+          current_path: "Inbox",
+          new_name: "2026.04.10 - Receipt.pdf",
+          target_directory: "02-Travel",
+          action: "move_and_rename",
+          needs_new_directory: true,
+          new_directory: {
+            folder_path: "02-Travel",
+            description: "Travel docs",
+          },
+          reason: "Travel receipt",
+        },
+      },
+      {
+        kind: "proposed",
+        file: {
+          id: "file-2",
+          name: "itinerary.pdf",
+          mimeType: "application/pdf",
+          parentId: "root",
+          parentPath: "Inbox",
+          createdTime: "2026-04-11T00:00:00.000Z",
+          size: 100,
+          webViewLink: "",
+          isFolder: false,
+        },
+        proposed: {
+          file_id: "file-2",
+          current_name: "itinerary.pdf",
+          current_path: "Inbox",
+          new_name: "2026.04.11 - Itinerary.pdf",
+          target_directory: "02-Travel",
+          action: "move_and_rename",
+          needs_new_directory: true,
+          new_directory: {
+            folder_path: "02-Travel",
+            description: "Travel docs duplicate",
+          },
+          reason: "Travel itinerary",
+        },
+      },
+    ];
+
+    const fileActions = reconcilePlanningChunkResults(
+        results,
+        runningTree,
+        knownDirectories,
+        stats,
+        {proposalId: "proposal-1", chunkIndex: 0},
+    );
+
+    expect(runningTree.map((folder) => folder.folder_path)).to.deep.equal(["01-Docs", "02-Travel"]);
+    expect(fileActions.map((action) => action.new_folder)).to.deep.equal(["02-Travel", "02-Travel"]);
+    expect(stats).to.deep.equal({planned: 2, failed: 0, skipped: 0});
+  });
+
+  it("DT00ubh2 counts ignored kept files and errors during reconciliation", function() {
+    const runningTree: DriveOrganizeProposal["proposed_folders"] = [{
+      folder_path: "01-Docs",
+      description: "Documents",
+    }];
+    const knownDirectories = new Set(runningTree.map((folder) => folder.folder_path));
+    const stats = {planned: 0, failed: 0, skipped: 0};
+    const results: Parameters<typeof reconcilePlanningChunkResults>[0] = [
+      {
+        kind: "ignored",
+        file: {
+          id: "file-1",
+          name: "beach.jpg",
+          mimeType: "image/jpeg",
+          parentId: "root",
+          parentPath: "01-Personal/Photos",
+          createdTime: "2026-04-10T00:00:00.000Z",
+          size: 100,
+          webViewLink: "",
+          isFolder: false,
+        },
+        ignoredRoot: "01-Personal/Photos",
+      },
+      {
+        kind: "proposed",
+        file: {
+          id: "file-2",
+          name: "invoice.pdf",
+          mimeType: "application/pdf",
+          parentId: "root",
+          parentPath: "01-Docs",
+          createdTime: "2026-04-11T00:00:00.000Z",
+          size: 100,
+          webViewLink: "",
+          isFolder: false,
+        },
+        proposed: {
+          file_id: "file-2",
+          current_name: "invoice.pdf",
+          current_path: "01-Docs",
+          new_name: "invoice.pdf",
+          target_directory: "01-Docs",
+          action: "keep",
+          needs_new_directory: false,
+          new_directory: null,
+          reason: "Already organized",
+        },
+      },
+      {
+        kind: "proposed",
+        file: {
+          id: "file-3",
+          name: "contract.pdf",
+          mimeType: "application/pdf",
+          parentId: "root",
+          parentPath: "Inbox",
+          createdTime: "2026-04-12T00:00:00.000Z",
+          size: 100,
+          webViewLink: "",
+          isFolder: false,
+        },
+        proposed: {
+          file_id: "file-3",
+          current_name: "contract.pdf",
+          current_path: "Inbox",
+          new_name: "2026.04.12 - Contract.pdf",
+          target_directory: "01-Docs",
+          action: "move_and_rename",
+          needs_new_directory: false,
+          new_directory: null,
+          reason: "Move into documents",
+        },
+      },
+      {
+        kind: "error",
+        file: {
+          id: "file-4",
+          name: "bad.pdf",
+          mimeType: "application/pdf",
+          parentId: "root",
+          parentPath: "Inbox",
+          createdTime: "2026-04-13T00:00:00.000Z",
+          size: 100,
+          webViewLink: "",
+          isFolder: false,
+        },
+        error: new Error("boom"),
+      },
+    ];
+
+    const fileActions = reconcilePlanningChunkResults(
+        results,
+        runningTree,
+        knownDirectories,
+        stats,
+        {proposalId: "proposal-2", chunkIndex: 1},
+    );
+
+    expect(fileActions).to.have.length(3);
+    expect(fileActions[0]).to.deep.include({
+      file_id: "file-1",
+      action: "keep",
+      new_folder: "01-Personal/Photos",
+      reason: "Preserved by user: \"01-Personal/Photos\" left as-is",
+    });
+    expect(fileActions[1]).to.deep.include({
+      file_id: "file-2",
+      action: "keep",
+      new_folder: "01-Docs",
+    });
+    expect(fileActions[2]).to.deep.include({
+      file_id: "file-3",
+      action: "move_and_rename",
+      new_folder: "01-Docs",
+    });
+    expect(stats).to.deep.equal({planned: 1, failed: 1, skipped: 2});
   });
 
   it("DT00ubi writes RFC 4180 CSV for file actions", function() {

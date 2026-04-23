@@ -62,5 +62,11 @@ export const ORGANIZE_DRIVE_CHUNK_SIZE = defineInt(
     },
 );
 
+export const ORGANIZE_DRIVE_PLAN_CONCURRENCY = defineInt(
+    "ORGANIZE_DRIVE_PLAN_CONCURRENCY", {
+      default: 8,
+    },
+);
+
 /* eslint-disable max-len */
 export const ORGANIZE_PROMO_HTML = "<br><br><b>Did you know?</b> fwd2drive can organize your entire drive. Just email &quot;organize my drive please&quot; to <a href=\"mailto:drive@fwd2drive.com\">drive@fwd2drive.com</a>.";
