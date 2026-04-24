@@ -53,6 +53,10 @@ import {
   RevisePlanFileActionsSchema,
   RevisePlanFileActionsResult,
 } from "./prompts/revisePlanFileActions/v1";
+import {
+  ScopePlanRevisionSchema,
+  ScopePlanRevisionResult,
+} from "./prompts/scopePlanRevision/v1";
 
 const DEFAULT_FOLDER_CONVENTION = "NN-Category";
 const DEFAULT_FILENAME_CONVENTION = "YYYY.MM.DD - Description.ext";
@@ -509,6 +513,47 @@ async function revisePlanFileActions(
   ) as RevisePlanFileActionsResult;
 }
 
+/** Scope a plan-review revision before passing file actions to the patching LLM. */
+async function scopePlanRevision(
+    proposal: DriveOrganizeProposal,
+    userInstructions: string,
+    existingIgnoredFolders: string[] = [],
+    uid: string | null = null,
+): Promise<ScopePlanRevisionResult> {
+  const {prompts, versions} = getPrompts();
+  const approvedTree = renderFolderTreePlainText(proposal);
+  const originalTree = renderOriginalFolderTree(proposal);
+  const filenameSamples = sampleFilenamesPerFolder(proposal);
+  const sampleBlock = proposal.proposed_folders
+      .map((folder) => {
+        const folderPath = normalizeFolderPath(folder.folder_path);
+        const filenames = filenameSamples.get(folderPath) || [];
+        const sampleText = filenames.length > 0 ? filenames.join(", ") : "(none)";
+        return `- ${folderPath || folder.folder_path}: ${sampleText}`;
+      })
+      .join("\n");
+  const ignoredFolders = existingIgnoredFolders.length > 0 ?
+    existingIgnoredFolders.map((folderPath) => `- ${folderPath}`).join("\n") :
+    "(none)";
+  const userText = `## User Requested Changes\n${userInstructions || "(none)"}\n\n` +
+    `## Approved Folder Tree\n${approvedTree}\n\n` +
+    `## Original Current-Path Tree\n${originalTree}\n\n` +
+    `## Sample Filenames Per Proposed Folder\n${sampleBlock || "(none)"}\n\n` +
+    `## Previously Ignored Folders\n${ignoredFolders}\n`;
+  const messages: ChatMessage[] = [
+    {role: "system", content: prompts.scopePlanRevision.prompt},
+    {role: "user", content: userText},
+  ];
+  return await defaultCompletion<ScopePlanRevisionResult>(
+      messages,
+      prompts.scopePlanRevision.model,
+      prompts.scopePlanRevision.temperature ?? DEFAULT_TEMP,
+      ScopePlanRevisionSchema,
+      uid,
+      {promptVersion: versions.PROMPT_SCOPE_PLAN_REVISION_VERSION},
+  ) as ScopePlanRevisionResult;
+}
+
 /** Extract top-level folder names from the tree summary produced by buildDriveStructureSummary. */
 function extractTopLevelFolderNames(treeSummary: string): string[] {
   const names: string[] = [];
@@ -906,6 +951,114 @@ function renderOriginalFolderTree(proposal: DriveOrganizeProposal): string {
 
   renderChildren(root, "");
   return tree.trimEnd();
+}
+
+/** Collects a few example filenames for each proposed destination folder. */
+function sampleFilenamesPerFolder(
+    proposal: DriveOrganizeProposal,
+    limit = 3,
+): Map<string, string[]> {
+  const samples = new Map<string, string[]>();
+  for (const action of proposal.file_actions) {
+    const folderPath = normalizeFolderPath(action.new_folder);
+    if (!folderPath) {
+      continue;
+    }
+    const folderSamples = samples.get(folderPath) || [];
+    if (folderSamples.length >= limit) {
+      continue;
+    }
+    if (!folderSamples.includes(action.current_name)) {
+      folderSamples.push(action.current_name);
+      samples.set(folderPath, folderSamples);
+    }
+  }
+  return samples;
+}
+
+/** Matches a folder path against a normalized segment-aware prefix. */
+function matchesFolderPrefix(folderPath: string, prefix: string): boolean {
+  const normalizedFolderPath = normalizeFolderPath(folderPath);
+  const normalizedPrefix = normalizeFolderPath(prefix);
+  if (!normalizedFolderPath || !normalizedPrefix) {
+    return false;
+  }
+  return normalizedFolderPath === normalizedPrefix || normalizedFolderPath.startsWith(`${normalizedPrefix}/`);
+}
+
+/** Returns the lowercased extension without the leading dot. */
+function getLowercaseExtension(filename: string): string {
+  const trimmed = filename.trim();
+  const lastDot = trimmed.lastIndexOf(".");
+  if (lastDot <= 0 || lastDot === trimmed.length - 1) {
+    return "";
+  }
+  return trimmed.slice(lastDot + 1).toLowerCase();
+}
+
+/** Filters plan-review file actions to only the scope inferred from the user reply. */
+function filterFileActionsByScope(
+    fileActions: DriveOrganizeProposal["file_actions"],
+    scope: ScopePlanRevisionResult,
+): DriveOrganizeProposal["file_actions"] {
+  const ignoredPrefixes = new Set(
+      scope.folder_prefixes_to_ignore
+          .map((folderPath) => normalizeFolderPath(folderPath))
+          .filter(Boolean),
+  );
+  const inScopePrefixes = scope.folder_prefixes_in_scope
+      .map((folderPath) => normalizeFolderPath(folderPath))
+      .filter(Boolean);
+  const filenamePatterns = scope.filename_patterns
+      .map((pattern) => pattern.trim().toLowerCase())
+      .filter(Boolean);
+  const extensions = new Set(
+      scope.extensions
+          .map((extension) => extension.trim().replace(/^\./, "").toLowerCase())
+          .filter(Boolean),
+  );
+  const explicitHints = new Set(
+      scope.explicit_file_hints
+          .map((hint) => hint.trim().toLowerCase())
+          .filter(Boolean),
+  );
+  const hasNameFilters = filenamePatterns.length > 0 || extensions.size > 0;
+
+  return fileActions.filter((action) => {
+    const currentPath = normalizeFolderPath(action.current_path || "My Drive") || "My Drive";
+    const newFolder = normalizeFolderPath(action.new_folder);
+    if ([...ignoredPrefixes].some((prefix) =>
+      matchesFolderPrefix(currentPath, prefix) || matchesFolderPrefix(newFolder, prefix),
+    )) {
+      return false;
+    }
+
+    const currentNameLower = action.current_name.toLowerCase();
+    const newNameLower = action.new_name.toLowerCase();
+    if (explicitHints.has(currentNameLower) || explicitHints.has(newNameLower)) {
+      return true;
+    }
+
+    const matchesPattern = filenamePatterns.length === 0 || filenamePatterns.some((pattern) =>
+      currentNameLower.includes(pattern) || newNameLower.includes(pattern),
+    );
+    const extensionMatches = extensions.size === 0 ||
+      extensions.has(getLowercaseExtension(action.current_name)) ||
+      extensions.has(getLowercaseExtension(action.new_name));
+
+    if (inScopePrefixes.length > 0) {
+      const prefixMatches = inScopePrefixes.some((prefix) =>
+        matchesFolderPrefix(currentPath, prefix) || matchesFolderPrefix(newFolder, prefix),
+      );
+      return prefixMatches && matchesPattern && extensionMatches;
+    }
+
+    if (hasNameFilters) {
+      return matchesPattern && extensionMatches;
+    }
+
+    return false;
+  });
 }
 
 /**
@@ -1743,4 +1896,7 @@ export {
   proposeFileAction,
   generateFilenameExamples,
   revisePlanFileActions,
+  scopePlanRevision,
+  sampleFilenamesPerFolder,
+  filterFileActionsByScope,
 };

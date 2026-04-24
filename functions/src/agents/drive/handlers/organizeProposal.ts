@@ -1,6 +1,9 @@
 import {logger} from "firebase-functions/v2";
 import {sendEvent} from "../../../util/analytics";
-import {getSupportEmail} from "../../../util/config";
+import {
+  DRIVE_PLAN_REVISION_MAX_SCOPED_ACTIONS,
+  getSupportEmail,
+} from "../../../util/config";
 import {getOauthClient} from "../../../auth/authHandler";
 import {getSenderFromRawEmail} from "../../../util/emailUtils";
 import {TransformedEmail} from "../../../util/types";
@@ -16,6 +19,7 @@ import {
 } from "../types";
 import {buildOrganizeEmbeddedData, renderFolderTree} from "../templates/folderTree";
 import {
+  computeAffectedActions,
   calculateOrganizeCostEstimate,
   calculateOrganizeCostFromMimeTypesByFileId,
   emptyResult,
@@ -26,6 +30,7 @@ import {
   sendOrganizeEmailResponse,
   sendOrganizeFolderPreferencesEmail,
   sendOrganizePlanReviewEmail,
+  sendOrganizePlanReviewScopeTooBroadEmail,
   sendOrganizePhase1aEmail,
   sendOrganizePhase2Email,
   sendOrganizeProposalEmail,
@@ -68,8 +73,14 @@ import {
   renumberFoldersContiguously,
   reviseOrganization,
   revisePlanFileActions,
+  scopePlanRevision,
+  filterFileActionsByScope,
 } from "../llm";
 const DEFAULT_FILENAME_CONVENTION = "YYYY.MM.DD - Description.ext";
+
+let scopePlanRevisionImpl = scopePlanRevision;
+let revisePlanFileActionsImpl = revisePlanFileActions;
+let handleOrganizeRevisionImpl = handleOrganizeRevision;
 
 function getNonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
@@ -928,8 +939,85 @@ async function handlePlanReviewReply(
     ...(proposal.ignoredFolders || []),
     ...(proposalDoc.ignoredFolders || []),
   ]);
-  const revision = await revisePlanFileActions(
-      proposal.file_actions,
+  const scope = await scopePlanRevisionImpl(
+      proposal,
+      replyBody,
+      existingIgnoredFolders,
+      uid,
+  );
+  logger.info("Drive organize: Plan revision scope", {
+    proposalId,
+    uid,
+    inScope: scope.folder_prefixes_in_scope,
+    ignored: scope.folder_prefixes_to_ignore,
+    filenamePatterns: scope.filename_patterns,
+    extensions: scope.extensions,
+    explicitFileHints: scope.explicit_file_hints,
+    prefersFolderOperation: scope.prefers_folder_operation,
+    unclear: scope.unclear,
+    summary: scope.summary,
+  });
+
+  if (scope.prefers_folder_operation) {
+    return handleOrganizeRevisionImpl(email, sender, uid, proposalId, proposalDoc, replyBody);
+  }
+
+  if (scope.unclear) {
+    const csvBuffer = await savePlanCsv(proposalId, proposal.file_actions);
+    await sendOrganizePlanReviewEmail(
+        sender,
+        email,
+        proposalId,
+        proposal,
+        csvBuffer,
+        counts,
+        scope.summary || "Please name the exact file and the new filename or approved folder path.",
+    );
+    return emptyResult("Plan revision scope unclear", proposal.file_actions.length);
+  }
+
+  const scopedActions = filterFileActionsByScope(proposal.file_actions, scope);
+  if (scopedActions.length === 0 && (scope.folder_prefixes_to_ignore?.length ?? 0) === 0) {
+    const csvBuffer = await savePlanCsv(proposalId, proposal.file_actions);
+    await sendOrganizePlanReviewEmail(
+        sender,
+        email,
+        proposalId,
+        proposal,
+        csvBuffer,
+        counts,
+        scope.summary || "Please name the exact file and the new filename or approved folder path.",
+    );
+    return emptyResult("Plan revision scope unclear", proposal.file_actions.length);
+  }
+  const maxScopedActions = DRIVE_PLAN_REVISION_MAX_SCOPED_ACTIONS.value();
+  if (scopedActions.length > maxScopedActions) {
+    const csvBuffer = await savePlanCsv(proposalId, proposal.file_actions);
+    await sendOrganizePlanReviewScopeTooBroadEmail(
+        sender,
+        email,
+        proposalId,
+        proposal,
+        csvBuffer,
+        counts,
+        scope.summary ||
+          "That change still touches too many files. Please narrow it to a folder, filename, or extension.",
+    );
+    return emptyResult("Plan revision scope too broad", proposal.file_actions.length);
+  }
+
+  sendEvent(uid, "drivePlanRevisionScoped", "drive", {
+    proposalId,
+    total: String(proposal.file_actions.length),
+    scoped: String(scopedActions.length),
+    inScope: String(scope.folder_prefixes_in_scope.length),
+    ignored: String(scope.folder_prefixes_to_ignore.length),
+    unclear: String(scope.unclear),
+    rerouted: String(scope.prefers_folder_operation),
+  });
+
+  const revision = await revisePlanFileActionsImpl(
+      scopedActions,
       approvedFolders,
       replyBody,
       existingIgnoredFolders,
@@ -950,6 +1038,12 @@ async function handlePlanReviewReply(
   }
 
   const nextIgnoredFolders = new Set(existingIgnoredFolders);
+  for (const folderPath of scope.folder_prefixes_to_ignore || []) {
+    const normalizedPath = normalizeFolderPath(folderPath);
+    if (normalizedPath) {
+      nextIgnoredFolders.add(normalizedPath);
+    }
+  }
   for (const folderPath of revision.folder_ignores || []) {
     const normalizedPath = normalizeFolderPath(folderPath);
     if (normalizedPath) {
@@ -1014,6 +1108,10 @@ async function handlePlanReviewReply(
         .filter((a) => a.action === "rename" || a.action === "move_and_rename").length,
     filesToKeep: revisedProposal.file_actions.filter((a) => a.action === "keep").length,
   };
+  const affectedActions = computeAffectedActions(
+      proposal.file_actions,
+      revisedProposal.file_actions,
+  );
   await sendOrganizePlanReviewEmail(
       sender,
       email,
@@ -1022,6 +1120,7 @@ async function handlePlanReviewReply(
       csvBuffer,
       revisedCounts,
       revision.summary || "Updated the plan.",
+      affectedActions,
   );
   return emptyResult(undefined, revisedProposal.file_actions.length);
 }
@@ -1070,6 +1169,15 @@ export const organizeProposalTestHooks = {
   handleFilenameConventionReply,
   handleCostEstimateReply,
   handlePlanReviewReply,
+  setScopePlanRevisionForTest(fn: typeof scopePlanRevisionImpl | null): void {
+    scopePlanRevisionImpl = fn || scopePlanRevision;
+  },
+  setRevisePlanFileActionsForTest(fn: typeof revisePlanFileActionsImpl | null): void {
+    revisePlanFileActionsImpl = fn || revisePlanFileActions;
+  },
+  setHandleOrganizeRevisionForTest(fn: typeof handleOrganizeRevisionImpl | null): void {
+    handleOrganizeRevisionImpl = fn || handleOrganizeRevision;
+  },
 };
 // ============================================================================
 // APPROVAL HANDLER

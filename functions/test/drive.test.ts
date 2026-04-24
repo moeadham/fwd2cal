@@ -30,6 +30,7 @@ import {
   applyFolderOperations,
   DEFAULT_FOLDER_CONVENTION,
   detectFolderConvention,
+  filterFileActionsByScope,
   mergeRevisedProposal,
   normalizeFolderConventionSeparators,
   normalizeFolderPrefixes,
@@ -37,6 +38,7 @@ import {
   proposeFilePlacement,
   renumberFoldersContiguously,
   renderFolderTreePlainText,
+  scopePlanRevision,
 } from "../src/agents/drive/llm";
 import * as driveLlm from "../src/agents/drive/llm";
 import {
@@ -1482,6 +1484,9 @@ describe("detectFolderConvention", function() {
 describe("set-preferences", function() {
   afterEach(function() {
     setOpenAIClientForTest(null);
+    organizeProposalTestHooks.setScopePlanRevisionForTest(null);
+    organizeProposalTestHooks.setRevisePlanFileActionsForTest(null);
+    organizeProposalTestHooks.setHandleOrganizeRevisionForTest(null);
     clearMockData();
   });
 
@@ -1601,6 +1606,365 @@ describe("renderFolderTreePlainText", function() {
         "└── 02-Work/  (0 files)\n" +
         "    └── Clients/  (2 files)",
     );
+  });
+});
+
+describe("filterFileActionsByScope", function() {
+  const actions: DriveOrganizeProposal["file_actions"] = [
+    {
+      file_id: "tax-1",
+      current_name: "2025-tax-return.pdf",
+      current_path: "Finance/Taxes",
+      new_name: "2025-tax-return.pdf",
+      new_folder: "01-Finance/Taxes",
+      action: "move",
+      reason: "Tax file",
+    },
+    {
+      file_id: "ops-1",
+      current_name: "financeops-plan.pdf",
+      current_path: "FinanceOps",
+      new_name: "financeops-plan.pdf",
+      new_folder: "09-Operations",
+      action: "move",
+      reason: "Ops file",
+    },
+    {
+      file_id: "photo-1",
+      current_name: "beach.jpg",
+      current_path: "Photos/Trips",
+      new_name: "beach.jpg",
+      new_folder: "01-Personal/Photos",
+      action: "move",
+      reason: "Photo",
+    },
+    {
+      file_id: "contract-1",
+      current_name: "contract-final.docx",
+      current_path: "Inbox",
+      new_name: "contract-final.docx",
+      new_folder: "02-Work/Contracts",
+      action: "move",
+      reason: "Contract",
+    },
+  ];
+
+  it("DT00ua1 scopes by folder prefix without matching sibling prefixes", function() {
+    const scoped = filterFileActionsByScope(actions, {
+      folder_prefixes_in_scope: ["Finance"],
+      folder_prefixes_to_ignore: [],
+      filename_patterns: [],
+      extensions: [],
+      explicit_file_hints: [],
+      prefers_folder_operation: false,
+      unclear: false,
+      summary: "Finance only",
+    });
+
+    expect(scoped.map((action) => action.file_id)).to.deep.equal(["tax-1"]);
+  });
+
+  it("DT00ua2 scopes by extension across all folders when no folder prefix is present", function() {
+    const scoped = filterFileActionsByScope(actions, {
+      folder_prefixes_in_scope: [],
+      folder_prefixes_to_ignore: [],
+      filename_patterns: [],
+      extensions: ["pdf"],
+      explicit_file_hints: [],
+      prefers_folder_operation: false,
+      unclear: false,
+      summary: "PDFs only",
+    });
+
+    expect(scoped.map((action) => action.file_id)).to.deep.equal(["tax-1", "ops-1"]);
+  });
+
+  it("DT00ua3 lets ignore prefixes win over in-scope prefixes", function() {
+    const scoped = filterFileActionsByScope(actions, {
+      folder_prefixes_in_scope: ["01-Personal"],
+      folder_prefixes_to_ignore: ["01-Personal/Photos"],
+      filename_patterns: [],
+      extensions: [],
+      explicit_file_hints: [],
+      prefers_folder_operation: false,
+      unclear: false,
+      summary: "Ignore photos",
+    });
+
+    expect(scoped).to.deep.equal([]);
+  });
+
+  it("DT00ua4 includes explicit file hints even when other filters would reject them", function() {
+    const scoped = filterFileActionsByScope(actions, {
+      folder_prefixes_in_scope: ["01-Personal"],
+      folder_prefixes_to_ignore: [],
+      filename_patterns: ["tax"],
+      extensions: ["pdf"],
+      explicit_file_hints: ["contract-final.docx"],
+      prefers_folder_operation: false,
+      unclear: false,
+      summary: "Explicit contract",
+    });
+
+    expect(scoped.map((action) => action.file_id)).to.deep.equal(["contract-1"]);
+  });
+
+  it("DT00ua5 returns an empty set for an empty scope", function() {
+    const scoped = filterFileActionsByScope(actions, {
+      folder_prefixes_in_scope: [],
+      folder_prefixes_to_ignore: [],
+      filename_patterns: [],
+      extensions: [],
+      explicit_file_hints: [],
+      prefers_folder_operation: false,
+      unclear: false,
+      summary: "Empty",
+    });
+
+    expect(scoped).to.deep.equal([]);
+  });
+});
+
+describe("scopePlanRevision prompt construction", function() {
+  afterEach(function() {
+    setOpenAIClientForTest(null);
+  });
+
+  it("DT00ua6 includes trees, samples, ignored folders, and the user request", async function() {
+    const proposal: DriveOrganizeProposal = {
+      proposed_folders: [
+        {folder_path: "01-Finance/Taxes", description: "Tax files"},
+        {folder_path: "01-Personal/Photos", description: "Photos"},
+      ],
+      file_actions: [
+        {
+          file_id: "tax-1",
+          current_name: "2024-tax-return.pdf",
+          current_path: "Finance/Taxes",
+          new_name: "2024-tax-return.pdf",
+          new_folder: "01-Finance/Taxes",
+          action: "move",
+          reason: "Tax file",
+        },
+        {
+          file_id: "photo-1",
+          current_name: "beach.jpg",
+          current_path: "Photos",
+          new_name: "beach.jpg",
+          new_folder: "01-Personal/Photos",
+          action: "move",
+          reason: "Photo",
+        },
+      ],
+      ignoredFolders: ["01-Personal/Photos"],
+      summary: "Initial plan",
+    };
+
+    const capturedMessages: unknown[] = [];
+    setOpenAIClientForTest({
+      chat: {
+        completions: {
+          create: async (params: {messages: unknown[]}) => {
+            capturedMessages.push(...params.messages);
+            return {
+              choices: [{
+                message: {
+                  content: JSON.stringify({
+                    folder_prefixes_in_scope: ["01-Finance/Taxes"],
+                    folder_prefixes_to_ignore: ["01-Personal/Photos"],
+                    filename_patterns: ["tax"],
+                    extensions: ["pdf"],
+                    explicit_file_hints: [],
+                    prefers_folder_operation: false,
+                    unclear: false,
+                    summary: "Tax PDFs in Finance",
+                  }),
+                },
+                finish_reason: "stop",
+              }],
+              usage: {total_tokens: 1},
+            };
+          },
+        },
+      },
+    } as unknown as OpenAI);
+
+    await scopePlanRevision(
+        proposal,
+        "Rename the tax PDFs under /Finance and leave Photos alone.",
+        ["01-Personal/Photos"],
+        "scope-prompt-test",
+    );
+
+    const userMessage = capturedMessages.find((message) =>
+      typeof message === "object" &&
+      message !== null &&
+      "role" in (message as Record<string, unknown>) &&
+      (message as Record<string, unknown>).role === "user",
+    ) as {content: string};
+    expect(userMessage.content).to.equal(
+        "## User Requested Changes\n" +
+        "Rename the tax PDFs under /Finance and leave Photos alone.\n\n" +
+        "## Approved Folder Tree\n" +
+        "My Drive\n" +
+        "├── 01-Finance/  (0 files)\n" +
+        "│   └── Taxes/  (1 files)\n" +
+        "└── 01-Personal/  (0 files)\n" +
+        "    └── Photos/  (1 files)\n\n" +
+        "## Original Current-Path Tree\n" +
+        "My Drive\n" +
+        "├── Finance/  (0 files)\n" +
+        "│   └── Taxes/  (1 files)\n" +
+        "└── Photos/  (1 files)\n\n" +
+        "## Sample Filenames Per Proposed Folder\n" +
+        "- 01-Finance/Taxes: 2024-tax-return.pdf\n" +
+        "- 01-Personal/Photos: beach.jpg\n\n" +
+        "## Previously Ignored Folders\n" +
+        "- 01-Personal/Photos\n",
+    );
+  });
+});
+
+describe("plan review affected actions", function() {
+  afterEach(function() {
+    clearMockData();
+  });
+
+  it("DT00ua7 computes affected actions for folder, name, and action changes only", function() {
+    const affected = organizeHelpers.computeAffectedActions([
+      {
+        file_id: "folder-only",
+        current_path: "Inbox",
+        current_name: "a.pdf",
+        new_folder: "01-Docs",
+        new_name: "a.pdf",
+        action: "move",
+        reason: "before",
+      },
+      {
+        file_id: "name-only",
+        current_path: "Inbox",
+        current_name: "b.pdf",
+        new_folder: "01-Docs",
+        new_name: "b.pdf",
+        action: "move",
+        reason: "before",
+      },
+      {
+        file_id: "action-only",
+        current_path: "Inbox",
+        current_name: "c.pdf",
+        new_folder: "01-Docs",
+        new_name: "c.pdf",
+        action: "move",
+        reason: "before",
+      },
+      {
+        file_id: "no-change",
+        current_path: "Inbox",
+        current_name: "d.pdf",
+        new_folder: "01-Docs",
+        new_name: "d.pdf",
+        action: "move",
+        reason: "before",
+      },
+    ], [
+      {
+        file_id: "folder-only",
+        current_path: "Inbox",
+        current_name: "a.pdf",
+        new_folder: "02-Archive",
+        new_name: "a.pdf",
+        action: "move",
+        reason: "after",
+      },
+      {
+        file_id: "name-only",
+        current_path: "Inbox",
+        current_name: "b.pdf",
+        new_folder: "01-Docs",
+        new_name: "2026.04.24 - b.pdf",
+        action: "move_and_rename",
+        reason: "after",
+      },
+      {
+        file_id: "action-only",
+        current_path: "Inbox",
+        current_name: "c.pdf",
+        new_folder: "01-Docs",
+        new_name: "c.pdf",
+        action: "keep",
+        reason: "after",
+      },
+      {
+        file_id: "no-change",
+        current_path: "Inbox",
+        current_name: "d.pdf",
+        new_folder: "01-Docs",
+        new_name: "d.pdf",
+        action: "move",
+        reason: "after",
+      },
+    ]);
+
+    expect(affected.map((action) => action.file_id)).to.deep.equal([
+      "folder-only",
+      "name-only",
+      "action-only",
+    ]);
+  });
+
+  it("DT00ua8 renders the affected-files block only when affected actions are provided", async function() {
+    const proposal = makeOrganizeProposal(
+        ["1", "2"],
+        {"1": "01-Docs", "2": "01-Docs"},
+        ["01-Docs"],
+    );
+    const csvBuffer = Buffer.from("file_id\n1\n");
+
+    await organizeHelpers.sendOrganizePlanReviewEmail(
+        "tester@example.com",
+        makeTestEmail("review"),
+        "proposal-no-affected",
+        proposal,
+        csvBuffer,
+        {totalFiles: 2, filesToMove: 2, filesToRename: 0, filesToKeep: 0},
+        "No affected block",
+    );
+
+    expect(getLastSentEmail("tester@example.com")?.html).to.not.include("Affected files (");
+
+    clearMockData();
+
+    await organizeHelpers.sendOrganizePlanReviewEmail(
+        "tester@example.com",
+        makeTestEmail("review"),
+        "proposal-with-affected",
+        proposal,
+        csvBuffer,
+        {totalFiles: 2, filesToMove: 2, filesToRename: 0, filesToKeep: 0},
+        "With affected block",
+        [{
+          file_id: "1",
+          before: {
+            current_path: "Inbox",
+            current_name: "invoice.pdf",
+            new_folder: "01-Docs",
+            new_name: "invoice.pdf",
+            action: "move",
+          },
+          after: {
+            new_folder: "02-Archive",
+            new_name: "2026.04.24 - invoice.pdf",
+            action: "move_and_rename",
+          },
+        }],
+    );
+
+    const html = getLastSentEmail("tester@example.com")?.html || "";
+    expect(html).to.include("Affected files (1):");
+    expect(html).to.include("Inbox/invoice.pdf");
+    expect(html).to.include("02-Archive/2026.04.24 - invoice.pdf");
   });
 });
 
@@ -2460,6 +2824,15 @@ describe("organize phased proposal flow", function() {
     });
 
     setFakeStructuredCompletions([{
+      folder_prefixes_in_scope: [],
+      folder_prefixes_to_ignore: ["01-Personal/Photos"],
+      filename_patterns: [],
+      extensions: [],
+      explicit_file_hints: [],
+      prefers_folder_operation: false,
+      unclear: false,
+      summary: "Left Photos alone.",
+    }, {
       patches: [],
       folder_ignores: ["01-Personal/Photos"],
       unclear: false,
@@ -2488,6 +2861,15 @@ describe("organize phased proposal flow", function() {
     expect(getLastSentEmail(sender)?.html).to.include("Photos/&nbsp;&nbsp;(1 files, preserved)");
 
     setFakeStructuredCompletions([{
+      folder_prefixes_in_scope: [],
+      folder_prefixes_to_ignore: [],
+      filename_patterns: ["invoice"],
+      extensions: ["pdf"],
+      explicit_file_hints: ["invoice.pdf"],
+      prefers_folder_operation: false,
+      unclear: false,
+      summary: "Rename invoice.",
+    }, {
       patches: [{
         file_id: "doc-1",
         new_name: "2026.04.22 - invoice.pdf",
@@ -2525,6 +2907,369 @@ describe("organize phased proposal flow", function() {
       action: "move_and_rename",
       reason: "Rename invoice",
     });
+  });
+
+  it("DT00ubeH scopes plan-review revisions before calling revisePlanFileActions", async function() {
+    const proposalId = `phase-plan-review-scoped-${Date.now()}`;
+    const proposalDoc = makePhaseDoc("plan_review");
+    await seedPhaseProposal(proposalId, proposalDoc);
+    await saveSavedPlan(proposalId, {
+      proposed_folders: [
+        {folder_path: "01-Finance/Taxes", description: "Tax files"},
+        {folder_path: "01-Personal/Photos", description: "Photos"},
+      ],
+      file_actions: [
+        {
+          file_id: "tax-1",
+          current_path: "Finance/Taxes",
+          current_name: "2024-tax.pdf",
+          new_folder: "01-Finance/Taxes",
+          new_name: "2024-tax.pdf",
+          action: "move",
+          reason: "Tax file",
+        },
+        {
+          file_id: "photo-1",
+          current_path: "Photos",
+          current_name: "beach.jpg",
+          new_folder: "01-Personal/Photos",
+          new_name: "beach.jpg",
+          action: "move",
+          reason: "Photo",
+        },
+      ],
+      summary: "Initial plan",
+    });
+
+    let receivedActions: DriveOrganizeProposal["file_actions"] = [];
+    organizeProposalTestHooks.setScopePlanRevisionForTest(async () => ({
+      folder_prefixes_in_scope: ["01-Finance"],
+      folder_prefixes_to_ignore: [],
+      filename_patterns: ["tax"],
+      extensions: ["pdf"],
+      explicit_file_hints: [],
+      prefers_folder_operation: false,
+      unclear: false,
+      summary: "Tax PDFs under Finance",
+    }));
+    organizeProposalTestHooks.setRevisePlanFileActionsForTest(async (fileActions) => {
+      receivedActions = fileActions;
+      return {
+        patches: [{
+          file_id: "tax-1",
+          new_name: "2024 - tax.pdf",
+          new_folder: null,
+          action: null,
+          reason: "Scoped rename",
+        }],
+        folder_ignores: [],
+        unclear: false,
+        summary: "Scoped revision applied",
+      };
+    });
+
+    await organizeProposalTestHooks.handlePlanReviewReply(
+        makeTestEmail("Rename the tax PDFs under /Finance"),
+        sender,
+        uid,
+        proposalId,
+        proposalDoc,
+        "Rename the tax PDFs under /Finance",
+        false,
+    );
+
+    expect(receivedActions.map((action) => action.file_id)).to.deep.equal(["tax-1"]);
+  });
+
+  it("DT00ubeI seeds ignored folders from scope even when revisePlanFileActions omits them", async function() {
+    const proposalId = `phase-plan-review-scope-ignore-${Date.now()}`;
+    const proposalDoc = makePhaseDoc("plan_review");
+    await seedPhaseProposal(proposalId, proposalDoc);
+    await saveSavedPlan(proposalId, {
+      proposed_folders: [
+        {folder_path: "01-Personal/Photos", description: "Photos"},
+        {folder_path: "02-Work", description: "Work"},
+      ],
+      file_actions: [
+        {
+          file_id: "photo-1",
+          current_path: "01-Personal/Photos",
+          current_name: "beach.jpg",
+          new_folder: "03-Archive",
+          new_name: "beach.jpg",
+          action: "move",
+          reason: "Archive photo",
+        },
+        {
+          file_id: "doc-1",
+          current_path: "Inbox",
+          current_name: "invoice.pdf",
+          new_folder: "02-Work",
+          new_name: "invoice.pdf",
+          action: "move",
+          reason: "Work file",
+        },
+      ],
+      summary: "Initial plan",
+    });
+
+    organizeProposalTestHooks.setScopePlanRevisionForTest(async () => ({
+      folder_prefixes_in_scope: ["02-Work"],
+      folder_prefixes_to_ignore: ["01-Personal/Photos"],
+      filename_patterns: ["invoice"],
+      extensions: ["pdf"],
+      explicit_file_hints: [],
+      prefers_folder_operation: false,
+      unclear: false,
+      summary: "Leave Photos alone and rename invoice",
+    }));
+    organizeProposalTestHooks.setRevisePlanFileActionsForTest(async () => ({
+      patches: [{
+        file_id: "doc-1",
+        new_name: "2026.04.23 - invoice.pdf",
+        new_folder: null,
+        action: null,
+        reason: "Rename invoice",
+      }],
+      folder_ignores: [],
+      unclear: false,
+      summary: "Scoped revision applied",
+    }));
+
+    await organizeProposalTestHooks.handlePlanReviewReply(
+        makeTestEmail("Rename invoice.pdf and leave Photos alone"),
+        sender,
+        uid,
+        proposalId,
+        proposalDoc,
+        "Rename invoice.pdf and leave Photos alone",
+        false,
+    );
+
+    const savedPlan = await loadSavedPlan(proposalId);
+    expect(savedPlan.ignoredFolders).to.deep.equal(["01-Personal/Photos"]);
+    expect(savedPlan.file_actions.find((action) => action.file_id === "photo-1")).to.deep.include({
+      file_id: "photo-1",
+      new_folder: "01-Personal/Photos",
+      action: "keep",
+    });
+    const html = getLastSentEmail(sender)?.html || "";
+    expect(html).to.include("Affected files (2):");
+    expect(html).to.include("01-Personal/Photos/beach.jpg");
+    expect(html).to.include("01-Personal/Photos/beach.jpg (keep)");
+    expect(html).to.include("Inbox/invoice.pdf");
+    expect(html).to.include("02-Work/2026.04.23 - invoice.pdf");
+  });
+
+  it("DT00ubeJ reroutes folder-operation plan-review replies to the folder revision handler", async function() {
+    const proposalId = `phase-plan-review-folder-reroute-${Date.now()}`;
+    const proposalDoc = makePhaseDoc("plan_review");
+    await seedPhaseProposal(proposalId, proposalDoc);
+    await saveSavedPlan(proposalId, {
+      proposed_folders: [{folder_path: "01-Docs", description: "Docs"}],
+      file_actions: [],
+      summary: "Initial plan",
+    });
+
+    let rerouted = false;
+    organizeProposalTestHooks.setScopePlanRevisionForTest(async () => ({
+      folder_prefixes_in_scope: [],
+      folder_prefixes_to_ignore: [],
+      filename_patterns: [],
+      extensions: [],
+      explicit_file_hints: [],
+      prefers_folder_operation: true,
+      unclear: false,
+      summary: "Rename the folder",
+    }));
+    organizeProposalTestHooks.setHandleOrganizeRevisionForTest(async () => {
+      rerouted = true;
+      return {
+        totalFiles: 0,
+        filesToMove: 0,
+        filesToRename: 0,
+        totalCost: 0,
+        proposalSent: true,
+      };
+    });
+
+    const result = await organizeProposalTestHooks.handlePlanReviewReply(
+        makeTestEmail("Rename folder 01-Docs to 01-Documents"),
+        sender,
+        uid,
+        proposalId,
+        proposalDoc,
+        "Rename folder 01-Docs to 01-Documents",
+        false,
+    );
+
+    expect(rerouted).to.equal(true);
+    expect(result.proposalSent).to.equal(true);
+  });
+
+  it("DT00ubeK sends clarification when the scope is unclear", async function() {
+    const proposalId = `phase-plan-review-unclear-scope-${Date.now()}`;
+    const proposalDoc = makePhaseDoc("plan_review");
+    await seedPhaseProposal(proposalId, proposalDoc);
+    await saveSavedPlan(proposalId, {
+      proposed_folders: [{folder_path: "01-Docs", description: "Docs"}],
+      file_actions: [{
+        file_id: "doc-1",
+        current_path: "Inbox",
+        current_name: "invoice.pdf",
+        new_folder: "01-Docs",
+        new_name: "invoice.pdf",
+        action: "move",
+        reason: "Doc",
+      }],
+      summary: "Initial plan",
+    });
+
+    let reviseCalled = false;
+    organizeProposalTestHooks.setScopePlanRevisionForTest(async () => ({
+      folder_prefixes_in_scope: [],
+      folder_prefixes_to_ignore: [],
+      filename_patterns: [],
+      extensions: [],
+      explicit_file_hints: [],
+      prefers_folder_operation: false,
+      unclear: true,
+      summary: "Please name the exact file to change.",
+    }));
+    organizeProposalTestHooks.setRevisePlanFileActionsForTest(async () => {
+      reviseCalled = true;
+      return {
+        patches: [],
+        folder_ignores: [],
+        unclear: false,
+        summary: "unused",
+      };
+    });
+
+    const result = await organizeProposalTestHooks.handlePlanReviewReply(
+        makeTestEmail("Make it better"),
+        sender,
+        uid,
+        proposalId,
+        proposalDoc,
+        "Make it better",
+        false,
+    );
+
+    expect(reviseCalled).to.equal(false);
+    expect(result.error).to.equal("Plan revision scope unclear");
+    expect(getLastSentEmail(sender)?.html).to.include("Please name the exact file to change.");
+  });
+
+  it("DT00ubeL sends clarification when the scoped subset is too broad", async function() {
+    const proposalId = `phase-plan-review-overflow-scope-${Date.now()}`;
+    const proposalDoc = makePhaseDoc("plan_review");
+    await seedPhaseProposal(proposalId, proposalDoc);
+    await saveSavedPlan(proposalId, {
+      proposed_folders: [{folder_path: "01-Docs", description: "Docs"}],
+      file_actions: Array.from({length: 501}, (_value, index) => ({
+        file_id: `doc-${index}`,
+        current_path: "Inbox",
+        current_name: `document-${index}.pdf`,
+        new_folder: "01-Docs",
+        new_name: `document-${index}.pdf`,
+        action: "move" as const,
+        reason: "Doc",
+      })),
+      summary: "Initial plan",
+    });
+
+    let reviseCalled = false;
+    organizeProposalTestHooks.setScopePlanRevisionForTest(async () => ({
+      folder_prefixes_in_scope: [],
+      folder_prefixes_to_ignore: [],
+      filename_patterns: [],
+      extensions: ["pdf"],
+      explicit_file_hints: [],
+      prefers_folder_operation: false,
+      unclear: false,
+      summary: "That would update every PDF in the plan.",
+    }));
+    organizeProposalTestHooks.setRevisePlanFileActionsForTest(async () => {
+      reviseCalled = true;
+      return {
+        patches: [],
+        folder_ignores: [],
+        unclear: false,
+        summary: "unused",
+      };
+    });
+
+    const result = await organizeProposalTestHooks.handlePlanReviewReply(
+        makeTestEmail("Rename all PDFs"),
+        sender,
+        uid,
+        proposalId,
+        proposalDoc,
+        "Rename all PDFs",
+        false,
+    );
+
+    expect(reviseCalled).to.equal(false);
+    expect(result.error).to.equal("Plan revision scope too broad");
+    const html = getLastSentEmail(sender)?.html || "";
+    expect(html).to.include("That would update every PDF in the plan.");
+    expect(html).to.include("safe in-email revision");
+    expect(html).to.not.include("Move Files");
+  });
+
+  it("DT00ubeM sends clarification when scoping returns no matching actions", async function() {
+    const proposalId = `phase-plan-review-empty-scope-${Date.now()}`;
+    const proposalDoc = makePhaseDoc("plan_review");
+    await seedPhaseProposal(proposalId, proposalDoc);
+    await saveSavedPlan(proposalId, {
+      proposed_folders: [{folder_path: "01-Docs", description: "Docs"}],
+      file_actions: [{
+        file_id: "doc-1",
+        current_path: "Inbox",
+        current_name: "invoice.pdf",
+        new_folder: "01-Docs",
+        new_name: "invoice.pdf",
+        action: "move",
+        reason: "Doc",
+      }],
+      summary: "Initial plan",
+    });
+
+    let reviseCalled = false;
+    organizeProposalTestHooks.setScopePlanRevisionForTest(async () => ({
+      folder_prefixes_in_scope: ["02-Archive"],
+      folder_prefixes_to_ignore: [],
+      filename_patterns: ["tax"],
+      extensions: ["pdf"],
+      explicit_file_hints: [],
+      prefers_folder_operation: false,
+      unclear: false,
+      summary: "Please name the exact file to change.",
+    }));
+    organizeProposalTestHooks.setRevisePlanFileActionsForTest(async () => {
+      reviseCalled = true;
+      return {
+        patches: [],
+        folder_ignores: [],
+        unclear: false,
+        summary: "unused",
+      };
+    });
+
+    const result = await organizeProposalTestHooks.handlePlanReviewReply(
+        makeTestEmail("Rename the tax PDF"),
+        sender,
+        uid,
+        proposalId,
+        proposalDoc,
+        "Rename the tax PDF",
+        false,
+    );
+
+    expect(reviseCalled).to.equal(false);
+    expect(result.error).to.equal("Plan revision scope unclear");
+    expect(getLastSentEmail(sender)?.html).to.include("Please name the exact file to change.");
   });
 
 });

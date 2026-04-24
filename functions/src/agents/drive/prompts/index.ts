@@ -65,6 +65,11 @@ import {
   VERSION_KEY as REVISE_PLAN_FILE_ACTIONS_VERSION_KEY,
   VERSION_PARAM as REVISE_PLAN_FILE_ACTIONS_VERSION_PARAM,
 } from "./revisePlanFileActions";
+import {
+  versions as scopePlanRevisionVersions,
+  VERSION_KEY as SCOPE_PLAN_REVISION_VERSION_KEY,
+  VERSION_PARAM as SCOPE_PLAN_REVISION_VERSION_PARAM,
+} from "./scopePlanRevision";
 
 /** Returns the active Drive prompt set and version metadata. */
 function getPrompts(): { prompts: DrivePrompts; versions: Record<string, string> } {
@@ -120,6 +125,10 @@ function getPrompts(): { prompts: DrivePrompts; versions: Record<string, string>
       REVISE_PLAN_FILE_ACTIONS_VERSION_PARAM,
       revisePlanFileActionsVersions,
   );
+  const scopePlanRevision = resolvePrompt(
+      SCOPE_PLAN_REVISION_VERSION_PARAM,
+      scopePlanRevisionVersions,
+  );
 
   const prompts: DrivePrompts = {
     proposeFilePlacement: proposeFilePlacement.prompt,
@@ -135,6 +144,7 @@ function getPrompts(): { prompts: DrivePrompts; versions: Record<string, string>
     proposeFileAction: proposeFileAction.prompt,
     generateFilenameExamples: generateFilenameExamples.prompt,
     revisePlanFileActions: revisePlanFileActions.prompt,
+    scopePlanRevision: scopePlanRevision.prompt,
   };
 
   const versions: Record<string, string> = {
@@ -151,6 +161,7 @@ function getPrompts(): { prompts: DrivePrompts; versions: Record<string, string>
     [PROPOSE_FILE_ACTION_VERSION_KEY]: proposeFileAction.version,
     [GENERATE_FILENAME_EXAMPLES_VERSION_KEY]: generateFilenameExamples.version,
     [REVISE_PLAN_FILE_ACTIONS_VERSION_KEY]: revisePlanFileActions.version,
+    [SCOPE_PLAN_REVISION_VERSION_KEY]: scopePlanRevision.version,
   };
 
   return {prompts, versions};

@@ -5,7 +5,7 @@
  * Export params directly - call .value() only inside function handlers
  */
 
-import {defineString} from "firebase-functions/params";
+import {defineInt, defineString} from "firebase-functions/params";
 
 const ENVIRONMENT_NAME = defineString("ENVIRONMENT_NAME", {
   default: "production",
@@ -51,6 +51,14 @@ const MAX_TOTAL_DOCUMENT_BYTES = defineString("MAX_TOTAL_DOCUMENT_BYTES", {
   default: "52428800", // 50MB
 });
 
+const DRIVE_PLAN_REVISION_MAX_SCOPED_ACTIONS = defineInt("DRIVE_PLAN_REVISION_MAX_SCOPED_ACTIONS", {
+  default: 500,
+});
+
+const DRIVE_REVISION_EMAIL_AFFECTED_CAP = defineInt("DRIVE_REVISION_EMAIL_AFFECTED_CAP", {
+  default: 50,
+});
+
 /**
  * Extracts the domain from an email address.
  * @param email - The email address (e.g., "calendar@fwd2cal.com")
@@ -83,6 +91,8 @@ export {
   MAX_CHARS_PER_SHEET,
   MAX_ATTACHMENT_BYTES,
   MAX_TOTAL_DOCUMENT_BYTES,
+  DRIVE_PLAN_REVISION_MAX_SCOPED_ACTIONS,
+  DRIVE_REVISION_EMAIL_AFFECTED_CAP,
   getSupportEmail,
   getAdminEmail,
 };

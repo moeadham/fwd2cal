@@ -360,6 +360,7 @@ export interface DrivePrompts {
   proposeFileAction: DrivePromptConfig;
   generateFilenameExamples: DrivePromptConfig;
   revisePlanFileActions: DrivePromptConfig;
+  scopePlanRevision: DrivePromptConfig;
 }
 
 // ============================================================================
@@ -394,6 +395,7 @@ export interface DriveMailTemplates {
   organizePhase2Proposal: DriveMailTemplate;
   organizeCostEstimate: DriveMailTemplate;
   organizePlanReview: DriveMailTemplate;
+  organizePlanReviewScopeTooBroad: DriveMailTemplate;
   organizeError: DriveMailTemplate;
   organizeNoFiles: DriveMailTemplate;
   organizeComplete: DriveMailTemplate;

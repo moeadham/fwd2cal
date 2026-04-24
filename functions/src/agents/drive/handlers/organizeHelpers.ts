@@ -6,6 +6,7 @@ import {
   ORGANIZE_DRIVE_IMAGE_MAX_TOKENS,
   ORGANIZE_DRIVE_TEXT_MAX_TOKENS,
 } from "../config";
+import {DRIVE_REVISION_EMAIL_AFFECTED_CAP} from "../../../util/config";
 import {getEmailThreadHeaders, threadEmailHtml} from "../../../util/emailUtils";
 import {sendEmailResend} from "../../../util/resend";
 import {TransformedEmail} from "../../../util/types";
@@ -20,6 +21,23 @@ import {
 import {driveMailTemplates, driveOrganizeActionUrl} from "../mailTemplates";
 import {updateOrganizeProposalStatus} from "../../../util/firestoreHandler";
 import {renderFolderTree, buildOrganizeEmbeddedData} from "../templates/folderTree";
+
+export interface AffectedAction {
+  file_id: string;
+  before: {
+    current_path: string;
+    current_name: string;
+    new_folder: string;
+    new_name: string;
+    action: string;
+  };
+  after: {
+    new_folder: string;
+    new_name: string;
+    action: string;
+  };
+}
+
 /** Signs organize action URLs with the configured HMAC key. */
 export function signActionToken(proposalId: string, action: string): string {
   return createHmac("sha256", DRIVE_ACTION_SIGNING_KEY.value())
@@ -49,6 +67,74 @@ function escapeHtml(value: string): string {
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;");
 }
+
+/** Returns files whose proposed plan changed between the previous and revised versions. */
+export function computeAffectedActions(
+    beforeActions: DriveOrganizeProposal["file_actions"],
+    afterActions: DriveOrganizeProposal["file_actions"],
+): AffectedAction[] {
+  const afterByFileId = new Map(afterActions.map((action) => [action.file_id, action]));
+  return beforeActions.flatMap((before) => {
+    const after = afterByFileId.get(before.file_id);
+    if (!after) {
+      return [];
+    }
+    if (
+      before.action === after.action &&
+      before.new_folder === after.new_folder &&
+      before.new_name === after.new_name
+    ) {
+      return [];
+    }
+    return [{
+      file_id: before.file_id,
+      before: {
+        current_path: before.current_path || "My Drive",
+        current_name: before.current_name,
+        new_folder: before.new_folder,
+        new_name: before.new_name,
+        action: before.action,
+      },
+      after: {
+        new_folder: after.new_folder,
+        new_name: after.new_name,
+        action: after.action,
+      },
+    }];
+  });
+}
+
+/** Renders the affected-files block for revision plan-review emails. */
+function renderAffectedFilesHtml(affectedActions?: AffectedAction[]): string {
+  if (!affectedActions || affectedActions.length === 0) {
+    return "";
+  }
+  const cap = DRIVE_REVISION_EMAIL_AFFECTED_CAP.value();
+  const sortedActions = [...affectedActions].sort((left, right) => {
+    const leftKey = `${left.after.new_folder}\u0000${left.after.new_name}\u0000${left.file_id}`;
+    const rightKey = `${right.after.new_folder}\u0000${right.after.new_name}\u0000${right.file_id}`;
+    return leftKey.localeCompare(rightKey);
+  });
+  const visibleActions = sortedActions.slice(0, cap);
+  const rows = visibleActions.map((action) =>
+    `${escapeHtml(action.before.current_path)}/${escapeHtml(action.before.current_name)} ` +
+    `&rarr; ${escapeHtml(action.after.new_folder)}/${escapeHtml(action.after.new_name)} ` +
+    `(${escapeHtml(action.after.action)})`,
+  );
+  const hiddenCount = sortedActions.length - visibleActions.length;
+  if (hiddenCount > 0) {
+    rows.push(`... and ${hiddenCount} more`);
+  }
+  const blockStyle =
+    "font-family:monospace;background:#f7f7f7;padding:16px;border-radius:8px;" +
+    "font-size:13px;line-height:1.6;";
+  return `<b>Affected files (${sortedActions.length}):</b>` +
+    `<br>` +
+    `<div style="${blockStyle}">` +
+    `${rows.join("<br>")}` +
+    `</div>` +
+    `<br>`;
+}
 /** Sends the plan-review email with an attached CSV and Move Files action link. */
 export async function sendOrganizePlanReviewEmail(
     sender: string,
@@ -58,9 +144,79 @@ export async function sendOrganizePlanReviewEmail(
     csvBuffer: Buffer,
     counts: {totalFiles: number; filesToMove: number; filesToRename: number; filesToKeep: number},
     revisionNote = "",
+    affectedActions?: AffectedAction[],
 ): Promise<void> {
   const moveToken = signActionToken(proposalId, "move");
   const moveLink = `${driveOrganizeActionUrl()}?proposalId=${proposalId}&action=move&token=${moveToken}`;
+  const preservedFolderPaths = new Set(
+      (proposal.ignoredFolders || [])
+          .map((folderPath) => folderPath.split("/").map((segment) => segment.trim()).filter(Boolean).join("/"))
+          .filter(Boolean),
+  );
+  const preservedRootPaths = new Set(
+      (proposal.ignoredFolders || [])
+          .map((folderPath) => folderPath.split("/").map((segment) => segment.trim()).filter(Boolean))
+          .filter((segments) => segments.length === 1)
+          .map((segments) => segments[0])
+          .filter((root): root is string => Boolean(root && root !== "My Drive")),
+  );
+  const hasAffectedFiles = Boolean(affectedActions && affectedActions.length > 0);
+  const previewBlock = hasAffectedFiles ?
+    "" :
+    (() => {
+      const preview = proposal.file_actions.slice(0, 20).map((action) =>
+        `${escapeHtml(action.current_path)}/${escapeHtml(action.current_name)} &rarr; ` +
+        `${escapeHtml(action.new_folder)}/${escapeHtml(action.new_name)} ` +
+        `(${escapeHtml(action.action)})`,
+      ).join("<br>") || "(no file actions)";
+      return `<b>Preview:</b>
+<br>
+<div style="font-family:monospace;background:#f7f7f7;padding:16px;border-radius:8px;font-size:13px;line-height:1.6;">
+${preview}
+</div>
+<br>
+`;
+    })();
+  const noteHtml = revisionNote ?
+    `<br><br><span style="color:#666;font-size:13px;">${escapeHtml(revisionNote)}</span>` :
+    "";
+  const html = applyTemplate(driveMailTemplates.organizePlanReview.html, {
+    TOTAL_FILES: String(counts.totalFiles),
+    FILES_TO_MOVE: String(counts.filesToMove),
+    FILES_TO_RENAME: String(counts.filesToRename),
+    FILES_TO_KEEP: String(counts.filesToKeep),
+    FOLDER_TREE: renderFolderTree(proposal, preservedRootPaths, preservedFolderPaths),
+    AFFECTED_FILES: renderAffectedFilesHtml(affectedActions),
+    PREVIEW_BLOCK: previewBlock,
+    MOVE_LINK: moveLink,
+    REVISION_NOTE: noteHtml,
+    EMBEDDED_DATA: phaseEmbeddedHtml(proposalId),
+  });
+  const threadedHtml = threadEmailHtml(originalEmail, html);
+  await sendEmailResend({
+    to: sender,
+    from: AGENT_EMAIL_ADDRESS.value(),
+    subject: originalEmail.subject || "Re: Organize your Drive",
+    html: threadedHtml,
+    headers: getEmailThreadHeaders(originalEmail.headers),
+    attachments: [{
+      filename: `proposal-${proposalId}.csv`,
+      content: csvBuffer,
+      content_type: "text/csv",
+    }],
+  });
+}
+
+/** Sends the scope-too-broad clarification email with the current plan CSV. */
+export async function sendOrganizePlanReviewScopeTooBroadEmail(
+    sender: string,
+    originalEmail: TransformedEmail,
+    proposalId: string,
+    proposal: DriveOrganizeProposal,
+    csvBuffer: Buffer,
+    counts: {totalFiles: number; filesToMove: number; filesToRename: number; filesToKeep: number},
+    revisionNote = "",
+): Promise<void> {
   const preservedFolderPaths = new Set(
       (proposal.ignoredFolders || [])
           .map((folderPath) => folderPath.split("/").map((segment) => segment.trim()).filter(Boolean).join("/"))
@@ -81,14 +237,13 @@ export async function sendOrganizePlanReviewEmail(
   const noteHtml = revisionNote ?
     `<br><br><span style="color:#666;font-size:13px;">${escapeHtml(revisionNote)}</span>` :
     "";
-  const html = applyTemplate(driveMailTemplates.organizePlanReview.html, {
+  const html = applyTemplate(driveMailTemplates.organizePlanReviewScopeTooBroad.html, {
     TOTAL_FILES: String(counts.totalFiles),
     FILES_TO_MOVE: String(counts.filesToMove),
     FILES_TO_RENAME: String(counts.filesToRename),
     FILES_TO_KEEP: String(counts.filesToKeep),
     FOLDER_TREE: renderFolderTree(proposal, preservedRootPaths, preservedFolderPaths),
     ACTION_PREVIEW: preview,
-    MOVE_LINK: moveLink,
     REVISION_NOTE: noteHtml,
     EMBEDDED_DATA: phaseEmbeddedHtml(proposalId),
   });
