@@ -68,6 +68,7 @@ import {
   buildSequentialExecutionProposal,
   loadSavedPlan,
   mapWithConcurrency,
+  organizeExecutionTestHooks,
   processMoveChunk,
   processPlanningChunk,
   reconcilePlanningChunkResults,
@@ -1920,14 +1921,14 @@ describe("plan review affected actions", function() {
         {"1": "01-Docs", "2": "01-Docs"},
         ["01-Docs"],
     );
-    const csvBuffer = Buffer.from("file_id\n1\n");
+    const sheetUrl = "https://docs.google.com/spreadsheets/d/proposal-sheet";
 
     await organizeHelpers.sendOrganizePlanReviewEmail(
         "tester@example.com",
         makeTestEmail("review"),
         "proposal-no-affected",
         proposal,
-        csvBuffer,
+        sheetUrl,
         {totalFiles: 2, filesToMove: 2, filesToRename: 0, filesToKeep: 0},
         "No affected block",
     );
@@ -1941,7 +1942,7 @@ describe("plan review affected actions", function() {
         makeTestEmail("review"),
         "proposal-with-affected",
         proposal,
-        csvBuffer,
+        sheetUrl,
         {totalFiles: 2, filesToMove: 2, filesToRename: 0, filesToKeep: 0},
         "With affected block",
         [{
@@ -1963,8 +1964,132 @@ describe("plan review affected actions", function() {
 
     const html = getLastSentEmail("tester@example.com")?.html || "";
     expect(html).to.include("Affected files (1):");
-    expect(html).to.include("Inbox/invoice.pdf");
-    expect(html).to.include("02-Archive/2026.04.24 - invoice.pdf");
+    expect(html).to.include(sheetUrl);
+  });
+
+  it("DT00ua9 creates a proposal sheet in My Drive root when no sheet exists", async function() {
+    const createCalls: unknown[] = [];
+    const originalDrive = google.drive;
+    (google as unknown as {drive: typeof google.drive}).drive = ((() => ({
+      files: {
+        create: async (params: unknown) => {
+          createCalls.push(params);
+          return {data: {id: "sheet-create-id", webViewLink: "https://sheet/create"}};
+        },
+      },
+    })) as unknown) as typeof google.drive;
+
+    try {
+      const result = await driveHelper.createOrUpdateProposalSheet(
+          {} as never,
+          "proposal-create",
+          Buffer.from("file_id,current_name\n1,invoice.pdf\n"),
+      );
+
+      expect(result).to.deep.equal({
+        fileId: "sheet-create-id",
+        webViewLink: "https://sheet/create",
+      });
+      expect(createCalls).to.have.length(1);
+      const createCall = createCalls[0] as {
+        requestBody: {name: string; mimeType: string; parents: string[]};
+        media: {mimeType: string; body: NodeJS.ReadableStream};
+        fields: string;
+      };
+      expect(createCall.requestBody).to.deep.equal({
+        name: "fwd2drive-proposal-proposal-create",
+        mimeType: "application/vnd.google-apps.spreadsheet",
+        parents: ["root"],
+      });
+      expect(createCall.media.mimeType).to.equal("text/csv");
+      expect(createCall.media.body).to.have.property("read");
+      expect(createCall.fields).to.equal("id, webViewLink");
+    } finally {
+      (google as unknown as {drive: typeof google.drive}).drive = originalDrive;
+    }
+  });
+
+  it("DT00ub0 updates an existing proposal sheet instead of creating a new one", async function() {
+    const updateCalls: unknown[] = [];
+    const createCalls: unknown[] = [];
+    const originalDrive = google.drive;
+    (google as unknown as {drive: typeof google.drive}).drive = ((() => ({
+      files: {
+        create: async (params: unknown) => {
+          createCalls.push(params);
+          return {data: {id: "sheet-create-id", webViewLink: "https://sheet/create"}};
+        },
+        update: async (params: unknown) => {
+          updateCalls.push(params);
+          return {data: {id: "sheet-existing-id", webViewLink: "https://sheet/update"}};
+        },
+      },
+    })) as unknown) as typeof google.drive;
+
+    try {
+      const result = await driveHelper.createOrUpdateProposalSheet(
+          {} as never,
+          "proposal-update",
+          Buffer.from("file_id,current_name\n1,invoice.pdf\n"),
+          "sheet-existing-id",
+      );
+
+      expect(result).to.deep.equal({
+        fileId: "sheet-existing-id",
+        webViewLink: "https://sheet/update",
+      });
+      expect(updateCalls).to.have.length(1);
+      expect(createCalls).to.have.length(0);
+      const updateCall = updateCalls[0] as {
+        fileId: string;
+        media: {mimeType: string; body: NodeJS.ReadableStream};
+        fields: string;
+      };
+      expect(updateCall.fileId).to.equal("sheet-existing-id");
+      expect(updateCall.media.mimeType).to.equal("text/csv");
+      expect(updateCall.media.body).to.have.property("read");
+      expect(updateCall.fields).to.equal("id, webViewLink");
+    } finally {
+      (google as unknown as {drive: typeof google.drive}).drive = originalDrive;
+    }
+  });
+
+  it("DT00ub1 recreates a proposal sheet when the stored sheet id returns 404", async function() {
+    const updateCalls: unknown[] = [];
+    const createCalls: unknown[] = [];
+    const originalDrive = google.drive;
+    (google as unknown as {drive: typeof google.drive}).drive = ((() => ({
+      files: {
+        create: async (params: unknown) => {
+          createCalls.push(params);
+          return {data: {id: "sheet-recreated-id", webViewLink: "https://sheet/recreated"}};
+        },
+        update: async (params: unknown) => {
+          updateCalls.push(params);
+          const error = new Error("File not found") as Error & {code?: number};
+          error.code = 404;
+          throw error;
+        },
+      },
+    })) as unknown) as typeof google.drive;
+
+    try {
+      const result = await driveHelper.createOrUpdateProposalSheet(
+          {} as never,
+          "proposal-fallback",
+          Buffer.from("file_id,current_name\n1,invoice.pdf\n"),
+          "missing-sheet-id",
+      );
+
+      expect(result).to.deep.equal({
+        fileId: "sheet-recreated-id",
+        webViewLink: "https://sheet/recreated",
+      });
+      expect(updateCalls).to.have.length(1);
+      expect(createCalls).to.have.length(1);
+    } finally {
+      (google as unknown as {drive: typeof google.drive}).drive = originalDrive;
+    }
   });
 });
 
@@ -2064,8 +2189,16 @@ describe("organize phased proposal flow", function() {
   const sender = "tester@example.com";
   const uid = "phase-test-uid";
 
+  beforeEach(function() {
+    organizeProposalTestHooks.setCreateOrUpdateProposalSheetForTest(async () => ({
+      fileId: "sheet-test-id",
+      webViewLink: "https://docs.google.com/spreadsheets/d/sheet-test-id",
+    }));
+  });
+
   afterEach(function() {
     setOpenAIClientForTest(null);
+    organizeProposalTestHooks.setCreateOrUpdateProposalSheetForTest(null);
     clearMockData();
   });
 
@@ -3275,9 +3408,17 @@ describe("organize phased proposal flow", function() {
 });
 
 describe("organize sequential execution proposal builder", function() {
+  beforeEach(function() {
+    organizeExecutionTestHooks.setCreateOrUpdateProposalSheetForTest(async () => ({
+      fileId: "sheet-test-id",
+      webViewLink: "https://docs.google.com/spreadsheets/d/sheet-test-id",
+    }));
+  });
+
   afterEach(function() {
     setOpenAIClientForTest(null);
     dispatchHandlerTestHooks.setGetFunctionsClientForTest(null);
+    organizeExecutionTestHooks.setCreateOrUpdateProposalSheetForTest(null);
   });
 
   it("DT00ubeF sends multimodal content from proposeFileAction only when imageUrls are present", async function() {

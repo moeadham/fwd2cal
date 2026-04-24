@@ -115,6 +115,117 @@ async function uploadFile(
   };
 }
 
+function isDriveNotFoundError(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  const status = "code" in error ? error.code : undefined;
+  if (status === 404) {
+    return true;
+  }
+  if (!("response" in error) || !error.response || typeof error.response !== "object") {
+    return false;
+  }
+  return "status" in error.response && error.response.status === 404;
+}
+
+async function withRetry<T>(
+    proposalId: string,
+    existingFileId: string | undefined,
+    operation: () => Promise<T>,
+): Promise<T> {
+  const maxAttempts = 2;
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (isDriveNotFoundError(error)) {
+        throw error;
+      }
+      if (attempt < maxAttempts) {
+        logger.warn("Drive: Proposal sheet API call retrying", {
+          proposalId,
+          existingFileId,
+          attempt,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+    }
+  }
+  throw lastError;
+}
+
+async function createProposalSheet(
+    oauth2Client: Auth.OAuth2Client,
+    proposalId: string,
+    csvBuffer: Buffer,
+): Promise<{fileId: string; webViewLink: string}> {
+  const drive = getDriveClient(oauth2Client);
+  const response = await withRetry(proposalId, undefined, async () => drive.files.create({
+    requestBody: {
+      name: `fwd2drive-proposal-${proposalId}`,
+      mimeType: "application/vnd.google-apps.spreadsheet",
+      parents: ["root"],
+    },
+    media: {
+      mimeType: "text/csv",
+      body: Readable.from(csvBuffer),
+    },
+    fields: "id, webViewLink",
+  }));
+
+  if (!response.data.id) {
+    throw new Error("Drive proposal sheet create failed: no file ID returned");
+  }
+
+  return {
+    fileId: response.data.id,
+    webViewLink: response.data.webViewLink || "",
+  };
+}
+
+async function createOrUpdateProposalSheet(
+    oauth2Client: Auth.OAuth2Client,
+    proposalId: string,
+    csvBuffer: Buffer,
+    existingFileId?: string,
+): Promise<{fileId: string; webViewLink: string}> {
+  if (!existingFileId) {
+    return createProposalSheet(oauth2Client, proposalId, csvBuffer);
+  }
+
+  const drive = getDriveClient(oauth2Client);
+  try {
+    const response = await withRetry(proposalId, existingFileId, async () => drive.files.update({
+      fileId: existingFileId,
+      media: {
+        mimeType: "text/csv",
+        body: Readable.from(csvBuffer),
+      },
+      fields: "id, webViewLink",
+    }));
+    if (!response.data.id) {
+      throw new Error("Drive proposal sheet update failed: no file ID returned");
+    }
+    return {
+      fileId: response.data.id,
+      webViewLink: response.data.webViewLink || "",
+    };
+  } catch (error) {
+    if (!isDriveNotFoundError(error)) {
+      throw error;
+    }
+    logger.warn("Drive: Proposal sheet missing, creating replacement", {
+      proposalId,
+      existingFileId,
+    });
+    return createProposalSheet(oauth2Client, proposalId, csvBuffer);
+  }
+}
+
 /**
  * Create a folder in Google Drive
  */
@@ -587,6 +698,7 @@ export {
   getDriveClient,
   getDriveFolderTree,
   uploadFile,
+  createOrUpdateProposalSheet,
   createFolder,
   findFolderInTree,
   getRootFolderId,

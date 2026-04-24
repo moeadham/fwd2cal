@@ -50,6 +50,7 @@ import {
 import {cleanupAllEmptyFolders, handleOrganizeUndo, undoOrganizeActions} from "./organizeUndo";
 import {verifyOrganizeResults} from "./organizeVerify";
 import {sendOrganizeAuthRequiredEmail} from "./organizeMain";
+import {createOrUpdateProposalSheet} from "../driveHelper";
 import {
   finalizeOrganizeProposal,
   getDriveUserPreferences,
@@ -81,6 +82,7 @@ const DEFAULT_FILENAME_CONVENTION = "YYYY.MM.DD - Description.ext";
 let scopePlanRevisionImpl = scopePlanRevision;
 let revisePlanFileActionsImpl = revisePlanFileActions;
 let handleOrganizeRevisionImpl = handleOrganizeRevision;
+let createOrUpdateProposalSheetImpl = createOrUpdateProposalSheet;
 
 function getNonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
@@ -919,12 +921,15 @@ async function handlePlanReviewReply(
       return startChunkedMove(email, sender, uid, proposalId, proposalDoc);
     }
     const csvBuffer = await savePlanCsv(proposalId, proposal.file_actions);
+    const oauth2Client = await getOauthClient(uid, AGENT_NAME);
+    const existingSheetId = proposalDoc.phaseData?.planReview?.sheetFileId;
+    const sheet = await createOrUpdateProposalSheetImpl(oauth2Client, proposalId, csvBuffer, existingSheetId);
     await sendOrganizePlanReviewEmail(
         sender,
         email,
         proposalId,
         proposal,
-        csvBuffer,
+        sheet.webViewLink,
         counts,
         "Use the Move Files button when you're ready.",
     );
@@ -964,12 +969,15 @@ async function handlePlanReviewReply(
 
   if (scope.unclear) {
     const csvBuffer = await savePlanCsv(proposalId, proposal.file_actions);
+    const oauth2Client = await getOauthClient(uid, AGENT_NAME);
+    const existingSheetId = proposalDoc.phaseData?.planReview?.sheetFileId;
+    const sheet = await createOrUpdateProposalSheetImpl(oauth2Client, proposalId, csvBuffer, existingSheetId);
     await sendOrganizePlanReviewEmail(
         sender,
         email,
         proposalId,
         proposal,
-        csvBuffer,
+        sheet.webViewLink,
         counts,
         scope.summary || "Please name the exact file and the new filename or approved folder path.",
     );
@@ -979,12 +987,15 @@ async function handlePlanReviewReply(
   const scopedActions = filterFileActionsByScope(proposal.file_actions, scope);
   if (scopedActions.length === 0 && (scope.folder_prefixes_to_ignore?.length ?? 0) === 0) {
     const csvBuffer = await savePlanCsv(proposalId, proposal.file_actions);
+    const oauth2Client = await getOauthClient(uid, AGENT_NAME);
+    const existingSheetId = proposalDoc.phaseData?.planReview?.sheetFileId;
+    const sheet = await createOrUpdateProposalSheetImpl(oauth2Client, proposalId, csvBuffer, existingSheetId);
     await sendOrganizePlanReviewEmail(
         sender,
         email,
         proposalId,
         proposal,
-        csvBuffer,
+        sheet.webViewLink,
         counts,
         scope.summary || "Please name the exact file and the new filename or approved folder path.",
     );
@@ -993,12 +1004,15 @@ async function handlePlanReviewReply(
   const maxScopedActions = DRIVE_PLAN_REVISION_MAX_SCOPED_ACTIONS.value();
   if (scopedActions.length > maxScopedActions) {
     const csvBuffer = await savePlanCsv(proposalId, proposal.file_actions);
+    const oauth2Client = await getOauthClient(uid, AGENT_NAME);
+    const existingSheetId = proposalDoc.phaseData?.planReview?.sheetFileId;
+    const sheet = await createOrUpdateProposalSheetImpl(oauth2Client, proposalId, csvBuffer, existingSheetId);
     await sendOrganizePlanReviewScopeTooBroadEmail(
         sender,
         email,
         proposalId,
         proposal,
-        csvBuffer,
+        sheet.webViewLink,
         counts,
         scope.summary ||
           "That change still touches too many files. Please narrow it to a folder, filename, or extension.",
@@ -1025,12 +1039,15 @@ async function handlePlanReviewReply(
   );
   if (revision.unclear) {
     const csvBuffer = await savePlanCsv(proposalId, proposal.file_actions);
+    const oauth2Client = await getOauthClient(uid, AGENT_NAME);
+    const existingSheetId = proposalDoc.phaseData?.planReview?.sheetFileId;
+    const sheet = await createOrUpdateProposalSheetImpl(oauth2Client, proposalId, csvBuffer, existingSheetId);
     await sendOrganizePlanReviewEmail(
         sender,
         email,
         proposalId,
         proposal,
-        csvBuffer,
+        sheet.webViewLink,
         counts,
         revision.summary || "Please name the exact file and the new filename or approved folder path.",
     );
@@ -1085,6 +1102,9 @@ async function handlePlanReviewReply(
   };
   await saveSavedPlan(proposalId, revisedProposal);
   const csvBuffer = await savePlanCsv(proposalId, revisedProposal.file_actions);
+  const oauth2Client = await getOauthClient(uid, AGENT_NAME);
+  const existingSheetId = proposalDoc.phaseData?.planReview?.sheetFileId;
+  const sheet = await createOrUpdateProposalSheetImpl(oauth2Client, proposalId, csvBuffer, existingSheetId);
   const nextVersion = (proposalDoc.phaseData?.planReview?.fileActionsVersion || 1) + 1;
   await updateOrganizeProposalStatus(proposalId, "pending", {
     phase: "plan_review",
@@ -1097,6 +1117,8 @@ async function handlePlanReviewReply(
         planStoragePath: proposalDoc.phaseData?.planReview?.planStoragePath || getPlanStoragePath(proposalId),
         fileActionsVersion: nextVersion,
         planEmailSentAt: new Date().toISOString(),
+        sheetFileId: sheet.fileId,
+        sheetWebViewLink: sheet.webViewLink,
       },
     },
   });
@@ -1117,7 +1139,7 @@ async function handlePlanReviewReply(
       email,
       proposalId,
       revisedProposal,
-      csvBuffer,
+      sheet.webViewLink,
       revisedCounts,
       revision.summary || "Updated the plan.",
       affectedActions,
@@ -1177,6 +1199,9 @@ export const organizeProposalTestHooks = {
   },
   setHandleOrganizeRevisionForTest(fn: typeof handleOrganizeRevisionImpl | null): void {
     handleOrganizeRevisionImpl = fn || handleOrganizeRevision;
+  },
+  setCreateOrUpdateProposalSheetForTest(fn: typeof createOrUpdateProposalSheetImpl | null): void {
+    createOrUpdateProposalSheetImpl = fn || createOrUpdateProposalSheet;
   },
 };
 // ============================================================================

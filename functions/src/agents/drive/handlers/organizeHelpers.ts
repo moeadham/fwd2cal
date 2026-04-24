@@ -135,13 +135,13 @@ function renderAffectedFilesHtml(affectedActions?: AffectedAction[]): string {
     `</div>` +
     `<br>`;
 }
-/** Sends the plan-review email with an attached CSV and Move Files action link. */
+/** Sends the plan-review email with a proposal sheet link and Move Files action link. */
 export async function sendOrganizePlanReviewEmail(
     sender: string,
     originalEmail: TransformedEmail,
     proposalId: string,
     proposal: DriveOrganizeProposal,
-    csvBuffer: Buffer,
+    sheetUrl: string,
     counts: {totalFiles: number; filesToMove: number; filesToRename: number; filesToKeep: number},
     revisionNote = "",
     affectedActions?: AffectedAction[],
@@ -189,6 +189,7 @@ ${preview}
     AFFECTED_FILES: renderAffectedFilesHtml(affectedActions),
     PREVIEW_BLOCK: previewBlock,
     MOVE_LINK: moveLink,
+    SHEET_URL: sheetUrl,
     REVISION_NOTE: noteHtml,
     EMBEDDED_DATA: phaseEmbeddedHtml(proposalId),
   });
@@ -199,21 +200,16 @@ ${preview}
     subject: originalEmail.subject || "Re: Organize your Drive",
     html: threadedHtml,
     headers: getEmailThreadHeaders(originalEmail.headers),
-    attachments: [{
-      filename: `proposal-${proposalId}.csv`,
-      content: csvBuffer,
-      content_type: "text/csv",
-    }],
   });
 }
 
-/** Sends the scope-too-broad clarification email with the current plan CSV. */
+/** Sends the scope-too-broad clarification email with the current proposal sheet link. */
 export async function sendOrganizePlanReviewScopeTooBroadEmail(
     sender: string,
     originalEmail: TransformedEmail,
     proposalId: string,
     proposal: DriveOrganizeProposal,
-    csvBuffer: Buffer,
+    sheetUrl: string,
     counts: {totalFiles: number; filesToMove: number; filesToRename: number; filesToKeep: number},
     revisionNote = "",
 ): Promise<void> {
@@ -244,6 +240,7 @@ export async function sendOrganizePlanReviewScopeTooBroadEmail(
     FILES_TO_KEEP: String(counts.filesToKeep),
     FOLDER_TREE: renderFolderTree(proposal, preservedRootPaths, preservedFolderPaths),
     ACTION_PREVIEW: preview,
+    SHEET_URL: sheetUrl,
     REVISION_NOTE: noteHtml,
     EMBEDDED_DATA: phaseEmbeddedHtml(proposalId),
   });
@@ -254,11 +251,6 @@ export async function sendOrganizePlanReviewScopeTooBroadEmail(
     subject: originalEmail.subject || "Re: Organize your Drive",
     html: threadedHtml,
     headers: getEmailThreadHeaders(originalEmail.headers),
-    attachments: [{
-      filename: `proposal-${proposalId}.csv`,
-      content: csvBuffer,
-      content_type: "text/csv",
-    }],
   });
 }
 /** Checks whether a stored OAuth scope includes full Drive access. */

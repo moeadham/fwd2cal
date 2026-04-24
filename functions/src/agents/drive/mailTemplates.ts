@@ -267,7 +267,7 @@ Examples:
   organizePlanReview: {
     html: `Your organization plan is ready.
 <br><br>
-Review the attached CSV before moving files. Nothing has changed in Google Drive yet.
+Review your <a href="%SHEET_URL%">Google Sheet proposal</a> before moving files. Nothing has changed in Google Drive yet.
 <br><br>
 <b>%TOTAL_FILES% files planned</b> &nbsp;|&nbsp; <b>%FILES_TO_MOVE% moves</b> &nbsp;|&nbsp; <b>%FILES_TO_RENAME% renames</b> &nbsp;|&nbsp; <b>%FILES_TO_KEEP% unchanged</b>
 <br><br>
@@ -289,7 +289,7 @@ Review the attached CSV before moving files. Nothing has changed in Google Drive
   organizePlanReviewScopeTooBroad: {
     html: `Your organization plan is ready.
 <br><br>
-Your latest reply still affects too many files for a safe in-email revision. Review the attached CSV and reply with a narrower request.
+Your latest reply still affects too many files for a safe in-email revision. Review your <a href="%SHEET_URL%">Google Sheet proposal</a> and reply with a narrower request.
 <br><br>
 <b>%TOTAL_FILES% files planned</b> &nbsp;|&nbsp; <b>%FILES_TO_MOVE% moves</b> &nbsp;|&nbsp; <b>%FILES_TO_RENAME% renames</b> &nbsp;|&nbsp; <b>%FILES_TO_KEEP% unchanged</b>
 <br><br>

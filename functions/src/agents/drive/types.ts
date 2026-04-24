@@ -228,6 +228,8 @@ export interface PlanReviewData {
   planStoragePath: string;
   fileActionsVersion: number;
   planEmailSentAt?: string;
+  sheetFileId?: string;
+  sheetWebViewLink?: string;
 }
 
 export interface OrganizePhaseData {

@@ -41,6 +41,7 @@ import {
   signActionToken,
 } from "./organizeHelpers";
 import {
+  createOrUpdateProposalSheet,
   createFolder,
   findAgentManagedFolders,
   findSubfolderByName,
@@ -90,6 +91,7 @@ export const getPlanStoragePath = (proposalId: string) =>
   `organize-proposals/proposal-${proposalId}.json`;
 export const getPlanCsvStoragePath = (proposalId: string) =>
   `organize-proposals/proposal-${proposalId}.csv`;
+let createOrUpdateProposalSheetImpl = createOrUpdateProposalSheet;
 
 export async function mapWithConcurrency<T, U>(
     items: T[],
@@ -714,6 +716,7 @@ export async function processPlanningChunk(
   };
   await saveSavedPlan(proposalId, proposal);
   const csvBuffer = await savePlanCsv(proposalId, proposal.file_actions);
+  const sheet = await createOrUpdateProposalSheetImpl(oauth2Client, proposalId, csvBuffer);
   const counts = countFileActions(proposal.file_actions);
   const nextPhaseData = {
     ...proposalDoc.phaseData,
@@ -724,6 +727,8 @@ export async function processPlanningChunk(
       planStoragePath: getPlanStoragePath(proposalId),
       fileActionsVersion: 1,
       planEmailSentAt: new Date().toISOString(),
+      sheetFileId: sheet.fileId,
+      sheetWebViewLink: sheet.webViewLink,
     },
   };
   await updateOrganizeProposalStatus(proposalId, "pending", {
@@ -731,7 +736,7 @@ export async function processPlanningChunk(
     generationStartedAt: null,
     phaseData: nextPhaseData,
   });
-  await sendOrganizePlanReviewEmail(proposalDoc.senderEmail, email, proposalId, proposal, csvBuffer, counts);
+  await sendOrganizePlanReviewEmail(proposalDoc.senderEmail, email, proposalId, proposal, sheet.webViewLink, counts);
 
   sendEvent(uid, "driveOrganizePlanReady", "drive", {
     totalFiles: String(counts.totalFiles),
@@ -1210,3 +1215,9 @@ export async function findSubfolder(
 }
 
 // ============================================================================
+
+export const organizeExecutionTestHooks = {
+  setCreateOrUpdateProposalSheetForTest(fn: typeof createOrUpdateProposalSheetImpl | null): void {
+    createOrUpdateProposalSheetImpl = fn || createOrUpdateProposalSheet;
+  },
+};
