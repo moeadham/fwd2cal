@@ -237,7 +237,11 @@ function deriveEffectiveAction(
   currentInApprovedTree: boolean;
 } {
   const currentPath = proposed.current_path || file.parentPath;
-  const newFolder = proposed.target_directory || file.parentPath;
+  const newFolder = proposed.needs_new_directory &&
+    proposed.new_directory &&
+    knownDirectories.has(proposed.new_directory.folder_path) ?
+      proposed.new_directory.folder_path :
+      (proposed.target_directory || file.parentPath);
   const currentName = proposed.current_name || file.name;
   const newName = proposed.new_name || file.name;
   const currentInApprovedTree = knownDirectories.has(currentPath);
@@ -355,6 +359,40 @@ export function reconcilePlanningChunkResults(
   return fileActions;
 }
 
+function getParentFolderPath(folderPath: string): string {
+  const normalized = folderPath.split("/").filter(Boolean).join("/");
+  if (!normalized) {
+    return "";
+  }
+  const segments = normalized.split("/");
+  segments.pop();
+  return segments.join("/");
+}
+
+export function pruneOrphanNewDirectories(
+    proposal: DriveOrganizeProposal,
+    approvedStructure: DriveOrganizeProposal["proposed_folders"],
+): DriveOrganizeProposal {
+  if (!proposal.proposed_folders.length) {
+    return proposal;
+  }
+
+  const kept = new Set(approvedStructure.map((folder) => folder.folder_path));
+  for (const action of proposal.file_actions) {
+    let candidate = action.new_folder;
+    while (candidate) {
+      kept.add(candidate);
+      candidate = getParentFolderPath(candidate);
+    }
+  }
+
+  return {
+    ...proposal,
+    proposed_folders: proposal.proposed_folders.filter((folder) => kept.has(folder.folder_path)),
+    file_actions: proposal.file_actions,
+  };
+}
+
 /** Builds content-aware actions sequentially while carrying forward newly-created directories. */
 export async function buildSequentialExecutionProposal(
     fileEntries: DriveFileEntry[],
@@ -393,11 +431,16 @@ export async function buildSequentialExecutionProposal(
     });
   }
 
-  return {
+  const result = {
     proposed_folders: runningTree,
     file_actions: fileActions,
     summary: `Prepared sequential content-aware actions for ${nonFolderFiles.length} files.`,
   };
+
+  return pruneOrphanNewDirectories(
+      result,
+      approvedStructure,
+  );
 }
 
 /** Saves an execution artifact in GCS. */
@@ -815,11 +858,15 @@ export async function processPlanningChunk(
       Array.from({length: totalChunks}, async (_value, i) =>
         loadExecutionJson<PlanningChunkResult>(getPlanningChunkPath(proposalId, i))),
   );
-  const proposal: DriveOrganizeProposal = {
+  const approvedStructure =
+    proposalDoc.phaseData?.directoryLayout?.approvedStructure ??
+    proposalDoc.phaseData?.directoryLayout?.proposedStructure ??
+    [];
+  const proposal = pruneOrphanNewDirectories({
     proposed_folders: runningTree,
     file_actions: chunkResults.flatMap((result) => result.file_actions),
     summary: `Prepared file-by-file organization actions for ${nonFolderFiles.length} files.`,
-  };
+  }, approvedStructure);
   await saveSavedPlan(proposalId, proposal);
   const csvBuffer = await savePlanCsv(proposalId, proposal.file_actions);
   const sheet =

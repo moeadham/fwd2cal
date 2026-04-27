@@ -75,6 +75,7 @@ import {
   organizeExecutionTestHooks,
   processMoveChunk,
   processPlanningChunk,
+  pruneOrphanNewDirectories,
   reconcilePlanningChunkResults,
   saveSavedPlan,
   writeFileActionsCsv,
@@ -3887,6 +3888,94 @@ describe("organize sequential execution proposal builder", function() {
     expect(stats).to.deep.equal({planned: 2, failed: 0, skipped: 0});
   });
 
+  it("DT00ubh1b uses new_directory.folder_path for reconciled file actions", function() {
+    const runningTree: DriveOrganizeProposal["proposed_folders"] = [{
+      folder_path: "01-Docs",
+      description: "Documents",
+    }];
+    const knownDirectories = new Set(runningTree.map((folder) => folder.folder_path));
+    const stats = {planned: 0, failed: 0, skipped: 0};
+    const fileActions = reconcilePlanningChunkResults(
+        [{
+          kind: "proposed",
+          file: {
+            id: "file-1",
+            name: "receipt.pdf",
+            mimeType: "application/pdf",
+            parentId: "root",
+            parentPath: "Inbox",
+            createdTime: "2026-04-10T00:00:00.000Z",
+            size: 100,
+            webViewLink: "",
+            isFolder: false,
+          },
+          proposed: {
+            file_id: "file-1",
+            current_name: "receipt.pdf",
+            current_path: "Inbox",
+            new_name: "2026.04.10 - Receipt.pdf",
+            target_directory: "01-Docs",
+            action: "move_and_rename",
+            needs_new_directory: true,
+            new_directory: {
+              folder_path: "01-Docs/Receipts",
+              description: "Receipt files",
+            },
+            reason: "Receipt files belong together",
+          },
+        }],
+        runningTree,
+        knownDirectories,
+        stats,
+        {proposalId: "proposal-1", chunkIndex: 0},
+    );
+
+    expect(runningTree.map((folder) => folder.folder_path)).to.deep.equal(["01-Docs", "01-Docs/Receipts"]);
+    expect(fileActions[0].new_folder).to.equal("01-Docs/Receipts");
+  });
+
+  it("DT00ubh1c falls back to target_directory when new_directory is null", function() {
+    const runningTree: DriveOrganizeProposal["proposed_folders"] = [{
+      folder_path: "01-Docs",
+      description: "Documents",
+    }];
+    const knownDirectories = new Set(runningTree.map((folder) => folder.folder_path));
+    const stats = {planned: 0, failed: 0, skipped: 0};
+    const fileActions = reconcilePlanningChunkResults(
+        [{
+          kind: "proposed",
+          file: {
+            id: "file-1",
+            name: "receipt.pdf",
+            mimeType: "application/pdf",
+            parentId: "root",
+            parentPath: "Inbox",
+            createdTime: "2026-04-10T00:00:00.000Z",
+            size: 100,
+            webViewLink: "",
+            isFolder: false,
+          },
+          proposed: {
+            file_id: "file-1",
+            current_name: "receipt.pdf",
+            current_path: "Inbox",
+            new_name: "2026.04.10 - Receipt.pdf",
+            target_directory: "01-Docs",
+            action: "move_and_rename",
+            needs_new_directory: true,
+            new_directory: null,
+            reason: "Receipt files belong together",
+          },
+        }],
+        runningTree,
+        knownDirectories,
+        stats,
+        {proposalId: "proposal-1", chunkIndex: 0},
+    );
+
+    expect(fileActions[0].new_folder).to.equal("01-Docs");
+  });
+
   it("DT00ubh2 counts ignored kept files and errors during reconciliation", function() {
     const runningTree: DriveOrganizeProposal["proposed_folders"] = [{
       folder_path: "01-Docs",
@@ -4009,6 +4098,142 @@ describe("organize sequential execution proposal builder", function() {
       reason: "Automatic analysis failed — left in place",
     });
     expect(stats).to.deep.equal({planned: 1, failed: 1, skipped: 2});
+  });
+
+  describe("pruneOrphanNewDirectories", function() {
+    it("DT00ubpnd1 drops a newly-added folder no file_action targets", function() {
+      const proposal: DriveOrganizeProposal = {
+        proposed_folders: [
+          {folder_path: "01-Docs", description: "Documents"},
+          {folder_path: "01-Docs/Receipts", description: "Receipts"},
+        ],
+        file_actions: [{
+          file_id: "file-1",
+          current_name: "receipt.pdf",
+          current_path: "Inbox",
+          new_name: "receipt.pdf",
+          new_folder: "01-Docs",
+          action: "move",
+          reason: "Receipt",
+        }],
+        summary: "Test",
+      };
+
+      const result = pruneOrphanNewDirectories(
+          proposal,
+          [{folder_path: "01-Docs", description: "Documents"}],
+      );
+
+      expect(result.proposed_folders.map((folder) => folder.folder_path)).to.deep.equal(["01-Docs"]);
+      expect(result.file_actions).to.deep.equal(proposal.file_actions);
+    });
+
+    it("DT00ubpnd2 keeps a newly-added intermediate when a descendant is targeted", function() {
+      const proposal: DriveOrganizeProposal = {
+        proposed_folders: [
+          {folder_path: "01-Docs", description: "Documents"},
+          {folder_path: "01-Docs/Client A", description: "Client folder"},
+          {folder_path: "01-Docs/Client A/2026", description: "Year folder"},
+        ],
+        file_actions: [
+          {
+            file_id: "file-1",
+            current_name: "a.pdf",
+            current_path: "Inbox",
+            new_name: "a.pdf",
+            new_folder: "01-Docs/Client A/2026",
+            action: "move",
+            reason: "Client file",
+          },
+        ],
+        summary: "Test",
+      };
+
+      const result = pruneOrphanNewDirectories(
+          proposal,
+          [{folder_path: "01-Docs", description: "Documents"}],
+      );
+
+      expect(result.proposed_folders.map((folder) => folder.folder_path)).to.deep.equal([
+        "01-Docs",
+        "01-Docs/Client A",
+        "01-Docs/Client A/2026",
+      ]);
+    });
+
+    it("DT00ubpnd3 keeps approved folders with zero targets and no descendants", function() {
+      const proposal: DriveOrganizeProposal = {
+        proposed_folders: [
+          {folder_path: "01-Docs", description: "Documents"},
+          {folder_path: "01-Docs/Archive", description: "Archive"},
+        ],
+        file_actions: [],
+        summary: "Test",
+      };
+
+      const result = pruneOrphanNewDirectories(
+          proposal,
+          proposal.proposed_folders,
+      );
+
+      expect(result).to.deep.equal(proposal);
+    });
+
+    it("DT00ubpnd4 does not modify file_actions", function() {
+      const proposal: DriveOrganizeProposal = {
+        proposed_folders: [
+          {folder_path: "01-Docs", description: "Documents"},
+          {folder_path: "01-Docs/Receipts", description: "Receipts"},
+        ],
+        file_actions: [{
+          file_id: "file-1",
+          current_name: "1.pdf",
+          current_path: "Inbox",
+          new_name: "1.pdf",
+          new_folder: "01-Docs",
+          action: "move",
+          reason: "",
+        }],
+        summary: "Test",
+      };
+
+      const result = pruneOrphanNewDirectories(
+          proposal,
+          [{folder_path: "01-Docs", description: "Documents"}],
+      );
+
+      expect(result.file_actions).to.deep.equal(proposal.file_actions);
+    });
+
+    it("DT00ubpnd5 is idempotent", function() {
+      const proposal: DriveOrganizeProposal = {
+        proposed_folders: [
+          {folder_path: "01-Docs", description: "Documents"},
+          {folder_path: "01-Docs/Receipts", description: "Receipts"},
+        ],
+        file_actions: [{
+          file_id: "file-1",
+          current_name: "receipt.pdf",
+          current_path: "Inbox",
+          new_name: "receipt.pdf",
+          new_folder: "01-Docs",
+          action: "move",
+          reason: "Receipt",
+        }],
+        summary: "Test",
+      };
+
+      const once = pruneOrphanNewDirectories(
+          proposal,
+          [{folder_path: "01-Docs", description: "Documents"}],
+      );
+      const twice = pruneOrphanNewDirectories(
+          once,
+          [{folder_path: "01-Docs", description: "Documents"}],
+      );
+
+      expect(twice).to.deep.equal(once);
+    });
   });
 
   it("DT00ubi writes RFC 4180 CSV for file actions", function() {

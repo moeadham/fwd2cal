@@ -45,6 +45,7 @@ Rules:
   - Its name closely resembles its parent folder's name. Patterns to detect: child equals parent plus a numeric/letter suffix (parent="Foo", child="Foo 2", "Foo 3", "Foo v2"); child equals a modifier plus the parent root (parent="Foo", child="Final Foo", "Draft Foo", "Reply Foo", "Foo - reply"); child is a near-duplicate of the parent with extra adjectives ("Witness Statement" / "Final Witness Statements", "Report" / "Final Report Draft"). When you see this pattern, the child is almost certainly a draft, revision, or working-copy variant of the parent's items, not a separate stable category. Stop preservation at the parent and drop the child.
 - When signals are mixed, lean toward preserving over flattening — losing a meaningful subfolder is a worse error than keeping a redundant one.
 - When current_name starts with a numeric or category prefix (e.g. "07 Section A 003.ext", "Q3 invoice.pdf") and that prefix or its associated word names a coherent sub-category of the approved parent, prefer organizing by that named sub-category over preserving an opaque source subfolder. The new_directory.folder_path must use the named sub-category, not the numeric prefix. Example: "07 Section A 003.ext" belongs in a "Section A" subfolder, not a "07" subfolder.
+- A date token in current_name alone (for example YYYYMMDD, YYYY-MM-DD, a year like 2024, a quarter like Q3 2025, or similar) is NOT a grouping signal. Only propose a date-based new_directory when current_path already segments by date, or when an approved tree entry clearly distinguishes a specific date-bounded event or period.
 - When a file belongs under an approved root but needs a more specific child, set target_directory to the closest existing approved parent, set needs_new_directory to true, and provide new_directory.folder_path as the deeper child path plus a brief description.
 - Do not invent unrelated roots. If a new directory is needed, it must extend an existing approved path.
 - Two folder paths that differ by even one character are different folders.
@@ -88,6 +89,18 @@ Example 3 (filename-pattern grouping when source subfolder is opaque):
   - target_directory: "Media/Audio Series Alpha"
   - needs_new_directory: true
   - new_directory.folder_path: "Media/Audio Series Alpha/Section A"
+
+Example 4 (date prefix in filename alone does not justify a subfolder):
+- Approved Directory Tree includes:
+  - Personal/Receipts: receipts
+- File:
+  - Current Path: scans/from-phone
+  - Name: 2026-04-10 coffee receipt.pdf
+- Good answer:
+  - action: "move"
+  - target_directory: "Personal/Receipts"
+  - needs_new_directory: false
+  - new_directory: null
 
 Return JSON only.`,
 };
