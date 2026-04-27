@@ -167,6 +167,44 @@ export async function mapWithConcurrency<T, U>(
   return results;
 }
 
+export function interleaveByParentPath(files: DriveFileEntry[]): DriveFileEntry[] {
+  if (files.length === 0) {
+    return [];
+  }
+
+  const buckets = new Map<string, DriveFileEntry[]>();
+  const bucketOrder: string[] = [];
+
+  for (const file of files) {
+    const bucketKey = file.parentPath || "";
+    if (!buckets.has(bucketKey)) {
+      buckets.set(bucketKey, []);
+      bucketOrder.push(bucketKey);
+    }
+    buckets.get(bucketKey)?.push(file);
+  }
+
+  const bucketIndexes = new Map<string, number>();
+  for (const key of bucketOrder) {
+    bucketIndexes.set(key, 0);
+  }
+
+  const orderedFiles: DriveFileEntry[] = [];
+  while (orderedFiles.length < files.length) {
+    for (const key of bucketOrder) {
+      const bucket = buckets.get(key) || [];
+      const index = bucketIndexes.get(key) || 0;
+      if (index >= bucket.length) {
+        continue;
+      }
+      orderedFiles.push(bucket[index]);
+      bucketIndexes.set(key, index + 1);
+    }
+  }
+
+  return orderedFiles;
+}
+
 async function isOrganizeProposalCancelled(proposalId: string): Promise<boolean> {
   const latestProposal = await getOrganizeProposal(proposalId);
   if (!latestProposal) {
@@ -662,7 +700,8 @@ export async function processPlanningChunk(
   const stats = {planned: 0, failed: 0, skipped: 0};
   const oauth2Client = await getOauthClient(uid, AGENT_NAME);
   const planConcurrency = ORGANIZE_DRIVE_PLAN_CONCURRENCY.value();
-  const results = await mapWithConcurrency(chunkFiles, planConcurrency, async (file) => {
+  const orderedChunkFiles = interleaveByParentPath(chunkFiles);
+  const results = await mapWithConcurrency(orderedChunkFiles, planConcurrency, async (file) => {
     const ignoredRoot = findIgnoredRoot(file.parentPath || "");
     if (ignoredRoot) {
       return {kind: "ignored", file, ignoredRoot} satisfies PlanningWorkerResult;

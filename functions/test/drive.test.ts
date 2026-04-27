@@ -69,6 +69,7 @@ import {persistMovePreferenceUpdates} from "../src/agents/drive/handlers/moveHan
 import {
   applyPlanPatches,
   buildSequentialExecutionProposal,
+  interleaveByParentPath,
   loadSavedPlan,
   mapWithConcurrency,
   organizeExecutionTestHooks,
@@ -3745,6 +3746,65 @@ describe("organize sequential execution proposal builder", function() {
     expect(callOrder).to.deep.equal([1, 2, 3]);
   });
 
+  it("DT-ileave-1 interleaves files across parent paths while preserving intra-bucket order", function() {
+    const files: DriveFileEntry[] = [
+      {id: "a-1", name: "A-1.pdf", mimeType: "application/pdf", parentId: "A", parentPath: "A", createdTime: "", size: 1, webViewLink: "", isFolder: false},
+      {id: "a-2", name: "A-2.pdf", mimeType: "application/pdf", parentId: "A", parentPath: "A", createdTime: "", size: 1, webViewLink: "", isFolder: false},
+      {id: "a-3", name: "A-3.pdf", mimeType: "application/pdf", parentId: "A", parentPath: "A", createdTime: "", size: 1, webViewLink: "", isFolder: false},
+      {id: "b-1", name: "B-1.pdf", mimeType: "application/pdf", parentId: "B", parentPath: "B", createdTime: "", size: 1, webViewLink: "", isFolder: false},
+      {id: "b-2", name: "B-2.pdf", mimeType: "application/pdf", parentId: "B", parentPath: "B", createdTime: "", size: 1, webViewLink: "", isFolder: false},
+      {id: "c-1", name: "C-1.pdf", mimeType: "application/pdf", parentId: "C", parentPath: "C", createdTime: "", size: 1, webViewLink: "", isFolder: false},
+    ];
+
+    const ordered = interleaveByParentPath(files);
+
+    expect(ordered.map((file) => file.id)).to.deep.equal(["a-1", "b-1", "c-1", "a-2", "b-2", "a-3"]);
+    expect(ordered).to.have.length(files.length);
+    expect(ordered.filter((file) => file.parentPath === "A").map((file) => file.id)).to.deep.equal(["a-1", "a-2", "a-3"]);
+    expect(ordered.filter((file) => file.parentPath === "B").map((file) => file.id)).to.deep.equal(["b-1", "b-2"]);
+  });
+
+  it("DT-ileave-2 returns an empty array for empty input", function() {
+    expect(interleaveByParentPath([])).to.deep.equal([]);
+  });
+
+  it("DT-ileave-3 leaves single-bucket input unchanged", function() {
+    const files: DriveFileEntry[] = [
+      {id: "a-1", name: "A-1.pdf", mimeType: "application/pdf", parentId: "A", parentPath: "A", createdTime: "", size: 1, webViewLink: "", isFolder: false},
+      {id: "a-2", name: "A-2.pdf", mimeType: "application/pdf", parentId: "A", parentPath: "A", createdTime: "", size: 1, webViewLink: "", isFolder: false},
+      {id: "a-3", name: "A-3.pdf", mimeType: "application/pdf", parentId: "A", parentPath: "A", createdTime: "", size: 1, webViewLink: "", isFolder: false},
+    ];
+
+    expect(interleaveByParentPath(files).map((file) => file.id)).to.deep.equal(["a-1", "a-2", "a-3"]);
+  });
+
+  it("DT-ileave-4 collapses undefined and empty parent paths into one bucket", function() {
+    const files: DriveFileEntry[] = [
+      {id: "blank-1", name: "blank-1.pdf", mimeType: "application/pdf", parentId: "root", parentPath: "", createdTime: "", size: 1, webViewLink: "", isFolder: false},
+      {id: "missing-1", name: "missing-1.pdf", mimeType: "application/pdf", parentId: "root", parentPath: "", createdTime: "", size: 1, webViewLink: "", isFolder: false},
+      {id: "folder-1", name: "folder-1.pdf", mimeType: "application/pdf", parentId: "folder", parentPath: "Folder", createdTime: "", size: 1, webViewLink: "", isFolder: false},
+      {id: "blank-2", name: "blank-2.pdf", mimeType: "application/pdf", parentId: "root", parentPath: "", createdTime: "", size: 1, webViewLink: "", isFolder: false},
+    ];
+
+    expect(interleaveByParentPath(files).map((file) => file.id)).to.deep.equal([
+      "blank-1",
+      "folder-1",
+      "missing-1",
+      "blank-2",
+    ]);
+  });
+
+  it("DT-ileave-5 uses first-seen bucket order instead of lexicographic order", function() {
+    const files: DriveFileEntry[] = [
+      {id: "z-1", name: "Z-1.pdf", mimeType: "application/pdf", parentId: "Z", parentPath: "Z", createdTime: "", size: 1, webViewLink: "", isFolder: false},
+      {id: "a-1", name: "A-1.pdf", mimeType: "application/pdf", parentId: "A", parentPath: "A", createdTime: "", size: 1, webViewLink: "", isFolder: false},
+      {id: "z-2", name: "Z-2.pdf", mimeType: "application/pdf", parentId: "Z", parentPath: "Z", createdTime: "", size: 1, webViewLink: "", isFolder: false},
+      {id: "a-2", name: "A-2.pdf", mimeType: "application/pdf", parentId: "A", parentPath: "A", createdTime: "", size: 1, webViewLink: "", isFolder: false},
+    ];
+
+    expect(interleaveByParentPath(files).map((file) => file.id)).to.deep.equal(["z-1", "a-1", "z-2", "a-2"]);
+  });
+
   it("DT00ubh1 dedupes parallel new folders during serial reconciliation", function() {
     const runningTree: DriveOrganizeProposal["proposed_folders"] = [{
       folder_path: "01-Docs",
@@ -4357,6 +4417,143 @@ describe("organize sequential execution proposal builder", function() {
     expect(treeExists).to.equal(true);
     expect(nextChunkExists).to.equal(false);
     expect(planExists).to.equal(false);
+  });
+
+  it("DT-ileave-6 saves a complete planning chunk after interleaving parent paths", async function() {
+    const uid = "execution-interleave-parent-paths";
+    const sender = "execution-interleave-parent-paths@example.com";
+    const proposalId = `execution-interleave-parent-paths-${Date.now()}`;
+    const storagePath = `organize-proposals/${proposalId}.json`;
+    const previousPlanConcurrency = process.env.ORGANIZE_DRIVE_PLAN_CONCURRENCY;
+    process.env.ORGANIZE_DRIVE_PLAN_CONCURRENCY = "2";
+
+    const phaseData = {
+      directoryLayout: {
+        approvedStructure: [{
+          folder_path: "01-Docs",
+          description: "Documents",
+        }],
+      },
+      filenameConvention: {convention: "YYYY.MM.DD - Description.ext"},
+      execution: {chunkSize: 6, totalChunks: 1, completedChunks: 0},
+    };
+    const chunkFiles: DriveFileEntry[] = [
+      {id: "a-1", name: "A-1.pdf", mimeType: "application/pdf", parentId: "folder-a", parentPath: "Folder-A", createdTime: "2026-04-10T00:00:00.000Z", size: 999999999, webViewLink: "", isFolder: false},
+      {id: "a-2", name: "A-2.pdf", mimeType: "application/pdf", parentId: "folder-a", parentPath: "Folder-A", createdTime: "2026-04-11T00:00:00.000Z", size: 999999999, webViewLink: "", isFolder: false},
+      {id: "a-3", name: "A-3.pdf", mimeType: "application/pdf", parentId: "folder-a", parentPath: "Folder-A", createdTime: "2026-04-12T00:00:00.000Z", size: 999999999, webViewLink: "", isFolder: false},
+      {id: "b-1", name: "B-1.pdf", mimeType: "application/pdf", parentId: "folder-b", parentPath: "Folder-B", createdTime: "2026-04-13T00:00:00.000Z", size: 999999999, webViewLink: "", isFolder: false},
+      {id: "b-2", name: "B-2.pdf", mimeType: "application/pdf", parentId: "folder-b", parentPath: "Folder-B", createdTime: "2026-04-14T00:00:00.000Z", size: 999999999, webViewLink: "", isFolder: false},
+      {id: "b-3", name: "B-3.pdf", mimeType: "application/pdf", parentId: "folder-b", parentPath: "Folder-B", createdTime: "2026-04-15T00:00:00.000Z", size: 999999999, webViewLink: "", isFolder: false},
+    ];
+
+    await db.collection("DriveUsers").doc(uid).set({
+      access_token: "test-access-token",
+      refresh_token: "test-refresh-token",
+    });
+    await db.collection("OrganizeProposals").doc(proposalId).set({
+      uid,
+      senderEmail: sender,
+      emailId: "execution-interleave-parent-paths-email-id",
+      status: "planning",
+      phase: "plan_review",
+      createdAt: "2026-04-16T00:00:00.000Z",
+      expiresAt: "2099-04-16T00:00:00.000Z",
+      storagePath,
+      phaseData,
+      cost: {},
+    });
+
+    const bucket = getStorage().bucket();
+    await bucket.file(storagePath).save(JSON.stringify({
+      fileEntries: chunkFiles,
+      senderEmail: sender,
+      phaseData,
+    }), {contentType: "application/json"});
+    await bucket.file(`organize-proposals/${proposalId}-execution-tree--1.json`).save(JSON.stringify([{
+      folder_path: "01-Docs",
+      description: "Documents",
+    }]), {contentType: "application/json"});
+
+    setOpenAIClientForTest({
+      chat: {
+        completions: {
+          create: async (params: {messages: Array<{content: unknown}>}) => {
+            const systemContent = params.messages[0]?.content;
+            const userContent = params.messages[1]?.content;
+            const promptText = typeof systemContent === "string" ? systemContent : "";
+            const requestText = typeof userContent === "string" ?
+              userContent :
+              Array.isArray(userContent) ?
+                userContent.map((part) => typeof part === "object" && part && "text" in part ?
+                  String((part as {text?: string}).text || "") :
+                  "").join("\n") :
+                "";
+            const fileIdMatch = requestText.match(/ID:\s*([^\n]+)/);
+            const fileNameMatch = requestText.match(/Name:\s*([^\n]+)/);
+            const currentPathMatch = requestText.match(/Current Path:\s*([^\n]+)/);
+            const fileId = fileIdMatch?.[1]?.trim() || "unknown-file";
+            const fileName = fileNameMatch?.[1]?.trim() || "unknown.pdf";
+            const currentPath = currentPathMatch?.[1]?.trim() || "My Drive";
+
+            const content: unknown = promptText === proposeFileNamePrompt.prompt ?
+              {
+                file_id: fileId,
+                current_name: fileName,
+                current_path: currentPath,
+                new_name: `2026.04 - ${fileName}`,
+                reason: `Rename ${fileName}`,
+              } :
+              {
+                file_id: fileId,
+                current_name: fileName,
+                current_path: currentPath,
+                target_directory: "01-Docs",
+                action: "move",
+                needs_new_directory: false,
+                new_directory: null,
+                reason: `Move ${fileName}`,
+              };
+
+            return {
+              choices: [{
+                message: {
+                  content: JSON.stringify(content),
+                },
+                finish_reason: "stop",
+              }],
+              usage: {total_tokens: 1},
+            };
+          },
+        },
+      },
+    } as unknown as OpenAI);
+
+    try {
+      await processPlanningChunk(makeTestEmail("plan"), {
+        proposalId,
+        emailId: "execution-interleave-parent-paths-email-id",
+        uid,
+        chunkIndex: 0,
+      });
+    } finally {
+      if (previousPlanConcurrency === undefined) {
+        delete process.env.ORGANIZE_DRIVE_PLAN_CONCURRENCY;
+      } else {
+        process.env.ORGANIZE_DRIVE_PLAN_CONCURRENCY = previousPlanConcurrency;
+      }
+    }
+
+    const [planningChunkContents] = await bucket.file(`organize-proposals/${proposalId}-planning-chunk-0.json`).download();
+    const planningChunk = JSON.parse(planningChunkContents.toString()) as {
+      file_actions: DriveOrganizeProposal["file_actions"];
+      stats: {planned: number; failed: number; skipped: number};
+    };
+
+    expect(planningChunk.stats.planned).to.equal(6);
+    expect(planningChunk.stats.failed).to.equal(0);
+    expect(planningChunk.file_actions.map((action) => action.file_id).sort()).to.deep.equal(
+        chunkFiles.map((file) => file.id).sort(),
+    );
   });
 
   async function runProcessExecutionOverrideCase(options: {
