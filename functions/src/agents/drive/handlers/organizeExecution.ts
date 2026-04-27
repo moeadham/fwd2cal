@@ -2,6 +2,7 @@ import {logger} from "firebase-functions/v2";
 import {getStorage} from "firebase-admin/storage";
 import {Auth} from "googleapis";
 import {getOauthClient} from "../../../auth/authHandler";
+import {ENVIRONMENT_NAME} from "../../../util/config";
 import {
   finalizeOrganizeProposal,
   getOrganizeIntermediateState,
@@ -141,6 +142,17 @@ export const getPlanStoragePath = (proposalId: string) =>
 export const getPlanCsvStoragePath = (proposalId: string) =>
   `organize-proposals/proposal-${proposalId}.csv`;
 let createOrUpdateProposalSheetImpl = createOrUpdateProposalSheet;
+
+function getProposalSheetRef(
+    proposalId: string,
+    existingFileId?: string,
+): {fileId: string; webViewLink: string} {
+  const fileId = existingFileId || `local-proposal-sheet-${proposalId}`;
+  return {
+    fileId,
+    webViewLink: `https://docs.google.com/spreadsheets/d/${fileId}`,
+  };
+}
 
 export async function mapWithConcurrency<T, U>(
     items: T[],
@@ -810,7 +822,10 @@ export async function processPlanningChunk(
   };
   await saveSavedPlan(proposalId, proposal);
   const csvBuffer = await savePlanCsv(proposalId, proposal.file_actions);
-  const sheet = await createOrUpdateProposalSheetImpl(oauth2Client, proposalId, csvBuffer);
+  const sheet =
+    ENVIRONMENT_NAME.value() === "local" || ENVIRONMENT_NAME.value() === "test" ?
+      getProposalSheetRef(proposalId) :
+      await createOrUpdateProposalSheetImpl(oauth2Client, proposalId, csvBuffer);
   const counts = countFileActions(proposal.file_actions);
   const nextPhaseData = {
     ...proposalDoc.phaseData,

@@ -2,6 +2,7 @@ import {logger} from "firebase-functions/v2";
 import {sendEvent} from "../../../util/analytics";
 import {
   DRIVE_PLAN_REVISION_MAX_SCOPED_ACTIONS,
+  ENVIRONMENT_NAME,
   getSupportEmail,
 } from "../../../util/config";
 import {getOauthClient} from "../../../auth/authHandler";
@@ -83,6 +84,29 @@ let scopePlanRevisionImpl = scopePlanRevision;
 let revisePlanFileActionsImpl = revisePlanFileActions;
 let handleOrganizeRevisionImpl = handleOrganizeRevision;
 let createOrUpdateProposalSheetImpl = createOrUpdateProposalSheet;
+
+function getProposalSheetRef(
+    proposalId: string,
+    existingFileId?: string,
+): {fileId: string; webViewLink: string} {
+  const fileId = existingFileId || `local-proposal-sheet-${proposalId}`;
+  return {
+    fileId,
+    webViewLink: `https://docs.google.com/spreadsheets/d/${fileId}`,
+  };
+}
+
+async function createOrReuseProposalSheet(
+    oauth2Client: ReturnType<typeof getOauthClient> extends Promise<infer T> ? T : never,
+    proposalId: string,
+    csvBuffer: Buffer,
+    existingFileId?: string,
+): Promise<{fileId: string; webViewLink: string}> {
+  if (ENVIRONMENT_NAME.value() === "local" || ENVIRONMENT_NAME.value() === "test") {
+    return getProposalSheetRef(proposalId, existingFileId);
+  }
+  return createOrUpdateProposalSheetImpl(oauth2Client, proposalId, csvBuffer, existingFileId);
+}
 
 function getNonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
@@ -923,7 +947,7 @@ async function handlePlanReviewReply(
     const csvBuffer = await savePlanCsv(proposalId, proposal.file_actions);
     const oauth2Client = await getOauthClient(uid, AGENT_NAME);
     const existingSheetId = proposalDoc.phaseData?.planReview?.sheetFileId;
-    const sheet = await createOrUpdateProposalSheetImpl(oauth2Client, proposalId, csvBuffer, existingSheetId);
+    const sheet = await createOrReuseProposalSheet(oauth2Client, proposalId, csvBuffer, existingSheetId);
     await sendOrganizePlanReviewEmail(
         sender,
         email,
@@ -971,7 +995,7 @@ async function handlePlanReviewReply(
     const csvBuffer = await savePlanCsv(proposalId, proposal.file_actions);
     const oauth2Client = await getOauthClient(uid, AGENT_NAME);
     const existingSheetId = proposalDoc.phaseData?.planReview?.sheetFileId;
-    const sheet = await createOrUpdateProposalSheetImpl(oauth2Client, proposalId, csvBuffer, existingSheetId);
+    const sheet = await createOrReuseProposalSheet(oauth2Client, proposalId, csvBuffer, existingSheetId);
     await sendOrganizePlanReviewEmail(
         sender,
         email,
@@ -989,7 +1013,7 @@ async function handlePlanReviewReply(
     const csvBuffer = await savePlanCsv(proposalId, proposal.file_actions);
     const oauth2Client = await getOauthClient(uid, AGENT_NAME);
     const existingSheetId = proposalDoc.phaseData?.planReview?.sheetFileId;
-    const sheet = await createOrUpdateProposalSheetImpl(oauth2Client, proposalId, csvBuffer, existingSheetId);
+    const sheet = await createOrReuseProposalSheet(oauth2Client, proposalId, csvBuffer, existingSheetId);
     await sendOrganizePlanReviewEmail(
         sender,
         email,
@@ -1006,7 +1030,7 @@ async function handlePlanReviewReply(
     const csvBuffer = await savePlanCsv(proposalId, proposal.file_actions);
     const oauth2Client = await getOauthClient(uid, AGENT_NAME);
     const existingSheetId = proposalDoc.phaseData?.planReview?.sheetFileId;
-    const sheet = await createOrUpdateProposalSheetImpl(oauth2Client, proposalId, csvBuffer, existingSheetId);
+    const sheet = await createOrReuseProposalSheet(oauth2Client, proposalId, csvBuffer, existingSheetId);
     await sendOrganizePlanReviewScopeTooBroadEmail(
         sender,
         email,
@@ -1041,7 +1065,7 @@ async function handlePlanReviewReply(
     const csvBuffer = await savePlanCsv(proposalId, proposal.file_actions);
     const oauth2Client = await getOauthClient(uid, AGENT_NAME);
     const existingSheetId = proposalDoc.phaseData?.planReview?.sheetFileId;
-    const sheet = await createOrUpdateProposalSheetImpl(oauth2Client, proposalId, csvBuffer, existingSheetId);
+    const sheet = await createOrReuseProposalSheet(oauth2Client, proposalId, csvBuffer, existingSheetId);
     await sendOrganizePlanReviewEmail(
         sender,
         email,
@@ -1104,7 +1128,7 @@ async function handlePlanReviewReply(
   const csvBuffer = await savePlanCsv(proposalId, revisedProposal.file_actions);
   const oauth2Client = await getOauthClient(uid, AGENT_NAME);
   const existingSheetId = proposalDoc.phaseData?.planReview?.sheetFileId;
-  const sheet = await createOrUpdateProposalSheetImpl(oauth2Client, proposalId, csvBuffer, existingSheetId);
+  const sheet = await createOrReuseProposalSheet(oauth2Client, proposalId, csvBuffer, existingSheetId);
   const nextVersion = (proposalDoc.phaseData?.planReview?.fileActionsVersion || 1) + 1;
   await updateOrganizeProposalStatus(proposalId, "pending", {
     phase: "plan_review",

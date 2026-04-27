@@ -137,6 +137,11 @@
             ? (p.lastError.length > 80 ? p.lastError.substring(0, 80) + '...' : p.lastError) 
             : '';
           const createdText = p.createdAt ? new Date(p.createdAt).toLocaleString() : '';
+          const canRerunPlan = p.status === 'pending' && p.phase === 'plan_review';
+          const rerunDisabledAttr = canRerunPlan ? '' : ' disabled';
+          const rerunTitleAttr = canRerunPlan
+            ? ' title="Regenerate the file-action plan from the current review state"'
+            : ' title="Available only for pending proposals in plan_review"';
           
           tableHtml += '<tr>' +
             '<td>' + (p.senderEmail || p.emailId || '') + '</td>' +
@@ -147,7 +152,10 @@
             '<td>' + createdText + '</td>' +
             '<td>' +
               '<button class="resume-btn" data-id="' + p.id + '" ' + 
-              'style="width: auto; padding: 6px 12px; font-size: 0.8rem">Resume</button>' +
+              'style="width: auto; padding: 6px 12px; font-size: 0.8rem">Resume</button> ' +
+              '<button class="rerun-plan-btn" data-id="' + p.id + '"' +
+              rerunDisabledAttr + rerunTitleAttr +
+              ' style="width: auto; padding: 6px 12px; font-size: 0.8rem">Rerun Plan</button>' +
             '</td>' +
           '</tr>';
         });
@@ -164,52 +172,59 @@
     });
 
     document.getElementById('proposalsContainer').addEventListener('click', async (e) => {
-      if (e.target && e.target.classList.contains('resume-btn')) {
-        const apiKey = document.getElementById('apiKey').value;
-        if (!apiKey) {
-          alert('Please enter API Key');
-          return;
-        }
+      const target = e.target;
+      if (!target || (!target.classList.contains('resume-btn') && !target.classList.contains('rerun-plan-btn'))) {
+        return;
+      }
+
+      const apiKey = document.getElementById('apiKey').value;
+      if (!apiKey) {
+        alert('Please enter API Key');
+        return;
+      }
+      
+      const btn = target;
+      const proposalId = btn.getAttribute('data-id');
+      const isRerun = btn.classList.contains('rerun-plan-btn');
+      const originalText = btn.textContent;
+      const loadingText = isRerun ? 'Rerunning...' : 'Resuming...';
+      const action = isRerun ? 'rerunPlanning' : 'retry';
+      const actionLabel = isRerun ? 'Rerunning plan for proposal ' : 'Resuming proposal ';
+      
+      btn.disabled = true;
+      btn.textContent = loadingText;
+      
+      const responseContainer = document.getElementById('responseContainer');
+      const responseArea = document.getElementById('responseArea');
+      responseContainer.classList.remove('hidden');
+      responseArea.textContent = actionLabel + proposalId + '...';
+      
+      try {
+        const res = await fetch('', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-admin-key': apiKey
+          },
+          body: JSON.stringify({ action: action, proposalId: proposalId })
+        });
         
-        const btn = e.target;
-        const proposalId = btn.getAttribute('data-id');
-        const originalText = btn.textContent;
-        
-        btn.disabled = true;
-        btn.textContent = 'Resuming...';
-        
-        const responseContainer = document.getElementById('responseContainer');
-        const responseArea = document.getElementById('responseArea');
-        responseContainer.classList.remove('hidden');
-        responseArea.textContent = 'Resuming proposal ' + proposalId + '...';
-        
+        let data;
         try {
-          const res = await fetch('', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-admin-key': apiKey
-            },
-            body: JSON.stringify({ action: 'retry', proposalId: proposalId })
-          });
-          
-          let data;
-          try {
-            data = await res.json();
-          } catch (err) {
-            data = await res.text();
-          }
-          
-          responseArea.textContent = JSON.stringify(data, null, 2);
-          if (!res.ok) {
-            responseArea.textContent += '\\n\\nStatus: ' + res.status;
-          }
+          data = await res.json();
         } catch (err) {
-          responseArea.textContent = 'Error: ' + err.message;
-        } finally {
-          btn.disabled = false;
-          btn.textContent = originalText;
+          data = await res.text();
         }
+        
+        responseArea.textContent = JSON.stringify(data, null, 2);
+        if (!res.ok) {
+          responseArea.textContent += '\\n\\nStatus: ' + res.status;
+        }
+      } catch (err) {
+        responseArea.textContent = 'Error: ' + err.message;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
       }
     });
   </script>

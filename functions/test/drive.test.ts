@@ -103,11 +103,12 @@ const DRIVE_EMAIL_ADDRESS = process.env.DRIVE_EMAIL_ADDRESS || "drive@fwd2drive.
 const DISPATCH_URL = "http://127.0.0.1:5001";
 const DISPATCH_REGION = "us-central1";
 const APP_ID = process.env.GCLOUD_PROJECT || "fwd2cal-dev-2578e";
+const STORAGE_BUCKET = `${APP_ID}.firebasestorage.app`;
 
 process.env.FIRESTORE_EMULATOR_HOST = "127.0.0.1:8080";
 process.env.FIREBASE_STORAGE_EMULATOR_HOST = "127.0.0.1:9199";
-initializeApp({projectId: APP_ID, storageBucket: `${APP_ID}.appspot.com`});
-const testApp = initializeApp({projectId: APP_ID, storageBucket: `${APP_ID}.appspot.com`}, "drive-test");
+initializeApp({projectId: APP_ID, storageBucket: STORAGE_BUCKET});
+const testApp = initializeApp({projectId: APP_ID, storageBucket: STORAGE_BUCKET}, "drive-test");
 const db = getFirestore(testApp);
 
 interface WebhookWithMock {
@@ -2114,6 +2115,7 @@ describe("admin resume helpers", function() {
     });
     await db.collection("OrganizeProposals").doc(`${baseId}-pending`).set({
       status: "pending",
+      phase: "plan_review",
       createdAt: "2099-01-03T00:00:00.000Z",
       emailId: "email-pending",
       uid: "uid-pending",
@@ -2123,6 +2125,7 @@ describe("admin resume helpers", function() {
     const seeded = proposals.filter((proposal) => String(proposal.id).startsWith(baseId));
 
     expect(seeded.map((proposal) => proposal.id)).to.deep.equal([
+      `${baseId}-pending`,
       `${baseId}-failed`,
       `${baseId}-generating`,
     ]);
@@ -4846,6 +4849,13 @@ describe("admin resume routes", function() {
       emailId: "email-completed",
       uid: "uid-completed",
     });
+    await db.collection("OrganizeProposals").doc(`${baseId}-pending-review`).set({
+      status: "pending",
+      phase: "plan_review",
+      createdAt: "2099-02-04T00:00:00.000Z",
+      emailId: "email-pending-review",
+      uid: "uid-pending-review",
+    });
 
     const res = await chaiWithHttp
       .request(`${DISPATCH_URL}/${APP_ID}/${DISPATCH_REGION}`)
@@ -4859,9 +4869,194 @@ describe("admin resume routes", function() {
       .filter((proposal) => proposal.id.startsWith(baseId))
       .map((proposal) => proposal.id);
     expect(seeded).to.deep.equal([
+      `${baseId}-pending-review`,
       `${baseId}-failed`,
       `${baseId}-generating`,
     ]);
+  });
+
+  describe("admin rerunPlanning", function() {
+    beforeEach(function() {
+      organizeExecutionTestHooks.setCreateOrUpdateProposalSheetForTest(async () => ({
+        fileId: "sheet-test-id",
+        webViewLink: "https://docs.google.com/spreadsheets/d/sheet-test-id",
+      }));
+    });
+
+    afterEach(function() {
+      organizeExecutionTestHooks.setCreateOrUpdateProposalSheetForTest(null);
+      setOpenAIClientForTest(null);
+      clearMockData();
+    });
+
+    it("DT00ue dispatches approve task and rewinds phase when proposal is ready for review", async function() {
+      const proposalId = `admin-rerun-${Date.now()}`;
+      const uid = `admin-rerun-uid-${Date.now()}`;
+      const senderEmail = "admin-rerun@example.com";
+      const storagePath = `organize-proposals/${proposalId}.json`;
+      await db.collection("DriveUsers").doc(uid).set({
+        email: senderEmail,
+        access_token: "test-access-token",
+        refresh_token: "test-refresh-token",
+      });
+      await db.collection("EmailAddress").doc(senderEmail).set({
+        uid,
+        email: senderEmail,
+        default: true,
+      });
+      await db.collection("OrganizeProposals").doc(proposalId).set({
+        uid,
+        senderEmail,
+        emailId: "original-organize-email-id",
+        status: "pending",
+        phase: "plan_review",
+        createdAt: "2026-04-20T00:00:00.000Z",
+        expiresAt: "2099-04-20T00:00:00.000Z",
+        storagePath,
+        ignoredFolders: ["Inbox"],
+        phaseData: {
+          directoryLayout: {
+            approvedStructure: [{
+              folder_path: "01-Documents",
+              description: "Documents",
+            }],
+          },
+          filenameConvention: {
+            convention: "YYYY.MM.DD - Description.ext",
+          },
+          execution: {
+            chunkSize: 10,
+            totalChunks: 3,
+            completedChunks: 3,
+          },
+          planReview: {
+            totalFiles: 1,
+            csvStoragePath: `organize-proposals/proposal-${proposalId}.csv`,
+            planStoragePath: `organize-proposals/proposal-${proposalId}.json`,
+            fileActionsVersion: 7,
+          },
+        },
+      });
+      await getStorage().bucket().file(storagePath).save(JSON.stringify({
+        fileEntries: [{
+          id: "file-1",
+          name: "invoice.pdf",
+          mimeType: "application/pdf",
+          parentId: "root",
+          parentPath: "Inbox",
+          createdTime: "2026-04-10T00:00:00.000Z",
+          size: 100,
+          webViewLink: "",
+          isFolder: false,
+        }],
+        senderEmail,
+        phaseData: {
+          directoryLayout: {
+            approvedStructure: [{
+              folder_path: "01-Documents",
+              description: "Documents",
+            }],
+          },
+          filenameConvention: {
+            convention: "YYYY.MM.DD - Description.ext",
+          },
+        },
+      }), {contentType: "application/json"});
+
+      const res = await chaiWithHttp
+        .request(`${DISPATCH_URL}/${APP_ID}/${DISPATCH_REGION}`)
+        .post("/v2driveAdminOrganize")
+        .set("Content-Type", "application/json")
+        .set("x-admin-key", "test-admin-key")
+        .send({action: "rerunPlanning", proposalId});
+
+      expect(res).to.have.status(200);
+      expect(res.body).to.include({proposalId, action: "rerunPlanning"});
+      expect(res.body.emailId).to.match(/^admin-organize-rerun-\d+$/);
+
+      const proposal = await getOrganizeProposal(proposalId) as unknown as OrganizeProposalDoc;
+      const savedPlan = await loadSavedPlan(proposalId);
+
+      expect(proposal.status).to.equal("pending");
+      expect(proposal.phase).to.equal("plan_review");
+      expect(proposal.emailId).to.match(/^admin-organize-rerun-\d+$/);
+      expect(proposal.phaseData?.execution?.completedChunks).to.equal(1);
+      expect(proposal.phaseData?.execution?.totalChunks).to.equal(1);
+      expect(proposal.phaseData?.planReview?.fileActionsVersion).to.equal(1);
+      expect(savedPlan.file_actions).to.deep.equal([{
+        file_id: "file-1",
+        current_name: "invoice.pdf",
+        current_path: "Inbox",
+        new_name: "invoice.pdf",
+        new_folder: "Inbox",
+        action: "keep",
+        reason: "Preserved by user: \"Inbox\" left as-is",
+      }]);
+    });
+
+    it("DT00uf returns 409 when proposal is not at plan_review", async function() {
+      const proposalId = `admin-rerun-not-ready-${Date.now()}`;
+      const storagePath = `organize-proposals/${proposalId}.json`;
+      await db.collection("OrganizeProposals").doc(proposalId).set({
+        uid: "admin-rerun-not-ready-uid",
+        senderEmail: "not-ready@example.com",
+        emailId: "not-ready-email-id",
+        status: "pending",
+        phase: "cost_estimate",
+        createdAt: "2026-04-20T00:00:00.000Z",
+        expiresAt: "2099-04-20T00:00:00.000Z",
+        storagePath,
+      });
+      await getStorage().bucket().file(storagePath).save(JSON.stringify({
+        phaseData: {},
+      }), {contentType: "application/json"});
+
+      const before = await db.collection("OrganizeProposals").doc(proposalId).get();
+
+      const res = await chaiWithHttp
+        .request(`${DISPATCH_URL}/${APP_ID}/${DISPATCH_REGION}`)
+        .post("/v2driveAdminOrganize")
+        .set("Content-Type", "application/json")
+        .set("x-admin-key", "test-admin-key")
+        .send({action: "rerunPlanning", proposalId});
+
+      expect(res).to.have.status(409);
+      expect(res.body).to.deep.equal({
+        error: "Proposal is not ready for review",
+        status: "pending",
+        phase: "cost_estimate",
+      });
+
+      const after = await db.collection("OrganizeProposals").doc(proposalId).get();
+      expect(after.data()).to.deep.equal(before.data());
+    });
+
+    it("DT00ug returns 404 when proposal does not exist", async function() {
+      const proposalId = `admin-rerun-missing-${Date.now()}`;
+
+      const res = await chaiWithHttp
+        .request(`${DISPATCH_URL}/${APP_ID}/${DISPATCH_REGION}`)
+        .post("/v2driveAdminOrganize")
+        .set("Content-Type", "application/json")
+        .set("x-admin-key", "test-admin-key")
+        .send({action: "rerunPlanning", proposalId});
+
+      expect(res).to.have.status(404);
+      expect(res.body).to.deep.equal({error: "Proposal not found"});
+      expect((await db.collection("OrganizeProposals").doc(proposalId).get()).exists).to.equal(false);
+    });
+
+    it("DT00uh returns 400 when proposalId is missing", async function() {
+      const res = await chaiWithHttp
+        .request(`${DISPATCH_URL}/${APP_ID}/${DISPATCH_REGION}`)
+        .post("/v2driveAdminOrganize")
+        .set("Content-Type", "application/json")
+        .set("x-admin-key", "test-admin-key")
+        .send({action: "rerunPlanning"});
+
+      expect(res).to.have.status(400);
+      expect(res.body).to.deep.equal({error: "proposalId is required"});
+    });
   });
 });
 

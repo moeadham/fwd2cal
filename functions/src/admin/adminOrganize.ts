@@ -1,11 +1,15 @@
 import type {Request, Response} from "express";
 import {AGENT_EMAIL_ADDRESS, DRIVE_ADMIN_API_KEY} from "../agents/drive/config";
+import {dispatchOrganizeActionTask} from "../agents/drive/handlers/dispatchHandler";
 import {findGeneratingProposal, hasFullDriveScope, scanAndPropose} from "../agents/drive/organizeHandler";
+import {OrganizeProposalDoc} from "../agents/drive/types";
 import {
   DRIVE_USERS_COLLECTION,
+  getOrganizeProposal,
   getResumableOrganizeProposals,
   getUserFromEmail,
   getUserFromUID,
+  updateOrganizeProposalStatus,
 } from "../util/firestoreHandler";
 import {TransformedEmail} from "../util/types";
 
@@ -33,6 +37,57 @@ export async function handleAdminOrganizeRequest(req: Request, res: Response): P
   if (body?.action === "list") {
     const proposals = await getResumableOrganizeProposals();
     res.status(200).json(proposals);
+    return;
+  }
+
+  if (body?.action === "rerunPlanning") {
+    const proposalId = body.proposalId?.trim();
+    if (!proposalId) {
+      res.status(400).json({error: "proposalId is required"});
+      return;
+    }
+
+    const rawProposal = await getOrganizeProposal(proposalId);
+    if (!rawProposal) {
+      res.status(404).json({error: "Proposal not found"});
+      return;
+    }
+
+    const proposal = rawProposal as unknown as OrganizeProposalDoc;
+    if (proposal.status !== "pending" || proposal.phase !== "plan_review") {
+      res.status(409).json({
+        error: "Proposal is not ready for review",
+        status: proposal.status,
+        phase: proposal.phase,
+      });
+      return;
+    }
+
+    const expiresAt = new Date(proposal.expiresAt);
+    if (!(expiresAt.getTime() > Date.now())) {
+      res.status(410).json({error: "Proposal has expired"});
+      return;
+    }
+
+    const previousEmailId = proposal.emailId;
+    const emailId = `admin-organize-rerun-${Date.now()}`;
+    await updateOrganizeProposalStatus(proposalId, "pending", {
+      phase: "cost_estimate",
+      emailId,
+    });
+
+    try {
+      await dispatchOrganizeActionTask({proposalId, action: "approve", emailId});
+    } catch (_error) {
+      await updateOrganizeProposalStatus(proposalId, "pending", {
+        phase: "plan_review",
+        emailId: previousEmailId,
+      });
+      res.status(500).json({error: "Dispatch failed"});
+      return;
+    }
+
+    res.status(200).json({proposalId, action: "rerunPlanning", emailId});
     return;
   }
 
