@@ -34,13 +34,16 @@ import {
   mergeRevisedProposal,
   normalizeFolderConventionSeparators,
   normalizeFolderPrefixes,
-  proposeFileAction,
+  proposeFileName,
   proposeFilePlacement,
+  proposePlacement,
   renumberFoldersContiguously,
   renderFolderTreePlainText,
   scopePlanRevision,
 } from "../src/agents/drive/llm";
 import * as driveLlm from "../src/agents/drive/llm";
+import {prompt as proposeFileNamePrompt} from "../src/agents/drive/prompts/proposeFileName/v1";
+import {prompt as proposePlacementPrompt} from "../src/agents/drive/prompts/proposePlacement/v1";
 import {
   DriveFileEntry,
   DriveOrganizeProposal,
@@ -3421,13 +3424,13 @@ describe("organize sequential execution proposal builder", function() {
     organizeExecutionTestHooks.setCreateOrUpdateProposalSheetForTest(null);
   });
 
-  it("DT00ubeF sends multimodal content from proposeFileAction only when imageUrls are present", async function() {
-    const capturedMessages: unknown[] = [];
+  it("DT00ubeF sends multimodal content from proposeFileName only when imageUrls are present", async function() {
+    const capturedRequests: Array<{messages: unknown[]}> = [];
     setOpenAIClientForTest({
       chat: {
         completions: {
           create: async (params: {messages: unknown[]}) => {
-            capturedMessages.push(...params.messages);
+            capturedRequests.push(params);
             return {
               choices: [{
                 message: {
@@ -3436,11 +3439,7 @@ describe("organize sequential execution proposal builder", function() {
                     current_name: "receipt.png",
                     current_path: "My Drive",
                     new_name: "2026.04.10 - Receipt.png",
-                    target_directory: "01-Docs",
-                    action: "move_and_rename",
-                    needs_new_directory: false,
-                    new_directory: null,
-                    reason: "Use the approved folder and filename.",
+                    reason: "Use the approved filename.",
                   }),
                 },
                 finish_reason: "stop",
@@ -3452,9 +3451,7 @@ describe("organize sequential execution proposal builder", function() {
       },
     } as unknown as OpenAI);
 
-    await proposeFileAction(
-        [{folder_path: "01-Docs", description: "Documents"}],
-        "YYYY.MM.DD - Description.ext",
+    await proposeFileName(
         {
           id: "file-1",
           name: "receipt.png",
@@ -3466,19 +3463,22 @@ describe("organize sequential execution proposal builder", function() {
           webViewLink: "",
           isFolder: false,
         },
+        "YYYY.MM.DD - Description.ext",
         "Receipt from a cafe",
         "uid-test",
         ["data:image/png;base64,QUJD", "data:image/png;base64,REVG"],
     );
 
-    expect(capturedMessages).to.have.length(2);
-    expect(capturedMessages[1]).to.deep.equal({
+    expect(capturedRequests[0]?.messages[0]).to.deep.equal({
+      role: "system",
+      content: proposeFileNamePrompt.prompt,
+    });
+    expect(capturedRequests[0]?.messages[1]).to.deep.equal({
       role: "user",
       content: [
         {
           type: "text",
           text:
-            "## Approved Directory Tree\n- 01-Docs: Documents\n\n" +
             "## Filename Convention\nYYYY.MM.DD - Description.ext\n\n" +
             "## File\n" +
             "ID: file-1\n" +
@@ -3494,10 +3494,7 @@ describe("organize sequential execution proposal builder", function() {
       ],
     });
 
-    capturedMessages.length = 0;
-    await proposeFileAction(
-        [{folder_path: "01-Docs", description: "Documents"}],
-        "YYYY.MM.DD - Description.ext",
+    await proposeFileName(
         {
           id: "file-2",
           name: "receipt.pdf",
@@ -3509,15 +3506,14 @@ describe("organize sequential execution proposal builder", function() {
           webViewLink: "",
           isFolder: false,
         },
+        "YYYY.MM.DD - Description.ext",
         "",
         "uid-test",
     );
 
-    expect(capturedMessages).to.have.length(2);
-    expect(capturedMessages[1]).to.deep.equal({
+    expect(capturedRequests[1]?.messages[1]).to.deep.equal({
       role: "user",
       content:
-        "## Approved Directory Tree\n- 01-Docs: Documents\n\n" +
         "## Filename Convention\nYYYY.MM.DD - Description.ext\n\n" +
         "## File\n" +
         "ID: file-2\n" +
@@ -3530,26 +3526,114 @@ describe("organize sequential execution proposal builder", function() {
     });
   });
 
-  it("DT00ubf carries a new directory from file N into file N+1 prompt context", async function() {
+  it("DT00ubf keeps placement text-only in proposePlacement", async function() {
+    const capturedRequests: Array<{messages: unknown[]}> = [];
+    setOpenAIClientForTest({
+      chat: {
+        completions: {
+          create: async (params: {messages: unknown[]}) => {
+            capturedRequests.push(params);
+            return {
+              choices: [{
+                message: {
+                  content: JSON.stringify({
+                    file_id: "file-1",
+                    current_name: "receipt.png",
+                    current_path: "My Drive",
+                    target_directory: "01-Docs",
+                    action: "move",
+                    needs_new_directory: false,
+                    new_directory: null,
+                    reason: "Place it in documents.",
+                  }),
+                },
+                finish_reason: "stop",
+              }],
+              usage: {total_tokens: 1},
+            };
+          },
+        },
+      },
+    } as unknown as OpenAI);
+
+    await proposePlacement(
+        {
+          id: "file-1",
+          name: "receipt.png",
+          mimeType: "image/png",
+          parentId: "root",
+          parentPath: "My Drive",
+          createdTime: "2026-04-10T00:00:00.000Z",
+          size: 100,
+          webViewLink: "",
+          isFolder: false,
+        },
+        [{folder_path: "01-Docs", description: "Documents"}],
+        "Receipt from a cafe",
+        "uid-test",
+    );
+
+    expect(capturedRequests[0]?.messages[0]).to.deep.equal({
+      role: "system",
+      content: proposePlacementPrompt.prompt,
+    });
+    expect(capturedRequests[0]?.messages[1]).to.deep.equal({
+      role: "user",
+      content:
+        "## Approved Directory Tree\n- 01-Docs: Documents\n\n" +
+        "## File\n" +
+        "ID: file-1\n" +
+        "Name: receipt.png\n" +
+        "Current Path: My Drive\n" +
+        "MIME Type: image/png\n" +
+        "Created: 2026-04-10T00:00:00.000Z\n" +
+        "Size: 100 bytes\n\n" +
+        "## Content Summary\nReceipt from a cafe\n",
+    });
+  });
+
+  it("DT00ubp synthesizes keep/rename/move/move_and_rename from split naming and placement calls", async function() {
     const files: DriveFileEntry[] = [
       {
-        id: "file-1",
-        name: "ticket.pdf",
+        id: "keep",
+        name: "2026.04.01 - Receipt.pdf",
         mimeType: "application/pdf",
         parentId: "root",
-        parentPath: "My Drive",
+        parentPath: "01-Docs",
         createdTime: "2026-04-01T00:00:00.000Z",
         size: 100,
         webViewLink: "",
         isFolder: false,
       },
       {
-        id: "file-2",
+        id: "rename",
+        name: "receipt.pdf",
+        mimeType: "application/pdf",
+        parentId: "root",
+        parentPath: "01-Docs",
+        createdTime: "2026-04-02T00:00:00.000Z",
+        size: 100,
+        webViewLink: "",
+        isFolder: false,
+      },
+      {
+        id: "move",
         name: "boarding-pass.pdf",
         mimeType: "application/pdf",
         parentId: "root",
-        parentPath: "My Drive",
-        createdTime: "2026-04-02T00:00:00.000Z",
+        parentPath: "Inbox",
+        createdTime: "2026-04-03T00:00:00.000Z",
+        size: 100,
+        webViewLink: "",
+        isFolder: false,
+      },
+      {
+        id: "move-and-rename",
+        name: "ticket.pdf",
+        mimeType: "application/pdf",
+        parentId: "root",
+        parentPath: "Inbox",
+        createdTime: "2026-04-04T00:00:00.000Z",
         size: 100,
         webViewLink: "",
         isFolder: false,
@@ -3559,48 +3643,62 @@ describe("organize sequential execution proposal builder", function() {
 
     const proposal = await buildSequentialExecutionProposal(
         files,
-        [{folder_path: "01-Documents", description: "Documents"}],
+        [{folder_path: "01-Docs", description: "Documents"}],
         "YYYY.MM.DD - Description.ext",
         "uid-phase3",
         async () => ({contentSummary: "", imageUrls: []}),
-        async (directoryTree, _convention, file) => {
+        async (file) => ({
+          file_id: file.id,
+          current_name: file.name,
+          current_path: file.parentPath,
+          new_name:
+            file.id === "rename" ? "2026.04.02 - Receipt.pdf" :
+            file.id === "move-and-rename" ? "2026.04.04 - Ticket.pdf" :
+            file.name,
+          reason: "Name based on content.",
+        }),
+        async (file, directoryTree) => {
           treeSnapshots.push(directoryTree.map((folder) => folder.folder_path));
-          if (file.id === "file-1") {
+          if (file.id === "keep" || file.id === "rename") {
             return {
               file_id: file.id,
               current_name: file.name,
               current_path: file.parentPath,
-              new_name: "2026.04.01 - Ticket.pdf",
-              target_directory: "02-Travel",
-              action: "move_and_rename",
-              needs_new_directory: true,
-              new_directory: {
-                folder_path: "02-Travel",
-                description: "Travel documents",
-              },
-              reason: "Travel ticket",
+              target_directory: "01-Docs",
+              action: "keep" as const,
+              needs_new_directory: false,
+              new_directory: null,
+              reason: "Already under the correct approved directory.",
             };
           }
           return {
             file_id: file.id,
             current_name: file.name,
             current_path: file.parentPath,
-            new_name: "2026.04.02 - Boarding Pass.pdf",
             target_directory: "02-Travel",
-            action: "move_and_rename",
-            needs_new_directory: false,
-            new_directory: null,
-            reason: "Related travel document",
+            action: "move" as const,
+            needs_new_directory: true,
+            new_directory: {
+              folder_path: "02-Travel",
+              description: "Travel documents",
+            },
+            reason: "Belongs under travel.",
           };
         },
     );
 
-    expect(treeSnapshots[0]).to.deep.equal(["01-Documents"]);
-    expect(treeSnapshots[1]).to.deep.equal(["01-Documents", "02-Travel"]);
-    expect(proposal.proposed_folders.map((folder) => folder.folder_path))
-        .to.deep.equal(["01-Documents", "02-Travel"]);
-    expect(proposal.file_actions.map((action) => action.new_folder))
-        .to.deep.equal(["02-Travel", "02-Travel"]);
+    expect(treeSnapshots[0]).to.deep.equal(["01-Docs"]);
+    expect(treeSnapshots[3]).to.deep.equal(["01-Docs", "02-Travel"]);
+    expect(proposal.file_actions.map((action) => action.action)).to.deep.equal([
+      "keep",
+      "rename",
+      "move",
+      "move_and_rename",
+    ]);
+    expect(proposal.proposed_folders.map((folder) => folder.folder_path)).to.deep.equal([
+      "01-Docs",
+      "02-Travel",
+    ]);
   });
 
   it("DT00ubg preserves input order while respecting the concurrency limit", async function() {
@@ -4223,7 +4321,7 @@ describe("organize sequential execution proposal builder", function() {
                     current_path: "My Drive",
                     new_name: "2026.04.10 - Receipt.pdf",
                     target_directory: "01-Docs",
-                    action: "move_and_rename",
+                    action: "move",
                     needs_new_directory: false,
                     new_directory: null,
                     reason: "Organize receipt",
@@ -4251,7 +4349,7 @@ describe("organize sequential execution proposal builder", function() {
     const [nextChunkExists] = await bucket.file(`organize-proposals/${proposalId}-planning-chunk-1.json`).exists();
     const [planExists] = await bucket.file(`organize-proposals/proposal-${proposalId}.json`).exists();
 
-    expect(llmCalls).to.equal(1);
+    expect(llmCalls).to.equal(2);
     expect(proposal.status).to.equal("cancelled");
     expect((proposal.phaseData as {execution?: {completedChunks?: number}} | undefined)?.execution?.completedChunks)
         .to.equal(0);
@@ -4259,138 +4357,6 @@ describe("organize sequential execution proposal builder", function() {
     expect(treeExists).to.equal(true);
     expect(nextChunkExists).to.equal(false);
     expect(planExists).to.equal(false);
-  });
-
-  it("DT00ubp forwards planning imageUrls into proposeFileAction", async function() {
-    const uid = "planning-images-uid";
-    const sender = "planning-images@example.com";
-    const proposalId = `planning-images-${Date.now()}`;
-    const storagePath = `organize-proposals/${proposalId}.json`;
-    const phaseData = {
-      directoryLayout: {
-        approvedStructure: [{
-          folder_path: "01-Docs",
-          description: "Documents",
-        }],
-      },
-      filenameConvention: {convention: "YYYY.MM.DD - Description.ext"},
-      execution: {chunkSize: 1, totalChunks: 1, completedChunks: 0},
-    };
-    await db.collection("DriveUsers").doc(uid).set({
-      access_token: "test-access-token",
-      refresh_token: "test-refresh-token",
-    });
-    await db.collection("OrganizeProposals").doc(proposalId).set({
-      uid,
-      senderEmail: sender,
-      emailId: "planning-images-email-id",
-      status: "planning",
-      phase: "plan_review",
-      createdAt: "2026-04-16T00:00:00.000Z",
-      expiresAt: "2099-04-16T00:00:00.000Z",
-      storagePath,
-      phaseData,
-      cost: {},
-    });
-
-    const bucket = getStorage().bucket();
-    await bucket.file(storagePath).save(JSON.stringify({
-      fileEntries: [{
-        id: "image-file",
-        name: "receipt.png",
-        mimeType: "image/png",
-        parentId: "root",
-        parentPath: "My Drive",
-        createdTime: "2026-04-10T00:00:00.000Z",
-        size: 12,
-        webViewLink: "",
-        isFolder: false,
-      }],
-      senderEmail: sender,
-      phaseData,
-    }), {contentType: "application/json"});
-    await bucket.file(`organize-proposals/${proposalId}-execution-tree--1.json`).save(JSON.stringify([{
-      folder_path: "01-Docs",
-      description: "Documents",
-    }]), {contentType: "application/json"});
-
-    const capturedMessages: unknown[] = [];
-    setOpenAIClientForTest({
-      chat: {
-        completions: {
-          create: async (params: {messages: unknown[]}) => {
-            capturedMessages.push(...params.messages);
-            return {
-              choices: [{
-                message: {
-                  content: JSON.stringify({
-                    file_id: "image-file",
-                    current_name: "receipt.png",
-                    current_path: "My Drive",
-                    new_name: "2026.04.10 - Receipt.png",
-                    target_directory: "01-Docs",
-                    action: "move_and_rename",
-                    needs_new_directory: false,
-                    new_directory: null,
-                    reason: "Use the visible receipt content.",
-                  }),
-                },
-                finish_reason: "stop",
-              }],
-              usage: {total_tokens: 1},
-            };
-          },
-        },
-      },
-    } as unknown as OpenAI);
-
-    const originalDrive = google.drive;
-    (google as unknown as {drive: typeof google.drive}).drive = ((() => ({
-      files: {
-        get: async (params: {fileId?: string; alt?: string}) => {
-          if (params.alt === "media") {
-            return {data: Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10, 65, 66, 67, 68]).buffer};
-          }
-          if (params.fileId === "root") {
-            return {data: {id: "root"}};
-          }
-          return {data: {id: "image-file", parents: ["root"], name: "receipt.png"}};
-        },
-      },
-    })) as unknown) as typeof google.drive;
-
-    try {
-      await processPlanningChunk(makeTestEmail("plan"), {
-        proposalId,
-        emailId: "planning-images-email-id",
-        uid,
-        chunkIndex: 0,
-      });
-    } finally {
-      (google as unknown as {drive: typeof google.drive}).drive = originalDrive;
-    }
-
-    expect(capturedMessages).to.have.length(2);
-    expect(capturedMessages[1]).to.deep.equal({
-      role: "user",
-      content: [
-        {
-          type: "text",
-          text:
-            "## Approved Directory Tree\n- 01-Docs: Documents\n\n" +
-            "## Filename Convention\nYYYY.MM.DD - Description.ext\n\n" +
-            "## File\n" +
-            "ID: image-file\n" +
-            "Name: receipt.png\n" +
-            "Current Path: My Drive\n" +
-            "MIME Type: image/png\n" +
-            "Created: 2026-04-10T00:00:00.000Z\n" +
-            "Size: 12 bytes\n\n" +
-            "## Content Summary\n(none)\n",
-        },
-        {type: "image_url", image_url: {url: "data:image/png;base64,iVBORw0KGgpBQkNE"}},
-      ],
-    });
   });
 
   async function runProcessExecutionOverrideCase(options: {
@@ -4439,17 +4405,25 @@ describe("organize sequential execution proposal builder", function() {
     await bucket.file(`organize-proposals/${proposalId}-execution-tree--1.json`)
         .save(JSON.stringify(approvedStructure), {contentType: "application/json"});
 
-    setFakeStructuredCompletions([{
-      file_id: options.file.id,
-      current_name: options.file.name,
-      current_path: options.file.parentPath,
-      new_name: options.newName,
-      target_directory: options.approvedFolder,
-      action: options.llmAction,
-      needs_new_directory: false,
-      new_directory: null,
-      reason: "LLM incorrectly treated a renamed folder as equivalent",
-    }]);
+    setFakeStructuredCompletions([
+      {
+        file_id: options.file.id,
+        current_name: options.file.name,
+        current_path: options.file.parentPath,
+        new_name: options.newName,
+        reason: "LLM preserved the filename.",
+      },
+      {
+        file_id: options.file.id,
+        current_name: options.file.name,
+        current_path: options.file.parentPath,
+        target_directory: options.approvedFolder,
+        action: options.llmAction === "rename" ? "move" : "keep",
+        needs_new_directory: false,
+        new_directory: null,
+        reason: "LLM incorrectly treated a renamed folder as equivalent",
+      },
+    ]);
 
     const updateCalls: unknown[] = [];
     const targetSegments = options.approvedFolder.split("/");

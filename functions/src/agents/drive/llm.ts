@@ -42,9 +42,13 @@ import {
   ClassifyFolderConventionChangeResult,
 } from "./prompts/classifyFolderConventionChange/v1";
 import {
-  ProposeFileActionSchema,
-  ProposeFileActionResult,
-} from "./prompts/proposeFileAction/v1";
+  ProposeFileNameSchema,
+  ProposeFileNameResult,
+} from "./prompts/proposeFileName/v1";
+import {
+  ProposePlacementSchema,
+  ProposePlacementResult,
+} from "./prompts/proposePlacement/v1";
 import {
   SetPreferencesSchema,
   SetPreferencesResult,
@@ -782,28 +786,28 @@ async function classifyFolderConventionChange(
   ) as ClassifyFolderConventionChangeResult;
 }
 
-/** Propose the action for one file using the evolving directory tree. */
-async function proposeFileAction(
-    directoryTree: DriveOrganizeProposal["proposed_folders"],
-    convention: string,
-    fileInfo: DriveFileEntry,
-    contentSummary: string,
-    uid: string | null = null,
-    imageUrls: string[] = [],
-): Promise<ProposeFileActionResult> {
-  const {prompts, versions} = getPrompts();
-  const tree = directoryTree
-      .map((folder) => `- ${folder.folder_path}: ${folder.description}`)
-      .join("\n");
-  const userText = `## Approved Directory Tree\n${tree || "(none)"}\n\n` +
-    `## Filename Convention\n${convention}\n\n` +
-    `## File\n` +
+function renderFileMetadataBlock(fileInfo: DriveFileEntry): string {
+  return `## File\n` +
     `ID: ${fileInfo.id}\n` +
     `Name: ${fileInfo.name}\n` +
     `Current Path: ${fileInfo.parentPath}\n` +
     `MIME Type: ${fileInfo.mimeType}\n` +
     `Created: ${fileInfo.createdTime}\n` +
-    `Size: ${fileInfo.size} bytes\n\n` +
+    `Size: ${fileInfo.size} bytes\n`;
+}
+
+/** Propose the filename for one file using content and optional images. */
+async function proposeFileName(
+    fileInfo: DriveFileEntry,
+    convention: string,
+    contentSummary: string,
+    uid: string | null = null,
+    imageUrls: string[] = [],
+): Promise<ProposeFileNameResult> {
+  const {prompts, versions} = getPrompts();
+  const userText = `## Filename Convention\n${convention}\n\n` +
+    renderFileMetadataBlock(fileInfo) +
+    `\n` +
     `## Content Summary\n${contentSummary || "(none)"}\n`;
   let userContent: string | Array<TextContent | ImageURLContent>;
   if (imageUrls.length > 0) {
@@ -818,17 +822,46 @@ async function proposeFileAction(
     userContent = userText;
   }
   const messages: ChatMessage[] = [
-    {role: "system", content: prompts.proposeFileAction.prompt},
+    {role: "system", content: prompts.proposeFileName.prompt},
     {role: "user", content: userContent},
   ];
-  return await defaultCompletion<ProposeFileActionResult>(
+  return await defaultCompletion<ProposeFileNameResult>(
       messages,
-      prompts.proposeFileAction.model,
-      prompts.proposeFileAction.temperature ?? DEFAULT_TEMP,
-      ProposeFileActionSchema,
+      prompts.proposeFileName.model,
+      prompts.proposeFileName.temperature ?? DEFAULT_TEMP,
+      ProposeFileNameSchema,
       uid,
-      {promptVersion: versions.PROMPT_PROPOSE_FILE_ACTION_VERSION},
-  ) as ProposeFileActionResult;
+      {promptVersion: versions.PROMPT_PROPOSE_FILE_NAME_VERSION},
+  ) as ProposeFileNameResult;
+}
+
+/** Propose the placement for one file using the evolving directory tree. */
+async function proposePlacement(
+    fileInfo: DriveFileEntry,
+    directoryTree: DriveOrganizeProposal["proposed_folders"],
+    contentSummary: string,
+    uid: string | null = null,
+): Promise<ProposePlacementResult> {
+  const {prompts, versions} = getPrompts();
+  const tree = directoryTree
+      .map((folder) => `- ${folder.folder_path}: ${folder.description}`)
+      .join("\n");
+  const userText = `## Approved Directory Tree\n${tree || "(none)"}\n\n` +
+    renderFileMetadataBlock(fileInfo) +
+    `\n` +
+    `## Content Summary\n${contentSummary || "(none)"}\n`;
+  const messages: ChatMessage[] = [
+    {role: "system", content: prompts.proposePlacement.prompt},
+    {role: "user", content: userText},
+  ];
+  return await defaultCompletion<ProposePlacementResult>(
+      messages,
+      prompts.proposePlacement.model,
+      prompts.proposePlacement.temperature ?? DEFAULT_TEMP,
+      ProposePlacementSchema,
+      uid,
+      {promptVersion: versions.PROMPT_PROPOSE_PLACEMENT_VERSION},
+  ) as ProposePlacementResult;
 }
 
 /** Renders a proposal folder tree as plain text for prompt context. */
@@ -1893,7 +1926,8 @@ export {
   finalizeDirectoryMap,
   classifyConventionChange,
   classifyFolderConventionChange,
-  proposeFileAction,
+  proposeFileName,
+  proposePlacement,
   generateFilenameExamples,
   revisePlanFileActions,
   scopePlanRevision,

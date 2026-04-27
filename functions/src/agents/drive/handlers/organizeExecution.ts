@@ -30,8 +30,9 @@ import {
 } from "../types";
 import {buildOrganizeEmbeddedData, renderFolderTree} from "../templates/folderTree";
 import {extractContentSummary, extractDocumentImageUrls} from "../fileProcessor";
-import {DEFAULT_FOLDER_CONVENTION, proposeFileAction} from "../llm";
-import {ProposeFileActionResult} from "../prompts/proposeFileAction/v1";
+import {DEFAULT_FOLDER_CONVENTION, proposeFileName, proposePlacement as defaultProposePlacement} from "../llm";
+import {ProposeFileNameResult} from "../prompts/proposeFileName/v1";
+import {ProposePlacementResult} from "../prompts/proposePlacement/v1";
 import {applyTemplate, toTitleCase} from "../driveUtils";
 import {
   emptyResult,
@@ -67,19 +68,67 @@ type PlanningChunkResult = {
 };
 
 type FileSummaryProvider = (file: DriveFileEntry) => Promise<{contentSummary: string; imageUrls: string[]}>;
-type FileActionProposer = (
-  directoryTree: DriveOrganizeProposal["proposed_folders"],
-  convention: string,
+type FileNameProposer = (
   file: DriveFileEntry,
+  convention: string,
   contentSummary: string,
   uid: string,
   imageUrls?: string[],
-) => Promise<ProposeFileActionResult>;
+) => Promise<ProposeFileNameResult>;
+type FilePlacementProposer = (
+  file: DriveFileEntry,
+  directoryTree: DriveOrganizeProposal["proposed_folders"],
+  contentSummary: string,
+  uid: string,
+) => Promise<ProposePlacementResult>;
 type OrganizeFileActionType = DriveOrganizeProposal["file_actions"][number]["action"];
+type DerivedFileActionProposal = {
+  file_id: string;
+  current_name: string;
+  current_path: string;
+  new_name: string;
+  target_directory: string;
+  action: OrganizeFileActionType;
+  needs_new_directory: boolean;
+  new_directory: ProposePlacementResult["new_directory"];
+  reason: string;
+};
 type PlanningWorkerResult =
   | {kind: "ignored"; file: DriveFileEntry; ignoredRoot: string}
-  | {kind: "proposed"; file: DriveFileEntry; proposed: ProposeFileActionResult}
+  | {kind: "proposed"; file: DriveFileEntry; proposed: DerivedFileActionProposal}
   | {kind: "error"; file: DriveFileEntry; error: unknown};
+
+function combineActionReasons(nameReason: string, placementReason: string): string {
+  if (nameReason && placementReason && nameReason !== placementReason) {
+    return `${placementReason} Filename: ${nameReason}`;
+  }
+  return placementReason || nameReason || "";
+}
+
+function synthesizeFileActionProposal(
+    file: DriveFileEntry,
+    nameResult: ProposeFileNameResult,
+    placementResult: ProposePlacementResult,
+): DerivedFileActionProposal {
+  const currentName = nameResult.current_name || placementResult.current_name || file.name;
+  const currentPath = placementResult.current_path || nameResult.current_path || file.parentPath || "My Drive";
+  const newName = nameResult.new_name || file.name;
+  const action: OrganizeFileActionType = placementResult.action === "keep" ?
+    (newName === currentName ? "keep" : "rename") :
+    (newName === currentName ? "move" : "move_and_rename");
+
+  return {
+    file_id: nameResult.file_id || placementResult.file_id || file.id,
+    current_name: currentName,
+    current_path: currentPath,
+    new_name: newName,
+    target_directory: placementResult.target_directory || file.parentPath || "My Drive",
+    action,
+    needs_new_directory: placementResult.needs_new_directory,
+    new_directory: placementResult.new_directory,
+    reason: combineActionReasons(nameResult.reason, placementResult.reason),
+  };
+}
 
 const getExecutionTreePath = (proposalId: string, chunkIndex: number) =>
   `organize-proposals/${proposalId}-execution-tree-${chunkIndex}.json`;
@@ -128,7 +177,7 @@ async function isOrganizeProposalCancelled(proposalId: string): Promise<boolean>
 
 /** Corrects contradictory LLM action labels using the actual source and target paths. */
 function deriveEffectiveAction(
-    proposed: ProposeFileActionResult,
+    proposed: DerivedFileActionProposal,
     file: DriveFileEntry,
     knownDirectories: Set<string>,
 ): {
@@ -263,21 +312,25 @@ export async function buildSequentialExecutionProposal(
     convention: string,
     uid: string,
     summarizeFile: FileSummaryProvider,
-    proposeAction: FileActionProposer = proposeFileAction,
+    proposeName: FileNameProposer = proposeFileName,
+    proposePlacement: FilePlacementProposer = defaultProposePlacement,
 ): Promise<DriveOrganizeProposal> {
   const nonFolderFiles = fileEntries.filter((file) => !file.isFolder);
   const runningTree = approvedStructure.map((folder) => ({...folder}));
   const knownDirectories = new Set(runningTree.map((folder) => folder.folder_path));
   const fileActions: DriveOrganizeProposal["file_actions"] = [];
+  const proposePlacementFile = proposePlacement;
 
   for (const file of nonFolderFiles) {
     const {contentSummary, imageUrls} = await summarizeFile(file);
-    const action = await proposeAction(runningTree, convention, file, contentSummary, uid, imageUrls);
-    if (action.needs_new_directory && action.new_directory &&
-        !knownDirectories.has(action.new_directory.folder_path)) {
-      runningTree.push(action.new_directory);
-      knownDirectories.add(action.new_directory.folder_path);
+    const nameResult = await proposeName(file, convention, contentSummary, uid, imageUrls);
+    const placementResult = await proposePlacementFile(file, runningTree, contentSummary, uid);
+    if (placementResult.needs_new_directory && placementResult.new_directory &&
+        !knownDirectories.has(placementResult.new_directory.folder_path)) {
+      runningTree.push(placementResult.new_directory);
+      knownDirectories.add(placementResult.new_directory.folder_path);
     }
+    const action = synthesizeFileActionProposal(file, nameResult, placementResult);
     const effective = deriveEffectiveAction(action, file, knownDirectories);
     fileActions.push({
       file_id: action.file_id || file.id,
@@ -628,7 +681,9 @@ export async function processPlanningChunk(
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
         const {contentSummary, imageUrls} = await summarizeExecutionFile(oauth2Client, file);
-        const proposed = await proposeFileAction(runningTree, convention, file, contentSummary, uid, imageUrls);
+        const nameResult = await proposeFileName(file, convention, contentSummary, uid, imageUrls);
+        const placementResult = await defaultProposePlacement(file, runningTree, contentSummary, uid);
+        const proposed = synthesizeFileActionProposal(file, nameResult, placementResult);
         return {kind: "proposed", file, proposed} satisfies PlanningWorkerResult;
       } catch (error) {
         lastError = error;

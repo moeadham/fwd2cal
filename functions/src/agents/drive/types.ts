@@ -350,6 +350,8 @@ export interface DrivePromptConfig {
 
 export interface DrivePrompts {
   proposeFilePlacement: DrivePromptConfig;
+  proposeFileName: DrivePromptConfig;
+  proposePlacement: DrivePromptConfig;
   interpretMoveInstructions: DrivePromptConfig;
   reviseOrganization: DrivePromptConfig;
   setPreferences: DrivePromptConfig;
@@ -359,7 +361,6 @@ export interface DrivePrompts {
   finalizeDirectoryMap: DrivePromptConfig;
   classifyConventionChange: DrivePromptConfig;
   classifyFolderConventionChange: DrivePromptConfig;
-  proposeFileAction: DrivePromptConfig;
   generateFilenameExamples: DrivePromptConfig;
   revisePlanFileActions: DrivePromptConfig;
   scopePlanRevision: DrivePromptConfig;
