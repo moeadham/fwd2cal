@@ -120,6 +120,7 @@
             '<tr>' +
               '<th>Email</th>' +
               '<th>Status</th>' +
+              '<th>Phase</th>' +
               '<th>Progress</th>' +
               '<th>Error</th>' +
               '<th>Attempts</th>' +
@@ -146,6 +147,7 @@
           tableHtml += '<tr>' +
             '<td>' + (p.senderEmail || p.emailId || '') + '</td>' +
             '<td>' + (p.status || '') + '</td>' +
+            '<td>' + (p.phase || '') + '</td>' +
             '<td>' + progress + '</td>' +
             '<td>' + errText + '</td>' +
             '<td>' + (p.attemptCount || 0) + '</td>' +

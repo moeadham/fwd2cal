@@ -439,7 +439,7 @@ async function getResumableOrganizeProposals():
 Promise<Array<{id: string; [key: string]: unknown}>> {
   try {
     const proposalsRef = getFirestore().collection("OrganizeProposals");
-    const [failedSnapshot, generatingSnapshot, pendingSnapshot] = await Promise.all([
+    const [failedSnapshot, generatingSnapshot, planningSnapshot, pendingSnapshot] = await Promise.all([
       proposalsRef
           .where("status", "==", "failed")
           .orderBy("createdAt", "desc")
@@ -451,13 +451,19 @@ Promise<Array<{id: string; [key: string]: unknown}>> {
           .limit(50)
           .get(),
       proposalsRef
+          .where("status", "==", "planning")
+          .orderBy("createdAt", "desc")
+          .limit(50)
+          .get(),
+      proposalsRef
           .where("status", "==", "pending")
+          .orderBy("createdAt", "desc")
           .limit(100)
           .get(),
     ]);
 
     const proposals = new Map<string, {id: string; [key: string]: unknown}>();
-    for (const doc of [...failedSnapshot.docs, ...generatingSnapshot.docs]) {
+    for (const doc of [...failedSnapshot.docs, ...generatingSnapshot.docs, ...planningSnapshot.docs]) {
       proposals.set(doc.id, {id: doc.id, ...doc.data()});
     }
     for (const doc of pendingSnapshot.docs) {
