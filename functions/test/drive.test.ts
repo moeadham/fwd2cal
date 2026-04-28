@@ -5114,7 +5114,7 @@ describe("admin resume routes", function() {
       clearMockData();
     });
 
-    it("DT00ue dispatches approve task and rewinds phase when proposal is ready for review", async function() {
+    it("DT00ue performs fresh Drive scan and preserves user-revised folder structure", async function() {
       const proposalId = `admin-rerun-${Date.now()}`;
       const uid = `admin-rerun-uid-${Date.now()}`;
       const senderEmail = "admin-rerun@example.com";
@@ -5123,6 +5123,7 @@ describe("admin resume routes", function() {
         email: senderEmail,
         access_token: "test-access-token",
         refresh_token: "test-refresh-token",
+        token_scope: "https://www.googleapis.com/auth/drive",
       });
       await db.collection("EmailAddress").doc(senderEmail).set({
         uid,
@@ -5163,11 +5164,47 @@ describe("admin resume routes", function() {
         },
       });
       await getStorage().bucket().file(storagePath).save(JSON.stringify({
+        proposal: {
+          proposed_folders: [{
+            folder_path: "001-Invoices",
+            description: "Invoices",
+          }],
+          file_actions: [{
+            file_id: "stale-1",
+            current_name: "invoice.pdf",
+            current_path: "Inbox",
+            new_name: "invoice.pdf",
+            new_folder: "001-Invoices",
+            action: "move",
+            reason: "stale",
+          }],
+          summary: "stale plan",
+        },
+        testDriveScan: {
+          rootFolderId: "root",
+          rawFiles: [{
+            id: "fresh-1",
+            name: "invoice-renamed.pdf",
+            mimeType: "application/pdf",
+            parents: ["folder-inbox"],
+            createdTime: "2026-04-11T00:00:00.000Z",
+            size: "200",
+            webViewLink: "",
+          }, {
+            id: "folder-inbox",
+            name: "Inbox",
+            mimeType: "application/vnd.google-apps.folder",
+            parents: ["root"],
+            createdTime: "2026-04-01T00:00:00.000Z",
+            size: "0",
+            webViewLink: "",
+          }],
+        },
         fileEntries: [{
-          id: "file-1",
+          id: "stale-1",
           name: "invoice.pdf",
           mimeType: "application/pdf",
-          parentId: "root",
+          parentId: "folder-inbox",
           parentPath: "Inbox",
           createdTime: "2026-04-10T00:00:00.000Z",
           size: 100,
@@ -5178,8 +5215,8 @@ describe("admin resume routes", function() {
         phaseData: {
           directoryLayout: {
             approvedStructure: [{
-              folder_path: "01-Documents",
-              description: "Documents",
+              folder_path: "001-Invoices",
+              description: "Invoices",
             }],
           },
           filenameConvention: {
@@ -5187,6 +5224,22 @@ describe("admin resume routes", function() {
           },
         },
       }), {contentType: "application/json"});
+      await saveSavedPlan(proposalId, {
+        proposed_folders: [{
+          folder_path: "001-Invoices",
+          description: "Invoices",
+        }],
+        file_actions: [{
+          file_id: "stale-1",
+          current_name: "invoice.pdf",
+          current_path: "Inbox",
+          new_name: "invoice.pdf",
+          new_folder: "001-Invoices",
+          action: "move",
+          reason: "stale",
+        }],
+        summary: "stale plan",
+      });
 
       const res = await chaiWithHttp
         .request(`${DISPATCH_URL}/${APP_ID}/${DISPATCH_REGION}`)
@@ -5196,27 +5249,37 @@ describe("admin resume routes", function() {
         .send({action: "rerunPlanning", proposalId});
 
       expect(res).to.have.status(200);
-      expect(res.body).to.include({proposalId, action: "rerunPlanning"});
+      expect(res.body).to.include({proposalId, action: "rerunPlanning", scannedFiles: 2});
       expect(res.body.emailId).to.match(/^admin-organize-rerun-\d+$/);
 
       const proposal = await getOrganizeProposal(proposalId) as unknown as OrganizeProposalDoc;
       const savedPlan = await loadSavedPlan(proposalId);
+      const [savedStateBuffer] = await getStorage().bucket().file(storagePath).download();
+      const savedState = JSON.parse(savedStateBuffer.toString()) as {
+        fileEntries: DriveFileEntry[];
+      };
 
       expect(proposal.status).to.equal("pending");
       expect(proposal.phase).to.equal("plan_review");
       expect(proposal.emailId).to.match(/^admin-organize-rerun-\d+$/);
+      expect(proposal.phaseData?.directoryLayout?.approvedStructure).to.deep.equal([{
+        folder_path: "001-Invoices",
+        description: "Invoices",
+      }]);
       expect(proposal.phaseData?.execution?.completedChunks).to.equal(1);
       expect(proposal.phaseData?.execution?.totalChunks).to.equal(1);
       expect(proposal.phaseData?.planReview?.fileActionsVersion).to.equal(1);
+      expect(savedState.fileEntries.map((entry) => entry.id)).to.deep.equal(["fresh-1", "folder-inbox"]);
       expect(savedPlan.file_actions).to.deep.equal([{
-        file_id: "file-1",
-        current_name: "invoice.pdf",
+        file_id: "fresh-1",
+        current_name: "invoice-renamed.pdf",
         current_path: "Inbox",
-        new_name: "invoice.pdf",
+        new_name: "invoice-renamed.pdf",
         new_folder: "Inbox",
         action: "keep",
         reason: "Preserved by user: \"Inbox\" left as-is",
       }]);
+      expect(savedPlan.file_actions.some((action) => action.file_id === "stale-1")).to.equal(false);
     });
 
     it("DT00uf returns 409 when proposal is not at plan_review", async function() {
@@ -5271,7 +5334,210 @@ describe("admin resume routes", function() {
       expect((await db.collection("OrganizeProposals").doc(proposalId).get()).exists).to.equal(false);
     });
 
-    it("DT00uh returns 400 when proposalId is missing", async function() {
+    it("DT00uh returns 422 when proposal has no preserved folder plan", async function() {
+      const proposalId = `admin-rerun-no-plan-${Date.now()}`;
+      const uid = `admin-rerun-no-plan-uid-${Date.now()}`;
+      const storagePath = `organize-proposals/${proposalId}.json`;
+      await db.collection("DriveUsers").doc(uid).set({
+        email: "no-plan@example.com",
+        access_token: "test-access-token",
+        refresh_token: "test-refresh-token",
+        token_scope: "https://www.googleapis.com/auth/drive",
+      });
+      await db.collection("OrganizeProposals").doc(proposalId).set({
+        uid,
+        senderEmail: "no-plan@example.com",
+        emailId: "no-plan-email-id",
+        status: "pending",
+        phase: "plan_review",
+        createdAt: "2026-04-20T00:00:00.000Z",
+        expiresAt: "2099-04-20T00:00:00.000Z",
+        storagePath,
+      });
+      await getStorage().bucket().file(storagePath).save(JSON.stringify({
+        proposal: {
+          proposed_folders: [],
+          file_actions: [],
+          summary: "empty",
+        },
+      }), {contentType: "application/json"});
+
+      const beforeDoc = await db.collection("OrganizeProposals").doc(proposalId).get();
+      const [beforeBlob] = await getStorage().bucket().file(storagePath).download();
+
+      const res = await chaiWithHttp
+        .request(`${DISPATCH_URL}/${APP_ID}/${DISPATCH_REGION}`)
+        .post("/v2driveAdminOrganize")
+        .set("Content-Type", "application/json")
+        .set("x-admin-key", "test-admin-key")
+        .send({action: "rerunPlanning", proposalId});
+
+      expect(res).to.have.status(422);
+      expect(res.body).to.deep.equal({error: "Proposal has no folder plan to preserve"});
+      expect((await db.collection("OrganizeProposals").doc(proposalId).get()).data()).to.deep.equal(beforeDoc.data());
+      const [afterBlob] = await getStorage().bucket().file(storagePath).download();
+      expect(afterBlob.toString()).to.equal(beforeBlob.toString());
+    });
+
+    it("DT00ui returns 403 when target user lacks full drive scope", async function() {
+      const proposalId = `admin-rerun-limited-scope-${Date.now()}`;
+      const uid = `admin-rerun-limited-scope-uid-${Date.now()}`;
+      const storagePath = `organize-proposals/${proposalId}.json`;
+      await db.collection("DriveUsers").doc(uid).set({
+        email: "limited-scope@example.com",
+        access_token: "test-access-token",
+        refresh_token: "test-refresh-token",
+        token_scope: "https://www.googleapis.com/auth/drive.file",
+      });
+      await db.collection("OrganizeProposals").doc(proposalId).set({
+        uid,
+        senderEmail: "limited-scope@example.com",
+        emailId: "limited-scope-email-id",
+        status: "pending",
+        phase: "plan_review",
+        createdAt: "2026-04-20T00:00:00.000Z",
+        expiresAt: "2099-04-20T00:00:00.000Z",
+        storagePath,
+      });
+      await getStorage().bucket().file(storagePath).save(JSON.stringify({
+        proposal: {
+          proposed_folders: [{
+            folder_path: "001-Invoices",
+            description: "Invoices",
+          }],
+          file_actions: [],
+          summary: "existing",
+        },
+      }), {contentType: "application/json"});
+
+      const res = await chaiWithHttp
+        .request(`${DISPATCH_URL}/${APP_ID}/${DISPATCH_REGION}`)
+        .post("/v2driveAdminOrganize")
+        .set("Content-Type", "application/json")
+        .set("x-admin-key", "test-admin-key")
+        .send({action: "rerunPlanning", proposalId});
+
+      expect(res).to.have.status(403);
+      expect(res.body).to.deep.equal({error: "User does not have full drive scope"});
+    });
+
+    it("DT00uj returns 502 when Drive scan throws", async function() {
+      const proposalId = `admin-rerun-scan-failure-${Date.now()}`;
+      const uid = `admin-rerun-scan-failure-uid-${Date.now()}`;
+      const storagePath = `organize-proposals/${proposalId}.json`;
+      await db.collection("DriveUsers").doc(uid).set({
+        email: "scan-failure@example.com",
+        access_token: "test-access-token",
+        refresh_token: "test-refresh-token",
+        token_scope: "https://www.googleapis.com/auth/drive",
+      });
+      await db.collection("OrganizeProposals").doc(proposalId).set({
+        uid,
+        senderEmail: "scan-failure@example.com",
+        emailId: "scan-failure-email-id",
+        status: "pending",
+        phase: "plan_review",
+        createdAt: "2026-04-20T00:00:00.000Z",
+        expiresAt: "2099-04-20T00:00:00.000Z",
+        storagePath,
+      });
+      await getStorage().bucket().file(storagePath).save(JSON.stringify({
+        proposal: {
+          proposed_folders: [{
+            folder_path: "001-Invoices",
+            description: "Invoices",
+          }],
+          file_actions: [],
+          summary: "existing",
+        },
+        testDriveScan: {
+          scanError: "scan exploded",
+        },
+        fileEntries: [{
+          id: "stale-1",
+          name: "invoice.pdf",
+          mimeType: "application/pdf",
+          parentId: "folder-inbox",
+          parentPath: "Inbox",
+          createdTime: "2026-04-10T00:00:00.000Z",
+          size: 100,
+          webViewLink: "",
+          isFolder: false,
+        }],
+        senderEmail: "scan-failure@example.com",
+      }), {contentType: "application/json"});
+      await saveSavedPlan(proposalId, {
+        proposed_folders: [{
+          folder_path: "001-Invoices",
+          description: "Invoices",
+        }],
+        file_actions: [],
+        summary: "existing",
+      });
+
+      const beforeDoc = await db.collection("OrganizeProposals").doc(proposalId).get();
+      const [beforeBlob] = await getStorage().bucket().file(storagePath).download();
+
+      const res = await chaiWithHttp
+        .request(`${DISPATCH_URL}/${APP_ID}/${DISPATCH_REGION}`)
+        .post("/v2driveAdminOrganize")
+        .set("Content-Type", "application/json")
+        .set("x-admin-key", "test-admin-key")
+        .send({action: "rerunPlanning", proposalId});
+
+      expect(res).to.have.status(502);
+      expect(res.body).to.deep.equal({error: "Drive scan failed"});
+      expect((await db.collection("OrganizeProposals").doc(proposalId).get()).data()).to.deep.equal(beforeDoc.data());
+      const [afterBlob] = await getStorage().bucket().file(storagePath).download();
+      expect(afterBlob.toString()).to.equal(beforeBlob.toString());
+    });
+
+    it("DT00uk returns 403 when OAuth reports Drive authorization is required", async function() {
+      const proposalId = `admin-rerun-auth-failure-${Date.now()}`;
+      const uid = `admin-rerun-auth-failure-uid-${Date.now()}`;
+      const storagePath = `organize-proposals/${proposalId}.json`;
+      await db.collection("DriveUsers").doc(uid).set({
+        email: "auth-failure@example.com",
+        access_token: "test-access-token",
+        refresh_token: "test-refresh-token",
+        token_scope: "https://www.googleapis.com/auth/drive",
+      });
+      await db.collection("OrganizeProposals").doc(proposalId).set({
+        uid,
+        senderEmail: "auth-failure@example.com",
+        emailId: "auth-failure-email-id",
+        status: "pending",
+        phase: "plan_review",
+        createdAt: "2026-04-20T00:00:00.000Z",
+        expiresAt: "2099-04-20T00:00:00.000Z",
+        storagePath,
+      });
+      await getStorage().bucket().file(storagePath).save(JSON.stringify({
+        proposal: {
+          proposed_folders: [{
+            folder_path: "001-Invoices",
+            description: "Invoices",
+          }],
+          file_actions: [],
+          summary: "existing",
+        },
+        testDriveScan: {
+          oauthError: "invalid_grant",
+        },
+      }), {contentType: "application/json"});
+
+      const res = await chaiWithHttp
+        .request(`${DISPATCH_URL}/${APP_ID}/${DISPATCH_REGION}`)
+        .post("/v2driveAdminOrganize")
+        .set("Content-Type", "application/json")
+        .set("x-admin-key", "test-admin-key")
+        .send({action: "rerunPlanning", proposalId});
+
+      expect(res).to.have.status(403);
+      expect(res.body).to.deep.equal({error: "Drive authorization required"});
+    });
+
+    it("DT00ul returns 400 when proposalId is missing", async function() {
       const res = await chaiWithHttp
         .request(`${DISPATCH_URL}/${APP_ID}/${DISPATCH_REGION}`)
         .post("/v2driveAdminOrganize")

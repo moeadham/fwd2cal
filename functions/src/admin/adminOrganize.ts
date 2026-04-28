@@ -1,17 +1,43 @@
 import type {Request, Response} from "express";
-import {AGENT_EMAIL_ADDRESS, DRIVE_ADMIN_API_KEY} from "../agents/drive/config";
+import * as authHandler from "../auth/authHandler";
+import {AGENT_EMAIL_ADDRESS, AGENT_NAME, DRIVE_ADMIN_API_KEY} from "../agents/drive/config";
+import * as driveHelper from "../agents/drive/driveHelper";
 import {dispatchOrganizeActionTask} from "../agents/drive/handlers/dispatchHandler";
+import {loadSavedPlan} from "../agents/drive/handlers/organizeExecution";
+import {buildDriveStructureSummary, buildFileEntries} from "../agents/drive/handlers/organizeHelpers";
 import {findGeneratingProposal, hasFullDriveScope, scanAndPropose} from "../agents/drive/organizeHandler";
-import {OrganizeProposalDoc} from "../agents/drive/types";
+import {isDriveAuthError} from "../agents/drive/driveUtils";
+import {
+  DriveOrganizeProposal,
+  OrganizeIntermediateState,
+  OrganizeProposalDoc,
+} from "../agents/drive/types";
+import {ENVIRONMENT_NAME} from "../util/config";
 import {
   DRIVE_USERS_COLLECTION,
   getOrganizeProposal,
   getResumableOrganizeProposals,
   getUserFromEmail,
   getUserFromUID,
+  saveOrganizeIntermediateState,
   updateOrganizeProposalStatus,
 } from "../util/firestoreHandler";
 import {TransformedEmail} from "../util/types";
+
+type AdminTestDriveScan = {
+  rawFiles?: Array<{
+    id: string;
+    name: string;
+    mimeType: string;
+    parents: string[];
+    createdTime: string;
+    size: string;
+    webViewLink: string;
+  }>;
+  rootFolderId?: string;
+  oauthError?: string;
+  scanError?: string;
+};
 
 /** Handles POST actions for the admin organize endpoint. */
 export async function handleAdminOrganizeRequest(req: Request, res: Response): Promise<void> {
@@ -69,11 +95,114 @@ export async function handleAdminOrganizeRequest(req: Request, res: Response): P
       return;
     }
 
+    const ignoredFolders = proposal.ignoredFolders || [];
     const previousEmailId = proposal.emailId;
+    const testDriveScan =
+      ENVIRONMENT_NAME.value() === "local" || ENVIRONMENT_NAME.value() === "test" ?
+        (proposal as OrganizeProposalDoc & {testDriveScan?: AdminTestDriveScan}).testDriveScan :
+        undefined;
+
+    let userData;
+    try {
+      userData = await getUserFromUID(proposal.uid, DRIVE_USERS_COLLECTION);
+    } catch (_error) {
+      res.status(404).json({error: "User not found"});
+      return;
+    }
+
+    if (!userData.access_token || !hasFullDriveScope(userData.token_scope)) {
+      res.status(403).json({error: "User does not have full drive scope"});
+      return;
+    }
+
+    if (testDriveScan?.oauthError) {
+      if (isDriveAuthError(testDriveScan.oauthError)) {
+        res.status(403).json({error: "Drive authorization required"});
+        return;
+      }
+      res.status(500).json({error: "OAuth failed"});
+      return;
+    }
+
+    let savedPlan: DriveOrganizeProposal | null = null;
+    try {
+      savedPlan = await loadSavedPlan(proposalId);
+    } catch (_error) {
+      // Saved plan blob is at getPlanStoragePath, separate from storagePath.
+      // Missing blob means planning never finalized; treat as no plan to preserve.
+    }
+    const userRevisedFolders: DriveOrganizeProposal["proposed_folders"] =
+      savedPlan?.proposed_folders ?? [];
+    if (userRevisedFolders.length === 0) {
+      res.status(422).json({error: "Proposal has no folder plan to preserve"});
+      return;
+    }
+
+    let fileEntries: OrganizeIntermediateState["fileEntries"];
+    let treeSummary: OrganizeIntermediateState["driveStructureSummary"];
+    try {
+      let rawFiles;
+      let rootFolderId;
+      if (testDriveScan?.scanError) {
+        throw new Error(testDriveScan.scanError);
+      }
+      if (testDriveScan?.rawFiles && testDriveScan.rootFolderId) {
+        rawFiles = testDriveScan.rawFiles;
+        rootFolderId = testDriveScan.rootFolderId;
+      } else {
+        let oauth2Client;
+        try {
+          oauth2Client = await authHandler.getOauthClient(proposal.uid, AGENT_NAME);
+        } catch (error) {
+          const errMsg = error instanceof Error ? error.message : String(error);
+          if (isDriveAuthError(errMsg)) {
+            res.status(403).json({error: "Drive authorization required"});
+            return;
+          }
+          res.status(500).json({error: "OAuth failed"});
+          return;
+        }
+        rawFiles = await driveHelper.listAllDriveFiles(oauth2Client);
+        rootFolderId = await driveHelper.getRootFolderId(oauth2Client);
+      }
+      const {entries: allFileEntries, isDrivePath} = buildFileEntries(rawFiles, rootFolderId);
+      fileEntries = allFileEntries.filter((file) => isDrivePath(file.id));
+      ({treeSummary} = buildDriveStructureSummary(fileEntries, rootFolderId));
+    } catch (_error) {
+      res.status(502).json({error: "Drive scan failed"});
+      return;
+    }
+
+    const intermediateState: OrganizeIntermediateState = {
+      driveStructureSummary: treeSummary,
+      fileEntries,
+      senderEmail: proposal.senderEmail,
+    };
+    await saveOrganizeIntermediateState(
+        proposalId,
+        intermediateState as unknown as Record<string, unknown>,
+    );
+
     const emailId = `admin-organize-rerun-${Date.now()}`;
     await updateOrganizeProposalStatus(proposalId, "pending", {
       phase: "cost_estimate",
       emailId,
+      ignoredFolders,
+      phaseData: {
+        ...proposal.phaseData,
+        directoryLayout: {
+          ...proposal.phaseData?.directoryLayout,
+          approvedStructure: userRevisedFolders,
+        },
+        execution: {
+          ...proposal.phaseData?.execution,
+          completedChunks: 0,
+        },
+        planReview: {
+          ...proposal.phaseData?.planReview,
+          fileActionsVersion: 0,
+        },
+      },
     });
 
     try {
@@ -87,7 +216,7 @@ export async function handleAdminOrganizeRequest(req: Request, res: Response): P
       return;
     }
 
-    res.status(200).json({proposalId, action: "rerunPlanning", emailId});
+    res.status(200).json({proposalId, action: "rerunPlanning", emailId, scannedFiles: fileEntries.length});
     return;
   }
 
