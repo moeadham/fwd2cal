@@ -5548,6 +5548,151 @@ describe("admin resume routes", function() {
       expect(res).to.have.status(400);
       expect(res.body).to.deep.equal({error: "proposalId is required"});
     });
+
+    it("DT00um returns 400 when limit is not a positive integer", async function() {
+      const proposalId = `admin-rerun-bad-limit-${Date.now()}`;
+      const storagePath = `organize-proposals/${proposalId}.json`;
+      await db.collection("OrganizeProposals").doc(proposalId).set({
+        uid: "admin-rerun-bad-limit-uid",
+        senderEmail: "bad-limit@example.com",
+        emailId: "bad-limit-email-id",
+        status: "pending",
+        phase: "plan_review",
+        createdAt: "2026-04-20T00:00:00.000Z",
+        expiresAt: "2099-04-20T00:00:00.000Z",
+        storagePath,
+      });
+
+      const res = await chaiWithHttp
+        .request(`${DISPATCH_URL}/${APP_ID}/${DISPATCH_REGION}`)
+        .post("/v2driveAdminOrganize")
+        .set("Content-Type", "application/json")
+        .set("x-admin-key", "test-admin-key")
+        .send({action: "rerunPlanning", proposalId, limit: -5});
+
+      expect(res).to.have.status(400);
+      expect(res.body).to.deep.equal({error: "limit must be a positive integer"});
+    });
+
+    it("DT00un randomly samples files when scan exceeds limit", async function() {
+      const proposalId = `admin-rerun-limit-${Date.now()}`;
+      const uid = `admin-rerun-limit-uid-${Date.now()}`;
+      const senderEmail = "limit-sample@example.com";
+      const storagePath = `organize-proposals/${proposalId}.json`;
+      await db.collection("DriveUsers").doc(uid).set({
+        email: senderEmail,
+        access_token: "test-access-token",
+        refresh_token: "test-refresh-token",
+        token_scope: "https://www.googleapis.com/auth/drive",
+      });
+      await db.collection("EmailAddress").doc(senderEmail).set({
+        uid,
+        email: senderEmail,
+        default: true,
+      });
+      await db.collection("OrganizeProposals").doc(proposalId).set({
+        uid,
+        senderEmail,
+        emailId: "limit-sample-email-id",
+        status: "pending",
+        phase: "plan_review",
+        createdAt: "2026-04-20T00:00:00.000Z",
+        expiresAt: "2099-04-20T00:00:00.000Z",
+        storagePath,
+        phaseData: {
+          directoryLayout: {
+            approvedStructure: [{
+              folder_path: "01-Documents",
+              description: "Documents",
+            }],
+          },
+          filenameConvention: {
+            convention: "YYYY.MM.DD - Description.ext",
+          },
+        },
+      });
+      const totalFiles = 10;
+      const rawFiles = [{
+        id: "folder-inbox",
+        name: "Inbox",
+        mimeType: "application/vnd.google-apps.folder",
+        parents: ["root"],
+        createdTime: "2026-04-01T00:00:00.000Z",
+        size: "0",
+        webViewLink: "",
+      }];
+      for (let i = 0; i < totalFiles; i++) {
+        rawFiles.push({
+          id: `file-${i}`,
+          name: `doc-${i}.pdf`,
+          mimeType: "application/pdf",
+          parents: ["folder-inbox"],
+          createdTime: "2026-04-10T00:00:00.000Z",
+          size: "100",
+          webViewLink: "",
+        });
+      }
+      await getStorage().bucket().file(storagePath).save(JSON.stringify({
+        testDriveScan: {
+          rootFolderId: "root",
+          rawFiles,
+        },
+      }), {contentType: "application/json"});
+      await saveSavedPlan(proposalId, {
+        proposed_folders: [{
+          folder_path: "01-Documents",
+          description: "Documents",
+        }],
+        file_actions: [],
+        summary: "existing",
+      });
+
+      const canonicalCsvPath = `organize-proposals/proposal-${proposalId}.csv`;
+      const sentinelCsvBytes = Buffer.from("sentinel-csv-content");
+      await getStorage().bucket().file(canonicalCsvPath).save(sentinelCsvBytes, {
+        contentType: "text/csv",
+      });
+
+      const res = await chaiWithHttp
+        .request(`${DISPATCH_URL}/${APP_ID}/${DISPATCH_REGION}`)
+        .post("/v2driveAdminOrganize")
+        .set("Content-Type", "application/json")
+        .set("x-admin-key", "test-admin-key")
+        .send({action: "rerunPlanning", proposalId, limit: 3});
+
+      expect(res).to.have.status(200);
+      expect(res.body.fileLimit).to.equal(3);
+      expect(res.body.totalFiles).to.equal(totalFiles);
+      expect(res.body.sampledFiles).to.equal(3);
+      expect(res.body.scannedFiles).to.equal(4);
+
+      const [savedStateBuffer] = await getStorage().bucket().file(storagePath).download();
+      const savedState = JSON.parse(savedStateBuffer.toString()) as {
+        fileEntries: DriveFileEntry[];
+      };
+      const sampledFileIds = savedState.fileEntries
+          .filter((entry) => !entry.isFolder)
+          .map((entry) => entry.id);
+      expect(sampledFileIds).to.have.lengthOf(3);
+      sampledFileIds.forEach((id) => {
+        expect(id).to.match(/^file-\d+$/);
+      });
+      const uniqueIds = new Set(sampledFileIds);
+      expect(uniqueIds.size).to.equal(3);
+
+      const [canonicalAfter] = await getStorage().bucket().file(canonicalCsvPath).download();
+      expect(canonicalAfter.equals(sentinelCsvBytes)).to.equal(true);
+
+      const updatedProposal = await getOrganizeProposal(proposalId) as unknown as OrganizeProposalDoc;
+      const writtenCsvPath = updatedProposal.phaseData?.planReview?.csvStoragePath;
+      expect(writtenCsvPath).to.match(
+          new RegExp(`^organize-proposals/proposal-${proposalId}-sample-\\d+\\.csv$`),
+      );
+      expect(writtenCsvPath).to.not.equal(canonicalCsvPath);
+      const [sampledCsvExists] = await getStorage().bucket().file(writtenCsvPath as string).exists();
+      expect(sampledCsvExists).to.equal(true);
+      expect(updatedProposal.phaseData?.execution?.sampled).to.equal(true);
+    });
   });
 });
 

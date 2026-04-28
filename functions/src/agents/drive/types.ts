@@ -220,6 +220,7 @@ export interface ExecutionData {
   chunkSize: number;
   totalChunks: number;
   completedChunks: number;
+  sampled?: boolean;
 }
 
 export interface PlanReviewData {

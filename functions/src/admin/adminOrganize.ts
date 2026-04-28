@@ -58,6 +58,7 @@ export async function handleAdminOrganizeRequest(req: Request, res: Response): P
     proposalId?: string;
     email?: string;
     uid?: string;
+    limit?: number;
   } | undefined;
 
   if (body?.action === "list") {
@@ -71,6 +72,20 @@ export async function handleAdminOrganizeRequest(req: Request, res: Response): P
     if (!proposalId) {
       res.status(400).json({error: "proposalId is required"});
       return;
+    }
+
+    const DEFAULT_RERUN_FILE_LIMIT = 300;
+    let fileLimit = DEFAULT_RERUN_FILE_LIMIT;
+    if (body.limit !== undefined) {
+      const isPositiveInteger = typeof body.limit === "number" &&
+        Number.isFinite(body.limit) &&
+        Number.isInteger(body.limit) &&
+        body.limit > 0;
+      if (!isPositiveInteger) {
+        res.status(400).json({error: "limit must be a positive integer"});
+        return;
+      }
+      fileLimit = body.limit;
     }
 
     const rawProposal = await getOrganizeProposal(proposalId);
@@ -173,6 +188,20 @@ export async function handleAdminOrganizeRequest(req: Request, res: Response): P
       return;
     }
 
+    const nonFolderEntries = fileEntries.filter((entry) => !entry.isFolder);
+    const totalNonFolderFiles = nonFolderEntries.length;
+    let sampledNonFolderEntries = nonFolderEntries;
+    if (totalNonFolderFiles > fileLimit) {
+      const shuffled = [...nonFolderEntries];
+      for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
+      sampledNonFolderEntries = shuffled.slice(0, fileLimit);
+      const folderEntries = fileEntries.filter((entry) => entry.isFolder);
+      fileEntries = [...folderEntries, ...sampledNonFolderEntries];
+    }
+
     const intermediateState: OrganizeIntermediateState = {
       driveStructureSummary: treeSummary,
       fileEntries,
@@ -184,6 +213,7 @@ export async function handleAdminOrganizeRequest(req: Request, res: Response): P
     );
 
     const emailId = `admin-organize-rerun-${Date.now()}`;
+    const sampled = totalNonFolderFiles > fileLimit;
     await updateOrganizeProposalStatus(proposalId, "pending", {
       phase: "cost_estimate",
       emailId,
@@ -197,6 +227,7 @@ export async function handleAdminOrganizeRequest(req: Request, res: Response): P
         execution: {
           ...proposal.phaseData?.execution,
           completedChunks: 0,
+          sampled,
         },
         planReview: {
           ...proposal.phaseData?.planReview,
@@ -216,7 +247,15 @@ export async function handleAdminOrganizeRequest(req: Request, res: Response): P
       return;
     }
 
-    res.status(200).json({proposalId, action: "rerunPlanning", emailId, scannedFiles: fileEntries.length});
+    res.status(200).json({
+      proposalId,
+      action: "rerunPlanning",
+      emailId,
+      scannedFiles: fileEntries.length,
+      fileLimit,
+      totalFiles: totalNonFolderFiles,
+      sampledFiles: sampledNonFolderEntries.length,
+    });
     return;
   }
 

@@ -153,7 +153,8 @@
             '<td>' + (p.attemptCount || 0) + '</td>' +
             '<td>' + createdText + '</td>' +
             '<td>' +
-              '<button class="resume-btn" data-id="' + p.id + '" ' + 
+              '<button class="resume-btn" data-id="' + p.id + '" disabled ' +
+              'title="Resume is temporarily disabled" ' +
               'style="width: auto; padding: 6px 12px; font-size: 0.8rem">Resume</button> ' +
               '<button class="rerun-plan-btn" data-id="' + p.id + '"' +
               rerunDisabledAttr + rerunTitleAttr +
@@ -192,23 +193,44 @@
       const loadingText = isRerun ? 'Rerunning...' : 'Resuming...';
       const action = isRerun ? 'rerunPlanning' : 'retry';
       const actionLabel = isRerun ? 'Rerunning plan for proposal ' : 'Resuming proposal ';
-      
+
+      let limit;
+      if (isRerun) {
+        const limitInput = window.prompt('File limit for this rerun (random sample for large drives)?', '300');
+        if (limitInput === null) {
+          return;
+        }
+        const trimmed = limitInput.trim();
+        if (trimmed !== '') {
+          const parsed = Number(trimmed);
+          if (!Number.isInteger(parsed) || parsed <= 0) {
+            alert('Limit must be a positive integer');
+            return;
+          }
+          limit = parsed;
+        }
+      }
+
       btn.disabled = true;
       btn.textContent = loadingText;
-      
+
       const responseContainer = document.getElementById('responseContainer');
       const responseArea = document.getElementById('responseArea');
       responseContainer.classList.remove('hidden');
       responseArea.textContent = actionLabel + proposalId + '...';
-      
+
       try {
+        const requestBody = { action: action, proposalId: proposalId };
+        if (limit !== undefined) {
+          requestBody.limit = limit;
+        }
         const res = await fetch('', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'x-admin-key': apiKey
           },
-          body: JSON.stringify({ action: action, proposalId: proposalId })
+          body: JSON.stringify(requestBody)
         });
         
         let data;

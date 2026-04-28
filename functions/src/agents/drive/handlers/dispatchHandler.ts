@@ -302,10 +302,16 @@ export async function dispatchPlanningChunkTask(
     return;
   }
 
+  const planningTaskId = [
+    sanitizeProposalIdForTaskId(data.proposalId),
+    sanitizeProposalIdForTaskId(data.emailId),
+    "plan",
+    String(data.chunkIndex),
+  ].join("-").slice(0, 500);
   await enqueueChunkTask(
       "locations/us-central1/functions/v2drivePlanningChunkTask",
       data,
-      `${sanitizeProposalIdForTaskId(data.proposalId)}-plan-${data.chunkIndex}`,
+      planningTaskId,
       {proposalId: data.proposalId, chunkIndex: data.chunkIndex, phase: "planning"},
   );
   logger.info("Drive planning chunk: Dispatched task", {

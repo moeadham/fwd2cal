@@ -141,6 +141,8 @@ export const getPlanStoragePath = (proposalId: string) =>
   `organize-proposals/proposal-${proposalId}.json`;
 export const getPlanCsvStoragePath = (proposalId: string) =>
   `organize-proposals/proposal-${proposalId}.csv`;
+export const getSampledPlanCsvStoragePath = (proposalId: string, timestamp: number) =>
+  `organize-proposals/proposal-${proposalId}-sample-${timestamp}.csv`;
 let createOrUpdateProposalSheetImpl = createOrUpdateProposalSheet;
 
 function getProposalSheetRef(
@@ -821,7 +823,12 @@ export async function processPlanningChunk(
   await updateOrganizeProposalStatus(proposalId, "planning", {
     phaseData: {
       ...proposalDoc.phaseData,
-      execution: {chunkSize, totalChunks, completedChunks: nextCompletedChunks},
+      execution: {
+        ...proposalDoc.phaseData?.execution,
+        chunkSize,
+        totalChunks,
+        completedChunks: nextCompletedChunks,
+      },
     },
   });
 
@@ -868,7 +875,19 @@ export async function processPlanningChunk(
     summary: `Prepared file-by-file organization actions for ${nonFolderFiles.length} files.`,
   }, approvedStructure);
   await saveSavedPlan(proposalId, proposal);
-  const csvBuffer = await savePlanCsv(proposalId, proposal.file_actions);
+  const sampled = proposalDoc.phaseData?.execution?.sampled === true;
+  let csvBuffer: Buffer;
+  let csvStoragePath: string;
+  if (sampled) {
+    csvBuffer = writeFileActionsCsv(proposal.file_actions);
+    csvStoragePath = getSampledPlanCsvStoragePath(proposalId, Date.now());
+    await getStorage().bucket().file(csvStoragePath).save(csvBuffer, {
+      contentType: "text/csv",
+    });
+  } else {
+    csvBuffer = await savePlanCsv(proposalId, proposal.file_actions);
+    csvStoragePath = getPlanCsvStoragePath(proposalId);
+  }
   const sheet =
     ENVIRONMENT_NAME.value() === "local" || ENVIRONMENT_NAME.value() === "test" ?
       getProposalSheetRef(proposalId) :
@@ -876,10 +895,15 @@ export async function processPlanningChunk(
   const counts = countFileActions(proposal.file_actions);
   const nextPhaseData = {
     ...proposalDoc.phaseData,
-    execution: {chunkSize, totalChunks, completedChunks: nextCompletedChunks},
+    execution: {
+      ...proposalDoc.phaseData?.execution,
+      chunkSize,
+      totalChunks,
+      completedChunks: nextCompletedChunks,
+    },
     planReview: {
       totalFiles: proposal.file_actions.length,
-      csvStoragePath: getPlanCsvStoragePath(proposalId),
+      csvStoragePath,
       planStoragePath: getPlanStoragePath(proposalId),
       fileActionsVersion: 1,
       planEmailSentAt: new Date().toISOString(),
