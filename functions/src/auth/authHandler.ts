@@ -2,6 +2,7 @@ import {
   getUserFromUID,
   findUsersWithExpiringTokens,
   storeUser,
+  markUserTokensRevoked,
   addUserEmailAddress,
   updateUserTokens,
   getPendingEmailAddressByCode,
@@ -22,6 +23,9 @@ import {addContactToResend, addContactToSegment} from "../util/resend";
 import {OAuthTokens, FirebaseUserRecord, SignupCallbackResult} from "./types";
 import {RequestWithQuery} from "../util/types";
 import {Response} from "express";
+import {isDriveAuthError} from "../agents/drive/driveUtils";
+
+let refreshAccessTokenForTest: typeof refreshAccessToken | null = null;
 
 async function refreshOAuthTokens(
     uid: string,
@@ -31,11 +35,15 @@ async function refreshOAuthTokens(
   const collection = getCollectionForAgent(agentName);
   let tokens: OAuthTokens;
   try {
-    tokens = await refreshAccessToken(oauth2Client);
+    tokens = await (refreshAccessTokenForTest || refreshAccessToken)(oauth2Client);
     await updateUserTokens(tokens, uid, collection);
     logger.log(`uid ${uid} access token refreshed to ${tokens.expiry_date}`);
   } catch (error) {
     logger.warn("Failed to refresh access token:", uid, error);
+    const errMsg = error instanceof Error ? error.message : String(error);
+    if (isDriveAuthError(errMsg)) {
+      await markUserTokensRevoked(uid, collection);
+    }
     throw error;
   }
 }
@@ -239,6 +247,12 @@ function hasRequiredScopes(
   return requiredScopes.every((scope) => granted.has(scope));
 }
 
+function setRefreshAccessTokenForTest(
+    refreshFn: typeof refreshAccessToken | null,
+): void {
+  refreshAccessTokenForTest = refreshFn;
+}
+
 export {
   getOauthClient,
   refreshOAuthTokens,
@@ -247,4 +261,5 @@ export {
   hasRequiredScopes,
   verifyAdditionalEmail,
   deleteAccount,
+  setRefreshAccessTokenForTest,
 };

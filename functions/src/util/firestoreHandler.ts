@@ -57,14 +57,19 @@ async function findUsersWithExpiringTokens(
   if (ENVIRONMENT_NAME.value() === "production") {
     querySnapshot = await usersRef
         .where("expiry_date", "<=", twoHoursLater)
+        .where("tokens_revoked", "!=", true)
         .get();
   } else {
     querySnapshot = await usersRef.get(); // For Local testing.
   }
   querySnapshot.forEach((doc) => {
+    const data = doc.data();
+    if (data.tokens_revoked === true) {
+      return;
+    }
     console.log(`User ${doc.id} has a token expiring soon.`);
     users.push({
-      id: doc.id, ...doc.data(),
+      id: doc.id, ...data,
     } as UserWithExpiringTokens);
   });
 
@@ -87,11 +92,26 @@ async function storeUser(
       refresh_token: tokens.refresh_token,
       expiry_date: tokens.expiry_date,
       token_scope: tokens.scope,
+      tokens_revoked: false,
     }, {merge: true});
   } catch (error) {
     logger.error(`Database error in storeUser for uid ${user.uid}:`, error);
     sendEvent(user.uid, "databaseError", "system", {operation: "storeUser"});
     throw error;
+  }
+}
+
+async function markUserTokensRevoked(
+    uid: string,
+    collection: string,
+): Promise<void> {
+  try {
+    await getFirestore().collection(collection).doc(uid).update({
+      tokens_revoked: true,
+    });
+  } catch (error) {
+    logger.error(`Database error in markUserTokensRevoked for uid ${uid}:`, error);
+    sendEvent(uid, "databaseError", "system", {operation: "markUserTokensRevoked"});
   }
 }
 
@@ -101,11 +121,16 @@ async function updateUserTokens(
     collection: string,
 ): Promise<void> {
   try {
+    // token_scope is intentionally not written here. Refresh responses report
+    // what the stored refresh_token grants, which can be narrower than what
+    // the user has consented to (e.g. after a full-scope re-consent that left
+    // the original drive.file refresh_token in place). Overwriting on refresh
+    // would silently downgrade users. Scope updates go through
+    // updateDriveUserTokenScope or storeUser only.
     await getFirestore().collection(collection).doc(uid).update({
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,
       expiry_date: tokens.expiry_date,
-      ...(tokens.scope ? {token_scope: tokens.scope} : {}),
     });
   } catch (error) {
     logger.error(`Database error in updateUserTokens for uid ${uid}:`, error);
@@ -625,6 +650,7 @@ export {
   getUserFromEmail,
   findUsersWithExpiringTokens,
   storeUser,
+  markUserTokensRevoked,
   addUserEmailAddress,
   updateUserTokens,
   updateDriveUserTokenScope,

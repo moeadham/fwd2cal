@@ -58,6 +58,7 @@ import {
   getResumableOrganizeProposals,
   getOrganizePhaseData,
   getDriveUserPreferences,
+  findUsersWithExpiringTokens,
   saveOrganizeProposal,
   storeUser,
   updateUserTokens,
@@ -1155,7 +1156,7 @@ describe("Drive token scope drift", function() {
         .to.equal("https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email");
   });
 
-  it("DT00ts2 updateUserTokens writes refresh scopes when present and preserves them when absent", async function() {
+  it("DT00ts2 updateUserTokens preserves token_scope across refresh regardless of refresh-response scope", async function() {
     const uid = `scope-refresh-${Date.now()}`;
     await db.collection("DriveUsers").doc(uid).set({
       email: `${uid}@example.com`,
@@ -1173,7 +1174,8 @@ describe("Drive token scope drift", function() {
     }, uid, "DriveUsers");
 
     let userDoc = (await db.collection("DriveUsers").doc(uid).get()).data();
-    expect(userDoc?.token_scope).to.equal("https://www.googleapis.com/auth/drive.file");
+    expect(userDoc?.token_scope).to.equal("https://www.googleapis.com/auth/drive");
+    expect(userDoc?.access_token).to.equal("new-access");
 
     await updateUserTokens({
       access_token: "newer-access",
@@ -1182,7 +1184,8 @@ describe("Drive token scope drift", function() {
     }, uid, "DriveUsers");
 
     userDoc = (await db.collection("DriveUsers").doc(uid).get()).data();
-    expect(userDoc?.token_scope).to.equal("https://www.googleapis.com/auth/drive.file");
+    expect(userDoc?.token_scope).to.equal("https://www.googleapis.com/auth/drive");
+    expect(userDoc?.access_token).to.equal("newer-access");
   });
 
   it("DT00ts3 scanAndPropose downgrades stale full-drive state and sends the upgrade email", async function() {
@@ -1277,6 +1280,111 @@ describe("Drive token scope drift", function() {
         sendOrganizeEmailResponse: typeof organizeHelpers.sendOrganizeEmailResponse;
       }).sendOrganizeEmailResponse = originalSendOrganizeEmailResponse;
     }
+  });
+});
+
+describe("Drive revoked OAuth tokens", function() {
+  const cleanupDocs: Array<{collection: string; uid: string}> = [];
+
+  afterEach(async function() {
+    authHandler.setRefreshAccessTokenForTest(null);
+    await Promise.all(cleanupDocs.map((doc) =>
+      db.collection(doc.collection).doc(doc.uid).delete(),
+    ));
+    cleanupDocs.length = 0;
+  });
+
+  function trackDoc(collection: string, uid: string): void {
+    cleanupDocs.push({collection, uid});
+  }
+
+  it("DT00tr1 marks a user revoked when cron refresh sees invalid_grant", async function() {
+    const uid = `revoked-invalid-grant-${Date.now()}`;
+    trackDoc("DriveUsers", uid);
+    await db.collection("DriveUsers").doc(uid).set({
+      email: `${uid}@example.com`,
+      access_token: "old-access",
+      refresh_token: "old-refresh",
+      expiry_date: 1,
+      token_scope: "https://www.googleapis.com/auth/drive.file",
+    });
+
+    const refreshError = new Error("invalid_grant: Token has been expired or revoked.");
+    authHandler.setRefreshAccessTokenForTest(async () => {
+      throw refreshError;
+    });
+
+    try {
+      await authHandler.refreshOAuthTokens(uid, "drive");
+      throw new Error("Expected refreshOAuthTokens to throw");
+    } catch (error) {
+      expect(error).to.equal(refreshError);
+    }
+
+    const userDoc = (await db.collection("DriveUsers").doc(uid).get()).data();
+    expect(userDoc?.tokens_revoked).to.equal(true);
+  });
+
+  it("DT00tr2 findUsersWithExpiringTokens skips revoked users and keeps legacy docs", async function() {
+    const collection = `DriveUsersRevokedSkip${Date.now()}`;
+    const revokedUid = "revoked";
+    const activeUid = "active";
+    const legacyUid = "legacy";
+    [revokedUid, activeUid, legacyUid].forEach((uid) => trackDoc(collection, uid));
+
+    await db.collection(collection).doc(revokedUid).set({
+      email: "revoked@example.com",
+      access_token: "revoked-access",
+      refresh_token: "revoked-refresh",
+      expiry_date: 1,
+      tokens_revoked: true,
+    });
+    await db.collection(collection).doc(activeUid).set({
+      email: "active@example.com",
+      access_token: "active-access",
+      refresh_token: "active-refresh",
+      expiry_date: 1,
+      tokens_revoked: false,
+    });
+    await db.collection(collection).doc(legacyUid).set({
+      email: "legacy@example.com",
+      access_token: "legacy-access",
+      refresh_token: "legacy-refresh",
+      expiry_date: 1,
+    });
+
+    const users = await findUsersWithExpiringTokens(collection);
+    const userIds = users.map((user) => user.id);
+
+    expect(userIds).to.include(activeUid);
+    expect(userIds).to.include(legacyUid);
+    expect(userIds).not.to.include(revokedUid);
+  });
+
+  it("DT00tr3 storeUser clears the revoked flag after re-consent", async function() {
+    const uid = `revoked-reconsent-${Date.now()}`;
+    trackDoc("DriveUsers", uid);
+    const user: FirebaseUserRecord = {
+      uid,
+      email: `${uid}@example.com`,
+    };
+    await db.collection("DriveUsers").doc(uid).set({
+      email: user.email,
+      access_token: "old-access",
+      refresh_token: "old-refresh",
+      expiry_date: 1,
+      tokens_revoked: true,
+    });
+
+    await storeUser({
+      access_token: "new-access",
+      refresh_token: "new-refresh",
+      expiry_date: 2,
+      scope: "https://www.googleapis.com/auth/drive.file",
+    }, user, "DriveUsers");
+
+    const userDoc = (await db.collection("DriveUsers").doc(uid).get()).data();
+    expect(userDoc?.tokens_revoked).to.equal(false);
   });
 });
 
