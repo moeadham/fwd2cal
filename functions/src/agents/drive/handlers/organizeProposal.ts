@@ -120,7 +120,7 @@ function normalizeFolderPath(folderPath: string): string {
       .join("/");
 }
 
-function normalizeIgnoredFolderPaths(folderPaths: string[]): string[] {
+export function normalizeIgnoredFolderPaths(folderPaths: string[]): string[] {
   return [...new Set(
       folderPaths
           .map((folderPath) => normalizeFolderPath(folderPath))
@@ -128,7 +128,7 @@ function normalizeIgnoredFolderPaths(folderPaths: string[]): string[] {
   )].sort((left, right) => left.localeCompare(right));
 }
 
-function findIgnoredRoot(path: string, ignoredFolders: Iterable<string>): string | null {
+export function findIgnoredRoot(path: string, ignoredFolders: Iterable<string>): string | null {
   const normalizedPath = normalizeFolderPath(path);
   if (!normalizedPath || normalizedPath === "My Drive") {
     return null;
@@ -162,41 +162,6 @@ function dropIgnoredFolderEntries<T>(
     }
     return !ignoredRoot;
   });
-}
-
-function buildIgnoredFolderKeepPatches(
-    fileActions: DriveOrganizeProposal["file_actions"],
-    ignoredFolders: Iterable<string>,
-): Array<{
-    file_id: string;
-    new_name: string;
-    new_folder: string;
-    action: "keep";
-    reason: string;
-  }> {
-  const patches: Array<{
-    file_id: string;
-    new_name: string;
-    new_folder: string;
-    action: "keep";
-    reason: string;
-  }> = [];
-  for (const ignoredFolder of ignoredFolders) {
-    for (const action of fileActions) {
-      const currentPath = normalizeFolderPath(action.current_path || "My Drive") || "My Drive";
-      if (currentPath !== ignoredFolder && !currentPath.startsWith(`${ignoredFolder}/`)) {
-        continue;
-      }
-      patches.push({
-        file_id: action.file_id,
-        new_name: action.current_name,
-        new_folder: currentPath,
-        action: "keep",
-        reason: `Preserved by user: "${ignoredFolder}" left as-is`,
-      });
-    }
-  }
-  return patches;
 }
 
 function renumberDirectoryStructure(
@@ -1111,10 +1076,11 @@ async function handlePlanReviewReply(
       }
     }
   }
-  const syntheticKeepPatches = buildIgnoredFolderKeepPatches(proposal.file_actions, nextIgnoredFolders);
+  const filteredActions = proposal.file_actions.filter((action) =>
+    findIgnoredRoot(action.current_path || "My Drive", nextIgnoredFolders) === null);
   const revisedActions = applyPlanPatches(
-      proposal.file_actions,
-      [...syntheticKeepPatches, ...revision.patches],
+      filteredActions,
+      revision.patches,
       approvedFolders,
   );
   const sortedIgnoredFolders = normalizeIgnoredFolderPaths([...nextIgnoredFolders]);
@@ -1246,13 +1212,6 @@ export async function handleOrganizeProposalReply(
     return emptyResult("No sender found");
   }
 
-  // Look up user
-  const uid = await getUserFromEmail(sender);
-  if (!uid) {
-    logger.warn("Drive organize approval: Unknown user", {sender});
-    return emptyResult("User not found");
-  }
-
   // Fetch proposal from Firestore
   let proposalDoc: OrganizeProposalDoc;
   try {
@@ -1274,8 +1233,16 @@ export async function handleOrganizeProposalReply(
     return emptyResult("Proposal fetch failed");
   }
 
+  // Look up user. Action tasks are already authorized by a signed/admin endpoint,
+  // and admin reruns may use a synthetic sender that is not an EmailAddress record.
+  const uid = fromActionTask ? proposalDoc.uid : await getUserFromEmail(sender);
+  if (!uid) {
+    logger.warn("Drive organize approval: Unknown user", {sender});
+    return emptyResult("User not found");
+  }
+
   // Validate proposal ownership
-  if (proposalDoc.uid !== uid) {
+  if (!fromActionTask && proposalDoc.uid !== uid) {
     logger.warn("Drive organize: UID mismatch", {
       proposalUid: proposalDoc.uid, senderUid: uid,
     });

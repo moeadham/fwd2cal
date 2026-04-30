@@ -36,6 +36,7 @@ Rules:
 - When the convention includes a numeric prefix token such as NN-Category, assign root prefixes contiguously from 01 in proposed_structure order. Do not preserve existing prefix numbers from the current tree; the system will renumber deterministically as a safety net.
 - Prefer stable, broad root categories over one-off folders.
 - Include subfolders if applicable.
+- Do not nest a sub-folder whose name expresses the same status, era, or scope as its parent (e.g., an "Old", "Legacy", or "Inactive" sub-folder under an Archive root). Collapse it into the parent and keep the sub-folder's children directly under the parent.
 - Mark folders that already exist as source "existing" and new folders as source "proposed".
 - Keep paths relative to My Drive. Do not include "My Drive/" in folder_path.
 - Include descriptions that explain what belongs in each folder.

@@ -1,10 +1,12 @@
 import type {Request, Response} from "express";
+import {logger} from "firebase-functions/v2";
 import * as authHandler from "../auth/authHandler";
 import {AGENT_EMAIL_ADDRESS, AGENT_NAME, DRIVE_ADMIN_API_KEY} from "../agents/drive/config";
 import * as driveHelper from "../agents/drive/driveHelper";
 import {dispatchOrganizeActionTask} from "../agents/drive/handlers/dispatchHandler";
 import {loadSavedPlan} from "../agents/drive/handlers/organizeExecution";
 import {buildDriveStructureSummary, buildFileEntries} from "../agents/drive/handlers/organizeHelpers";
+import {findIgnoredRoot, normalizeIgnoredFolderPaths} from "../agents/drive/handlers/organizeProposal";
 import {findGeneratingProposal, hasFullDriveScope, scanAndPropose} from "../agents/drive/organizeHandler";
 import {isDriveAuthError} from "../agents/drive/driveUtils";
 import {
@@ -178,17 +180,80 @@ export async function handleAdminOrganizeRequest(req: Request, res: Response): P
           return;
         }
         rawFiles = await driveHelper.listAllDriveFiles(oauth2Client);
+        logger.info("Admin rerunPlanning: Drive list succeeded", {
+          proposalId,
+          uid: proposal.uid,
+          fileCount: rawFiles.length,
+        });
+        try {
+          const drive = driveHelper.getDriveClient(oauth2Client);
+          const about = await drive.about.get({fields: "user, storageQuota, canCreateDrives"});
+          logger.info("Admin rerunPlanning: Drive about probe", {
+            proposalId,
+            uid: proposal.uid,
+            tokenAccountEmail: about.data.user?.emailAddress,
+            tokenAccountDisplayName: about.data.user?.displayName,
+            storageQuota: about.data.storageQuota,
+            canCreateDrives: about.data.canCreateDrives,
+          });
+        } catch (aboutError) {
+          logger.warn("Admin rerunPlanning: Drive about probe failed", {
+            proposalId,
+            uid: proposal.uid,
+            error: aboutError instanceof Error ?
+              {message: aboutError.message, stack: aboutError.stack} :
+              String(aboutError),
+          });
+        }
+        try {
+          const accessTokenResponse = await oauth2Client.getAccessToken();
+          const accessToken = accessTokenResponse.token;
+          if (accessToken) {
+            const info = await oauth2Client.getTokenInfo(accessToken);
+            logger.info("Admin rerunPlanning: Token info probe", {
+              proposalId,
+              uid: proposal.uid,
+              tokenInfoEmail: info.email,
+              tokenInfoScopes: info.scopes,
+              tokenInfoExpiryDate: info.expiry_date,
+              tokenInfoAud: info.aud,
+            });
+          } else {
+            logger.warn("Admin rerunPlanning: Token info probe missing access token", {
+              proposalId,
+              uid: proposal.uid,
+            });
+          }
+        } catch (tokenInfoError) {
+          logger.warn("Admin rerunPlanning: Token info probe failed", {
+            proposalId,
+            uid: proposal.uid,
+            error: tokenInfoError instanceof Error ?
+              {message: tokenInfoError.message, stack: tokenInfoError.stack} :
+              String(tokenInfoError),
+          });
+        }
         rootFolderId = await driveHelper.getRootFolderId(oauth2Client);
       }
       const {entries: allFileEntries, isDrivePath} = buildFileEntries(rawFiles, rootFolderId);
       fileEntries = allFileEntries.filter((file) => isDrivePath(file.id));
       ({treeSummary} = buildDriveStructureSummary(fileEntries, rootFolderId));
-    } catch (_error) {
+    } catch (error) {
+      logger.error("Admin rerunPlanning: Drive scan failed", {
+        proposalId,
+        uid: proposal.uid,
+        error: error instanceof Error ?
+          {message: error.message, stack: error.stack} :
+          String(error),
+      });
       res.status(502).json({error: "Drive scan failed"});
       return;
     }
 
-    const nonFolderEntries = fileEntries.filter((entry) => !entry.isFolder);
+    const normalizedIgnoredFolders = normalizeIgnoredFolderPaths(ignoredFolders);
+    const nonFolderEntries = fileEntries
+        .filter((entry) => !entry.isFolder)
+        .filter((entry) => findIgnoredRoot(entry.parentPath || "", normalizedIgnoredFolders) === null);
     const totalNonFolderFiles = nonFolderEntries.length;
     let sampledNonFolderEntries = nonFolderEntries;
     if (totalNonFolderFiles > fileLimit) {
@@ -198,9 +263,9 @@ export async function handleAdminOrganizeRequest(req: Request, res: Response): P
         [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
       }
       sampledNonFolderEntries = shuffled.slice(0, fileLimit);
-      const folderEntries = fileEntries.filter((entry) => entry.isFolder);
-      fileEntries = [...folderEntries, ...sampledNonFolderEntries];
     }
+    const folderEntries = fileEntries.filter((entry) => entry.isFolder);
+    fileEntries = [...folderEntries, ...sampledNonFolderEntries];
 
     const intermediateState: OrganizeIntermediateState = {
       driveStructureSummary: treeSummary,

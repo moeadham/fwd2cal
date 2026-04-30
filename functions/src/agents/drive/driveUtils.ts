@@ -4,7 +4,7 @@ import {
 } from "../../util/firestoreHandler";
 import {sendEmailResend} from "../../util/resend";
 import {getSupportEmail} from "../../util/config";
-import {AGENT_EMAIL_ADDRESS, AGENT_HOSTING_URL, ORGANIZE_PROMO_HTML} from "./config";
+import {AGENT_EMAIL_ADDRESS, AGENT_HOSTING_URL, DRIVE_ADMIN_TEST_EMAIL, ORGANIZE_PROMO_HTML} from "./config";
 import {isOrganizeDriveEnabled} from "../../util/featureFlags";
 import {getEmailThreadHeaders, threadEmailHtml} from "../../util/emailUtils";
 import {TransformedEmail} from "../../util/types";
@@ -211,6 +211,28 @@ export function applyTemplate(html: string, replacements: Record<string, string>
     result = result.replace(new RegExp(`%${key}%`, "g"), value);
   }
   return result;
+}
+
+/** Detects synthetic email IDs created by the admin organize endpoint. */
+export function isAdminEmailId(emailId: string | undefined | null): boolean {
+  return typeof emailId === "string" && emailId.startsWith("admin-organize-");
+}
+
+/**
+ * Returns the recipient for outbound mail tied to an organize proposal.
+ * Reroutes to DRIVE_ADMIN_TEST_EMAIL when the proposal was admin-initiated
+ * and the override is set. Never persisted — read-time only.
+ */
+export function resolveOutboundRecipient(proposal: {
+  emailId?: string | null;
+  senderEmail?: string | null;
+}): string {
+  const senderEmail = proposal.senderEmail || "";
+  if (!isAdminEmailId(proposal.emailId)) {
+    return senderEmail;
+  }
+  const override = DRIVE_ADMIN_TEST_EMAIL.value();
+  return override || senderEmail;
 }
 
 /**

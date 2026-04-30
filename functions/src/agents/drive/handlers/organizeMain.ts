@@ -184,12 +184,7 @@ export async function scanAndPropose(
     logger.error("Drive organize: Token info lookup failed", {
       uid, error: errMsg,
     });
-    if (isDriveAuthError(errMsg)) {
-      return sendOrganizeAuthRequiredEmail(email, sender, emailId);
-    }
-    const html = applyTemplate(driveMailTemplates.organizeError.html, {});
-    await sendOrganizeEmailResponse(sender, email, html);
-    return emptyResult("Token info lookup failed");
+    return sendOrganizeAuthRequiredEmail(email, sender, emailId);
   }
 
   if (!tokenScopes?.includes("https://www.googleapis.com/auth/drive")) {

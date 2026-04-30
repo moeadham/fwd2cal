@@ -34,7 +34,7 @@ import {extractContentSummary, extractDocumentImageUrls} from "../fileProcessor"
 import {DEFAULT_FOLDER_CONVENTION, proposeFileName, proposePlacement as defaultProposePlacement} from "../llm";
 import {ProposeFileNameResult} from "../prompts/proposeFileName/v1";
 import {ProposePlacementResult} from "../prompts/proposePlacement/v1";
-import {applyTemplate, toTitleCase} from "../driveUtils";
+import {applyTemplate, resolveOutboundRecipient, toTitleCase} from "../driveUtils";
 import {
   emptyResult,
   formatSummaryHtml,
@@ -42,6 +42,7 @@ import {
   sendOrganizeEmailResponse,
   signActionToken,
 } from "./organizeHelpers";
+import {findIgnoredRoot, normalizeIgnoredFolderPaths} from "./organizeProposal";
 import {
   createOrUpdateProposalSheet,
   createFolder,
@@ -95,7 +96,6 @@ type DerivedFileActionProposal = {
   reason: string;
 };
 type PlanningWorkerResult =
-  | {kind: "ignored"; file: DriveFileEntry; ignoredRoot: string}
   | {kind: "proposed"; file: DriveFileEntry; proposed: DerivedFileActionProposal}
   | {kind: "error"; file: DriveFileEntry; error: unknown};
 
@@ -219,6 +219,18 @@ export function interleaveByParentPath(files: DriveFileEntry[]): DriveFileEntry[
   return orderedFiles;
 }
 
+function filterIgnoredPlanningFiles(
+    files: DriveFileEntry[],
+    ignoredFolders: string[] | undefined,
+): DriveFileEntry[] {
+  const normalizedIgnoredFolders = normalizeIgnoredFolderPaths(ignoredFolders || []);
+  if (normalizedIgnoredFolders.length === 0) {
+    return files;
+  }
+  return files.filter((file) =>
+    findIgnoredRoot(file.parentPath || "", normalizedIgnoredFolders) === null);
+}
+
 async function isOrganizeProposalCancelled(proposalId: string): Promise<boolean> {
   const latestProposal = await getOrganizeProposal(proposalId);
   if (!latestProposal) {
@@ -286,21 +298,6 @@ export function reconcilePlanningChunkResults(
   const fileActions: DriveOrganizeProposal["file_actions"] = [];
 
   for (const result of results) {
-    if (result.kind === "ignored") {
-      const {file, ignoredRoot} = result;
-      fileActions.push({
-        file_id: file.id,
-        current_name: file.name,
-        current_path: file.parentPath || "My Drive",
-        new_name: file.name,
-        new_folder: file.parentPath || "My Drive",
-        action: "keep",
-        reason: `Preserved by user: "${ignoredRoot}" left as-is`,
-      });
-      stats.skipped++;
-      continue;
-    }
-
     if (result.kind === "proposed") {
       const {file, proposed} = result;
       if (proposed.needs_new_directory && proposed.new_directory &&
@@ -651,7 +648,10 @@ export async function startChunkedPlanning(
     proposalDoc: OrganizeProposalDoc,
 ): Promise<OrganizeProcessingResult> {
   const state = await getOrganizeIntermediateState(proposalId) as unknown as OrganizeIntermediateState;
-  const nonFolderFiles = (state.fileEntries || []).filter((file) => !file.isFolder);
+  const nonFolderFiles = filterIgnoredPlanningFiles(
+      (state.fileEntries || []).filter((file) => !file.isFolder),
+      proposalDoc.ignoredFolders,
+  );
   const approvedStructure =
     proposalDoc.phaseData?.directoryLayout?.approvedStructure ||
     proposalDoc.phaseData?.directoryLayout?.proposedStructure ||
@@ -667,6 +667,7 @@ export async function startChunkedPlanning(
     phaseData: {
       ...proposalDoc.phaseData,
       execution: {
+        ...proposalDoc.phaseData?.execution,
         chunkSize,
         totalChunks,
         completedChunks: 0,
@@ -683,6 +684,12 @@ export async function startChunkedPlanning(
   await saveExecutionJson(getExecutionTreePath(proposalId, -1), approvedStructure);
 
   if (totalChunks === 0) {
+    await saveSavedPlan(proposalId, {
+      proposed_folders: approvedStructure,
+      file_actions: [],
+      ignoredFolders: proposalDoc.ignoredFolders,
+      summary: "No files required organization after applying ignored folders.",
+    });
     await updateOrganizeProposalStatus(proposalId, "completed", {
       phase: "completed",
       snapshot: [],
@@ -730,7 +737,10 @@ export async function processPlanningChunk(
     return;
   }
   const state = await getOrganizeIntermediateState(proposalId) as unknown as OrganizeIntermediateState;
-  const nonFolderFiles = (state.fileEntries || []).filter((file) => !file.isFolder);
+  const nonFolderFiles = filterIgnoredPlanningFiles(
+      (state.fileEntries || []).filter((file) => !file.isFolder),
+      proposalDoc.ignoredFolders,
+  );
   const chunkSize = proposalDoc.phaseData?.execution?.chunkSize || ORGANIZE_DRIVE_CHUNK_SIZE.value();
   const totalChunks = proposalDoc.phaseData?.execution?.totalChunks ||
     Math.ceil(nonFolderFiles.length / chunkSize);
@@ -742,27 +752,11 @@ export async function processPlanningChunk(
       getExecutionTreePath(proposalId, chunkIndex - 1),
   );
   const knownDirectories = new Set(runningTree.map((folder) => folder.folder_path));
-  const ignoredFolders = (proposalDoc.ignoredFolders ?? [])
-      .map((folderPath) => folderPath.split("/").map((segment) => segment.trim()).filter(Boolean).join("/"))
-      .filter(Boolean);
-  const findIgnoredRoot = (folderPath: string): string | null => {
-    const normalized = folderPath.split("/").map((segment) => segment.trim()).filter(Boolean).join("/");
-    for (const root of ignoredFolders) {
-      if (normalized === root || normalized.startsWith(`${root}/`)) {
-        return root;
-      }
-    }
-    return null;
-  };
   const stats = {planned: 0, failed: 0, skipped: 0};
   const oauth2Client = await getOauthClient(uid, AGENT_NAME);
   const planConcurrency = ORGANIZE_DRIVE_PLAN_CONCURRENCY.value();
   const orderedChunkFiles = interleaveByParentPath(chunkFiles);
   const results = await mapWithConcurrency(orderedChunkFiles, planConcurrency, async (file) => {
-    const ignoredRoot = findIgnoredRoot(file.parentPath || "");
-    if (ignoredRoot) {
-      return {kind: "ignored", file, ignoredRoot} satisfies PlanningWorkerResult;
-    }
     logger.info(`Drive organize planning chunk ${chunkIndex + 1}/${totalChunks}: processing "${file.name}"`, {
       proposalId,
       chunkIndex,
@@ -916,7 +910,8 @@ export async function processPlanningChunk(
     generationStartedAt: null,
     phaseData: nextPhaseData,
   });
-  await sendOrganizePlanReviewEmail(proposalDoc.senderEmail, email, proposalId, proposal, sheet.webViewLink, counts);
+  const planReviewRecipient = resolveOutboundRecipient(proposalDoc);
+  await sendOrganizePlanReviewEmail(planReviewRecipient, email, proposalId, proposal, sheet.webViewLink, counts);
 
   sendEvent(uid, "driveOrganizePlanReady", "drive", {
     totalFiles: String(counts.totalFiles),
@@ -1136,7 +1131,7 @@ export async function processMoveChunk(
     EMBEDDED_DATA: buildOrganizeEmbeddedData(embeddedData),
     UNDO_LINK: undoLink,
   });
-  await sendOrganizeEmailResponse(proposalDoc.senderEmail, email, html);
+  await sendOrganizeEmailResponse(resolveOutboundRecipient(proposalDoc), email, html);
 
   sendEvent(uid, "driveOrganizeCompleted", "drive", {
     filesChanged: String(filesChanged),

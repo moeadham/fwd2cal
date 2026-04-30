@@ -3100,14 +3100,8 @@ describe("organize phased proposal flow", function() {
 
     let savedPlan = await loadSavedPlan(proposalId);
     expect(savedPlan.ignoredFolders).to.deep.equal(["01-Personal/Photos"]);
-    expect(savedPlan.file_actions.find((action) => action.file_id === "photo-1")).to.deep.include({
-      file_id: "photo-1",
-      new_folder: "01-Personal/Photos",
-      new_name: "beach.jpg",
-      action: "keep",
-      reason: "Preserved by user: \"01-Personal/Photos\" left as-is",
-    });
-    expect(getLastSentEmail(sender)?.html).to.include("Photos/&nbsp;&nbsp;(1 files, preserved)");
+    expect(savedPlan.file_actions.map((action) => action.file_id)).to.deep.equal(["doc-1"]);
+    expect(getLastSentEmail(sender)?.html).to.not.include("Photos/&nbsp;&nbsp;(1 files, preserved)");
 
     setFakeStructuredCompletions([{
       folder_prefixes_in_scope: [],
@@ -3143,12 +3137,7 @@ describe("organize phased proposal flow", function() {
 
     savedPlan = await loadSavedPlan(proposalId);
     expect(savedPlan.ignoredFolders).to.deep.equal(["01-Personal/Photos"]);
-    expect(savedPlan.file_actions.find((action) => action.file_id === "photo-1")).to.deep.include({
-      file_id: "photo-1",
-      new_folder: "01-Personal/Photos",
-      action: "keep",
-      reason: "Preserved by user: \"01-Personal/Photos\" left as-is",
-    });
+    expect(savedPlan.file_actions.find((action) => action.file_id === "photo-1")).to.equal(undefined);
     expect(savedPlan.file_actions.find((action) => action.file_id === "doc-1")).to.deep.include({
       file_id: "doc-1",
       new_folder: "02-Work",
@@ -3297,15 +3286,10 @@ describe("organize phased proposal flow", function() {
 
     const savedPlan = await loadSavedPlan(proposalId);
     expect(savedPlan.ignoredFolders).to.deep.equal(["01-Personal/Photos"]);
-    expect(savedPlan.file_actions.find((action) => action.file_id === "photo-1")).to.deep.include({
-      file_id: "photo-1",
-      new_folder: "01-Personal/Photos",
-      action: "keep",
-    });
+    expect(savedPlan.file_actions.find((action) => action.file_id === "photo-1")).to.equal(undefined);
     const html = getLastSentEmail(sender)?.html || "";
-    expect(html).to.include("Affected files (2):");
-    expect(html).to.include("01-Personal/Photos/beach.jpg");
-    expect(html).to.include("01-Personal/Photos/beach.jpg (keep)");
+    expect(html).to.include("Affected files (1):");
+    expect(html).to.not.include("01-Personal/Photos/beach.jpg");
     expect(html).to.include("Inbox/invoice.pdf");
     expect(html).to.include("02-Work/2026.04.23 - invoice.pdf");
   });
@@ -4084,7 +4068,7 @@ describe("organize sequential execution proposal builder", function() {
     expect(fileActions[0].new_folder).to.equal("01-Docs");
   });
 
-  it("DT00ubh2 counts ignored kept files and errors during reconciliation", function() {
+  it("DT00ubh2 counts kept files and errors during reconciliation", function() {
     const runningTree: DriveOrganizeProposal["proposed_folders"] = [{
       folder_path: "01-Docs",
       description: "Documents",
@@ -4093,24 +4077,9 @@ describe("organize sequential execution proposal builder", function() {
     const stats = {planned: 0, failed: 0, skipped: 0};
     const results: Parameters<typeof reconcilePlanningChunkResults>[0] = [
       {
-        kind: "ignored",
-        file: {
-          id: "file-1",
-          name: "beach.jpg",
-          mimeType: "image/jpeg",
-          parentId: "root",
-          parentPath: "01-Personal/Photos",
-          createdTime: "2026-04-10T00:00:00.000Z",
-          size: 100,
-          webViewLink: "",
-          isFolder: false,
-        },
-        ignoredRoot: "01-Personal/Photos",
-      },
-      {
         kind: "proposed",
         file: {
-          id: "file-2",
+          id: "file-1",
           name: "invoice.pdf",
           mimeType: "application/pdf",
           parentId: "root",
@@ -4121,7 +4090,7 @@ describe("organize sequential execution proposal builder", function() {
           isFolder: false,
         },
         proposed: {
-          file_id: "file-2",
+          file_id: "file-1",
           current_name: "invoice.pdf",
           current_path: "01-Docs",
           new_name: "invoice.pdf",
@@ -4135,7 +4104,7 @@ describe("organize sequential execution proposal builder", function() {
       {
         kind: "proposed",
         file: {
-          id: "file-3",
+          id: "file-2",
           name: "contract.pdf",
           mimeType: "application/pdf",
           parentId: "root",
@@ -4146,7 +4115,7 @@ describe("organize sequential execution proposal builder", function() {
           isFolder: false,
         },
         proposed: {
-          file_id: "file-3",
+          file_id: "file-2",
           current_name: "contract.pdf",
           current_path: "Inbox",
           new_name: "2026.04.12 - Contract.pdf",
@@ -4160,7 +4129,7 @@ describe("organize sequential execution proposal builder", function() {
       {
         kind: "error",
         file: {
-          id: "file-4",
+          id: "file-3",
           name: "bad.pdf",
           mimeType: "application/pdf",
           parentId: "root",
@@ -4182,30 +4151,24 @@ describe("organize sequential execution proposal builder", function() {
         {proposalId: "proposal-2", chunkIndex: 1},
     );
 
-    expect(fileActions).to.have.length(4);
+    expect(fileActions).to.have.length(3);
     expect(fileActions[0]).to.deep.include({
       file_id: "file-1",
       action: "keep",
-      new_folder: "01-Personal/Photos",
-      reason: "Preserved by user: \"01-Personal/Photos\" left as-is",
+      new_folder: "01-Docs",
     });
     expect(fileActions[1]).to.deep.include({
       file_id: "file-2",
-      action: "keep",
+      action: "move_and_rename",
       new_folder: "01-Docs",
     });
     expect(fileActions[2]).to.deep.include({
       file_id: "file-3",
-      action: "move_and_rename",
-      new_folder: "01-Docs",
-    });
-    expect(fileActions[3]).to.deep.include({
-      file_id: "file-4",
       action: "keep",
       new_folder: "Inbox",
       reason: "Automatic analysis failed — left in place",
     });
-    expect(stats).to.deep.equal({planned: 1, failed: 1, skipped: 2});
+    expect(stats).to.deep.equal({planned: 1, failed: 1, skipped: 1});
   });
 
   describe("pruneOrphanNewDirectories", function() {
@@ -4892,6 +4855,127 @@ describe("organize sequential execution proposal builder", function() {
     );
   });
 
+  it("DT00ubif filters ignored-folder files out before chunk planning", async function() {
+    const uid = "execution-ignore-planning";
+    const sender = "execution-ignore-planning@example.com";
+    const proposalId = `execution-ignore-planning-${Date.now()}`;
+    const storagePath = `organize-proposals/${proposalId}.json`;
+    const phaseData = {
+      directoryLayout: {
+        approvedStructure: [{
+          folder_path: "01-Docs",
+          description: "Documents",
+        }],
+      },
+      filenameConvention: {convention: "YYYY.MM.DD - Description.ext"},
+      execution: {chunkSize: 10, totalChunks: 1, completedChunks: 0},
+    };
+    const chunkFiles: DriveFileEntry[] = [
+      {id: "ignored-root", name: "ignored-root.pdf", mimeType: "application/pdf", parentId: "ignored", parentPath: "IgnoreMe", createdTime: "2026-04-10T00:00:00.000Z", size: 999999999, webViewLink: "", isFolder: false},
+      {id: "ignored-child", name: "ignored-child.pdf", mimeType: "application/pdf", parentId: "ignored-child", parentPath: "IgnoreMe/Sub", createdTime: "2026-04-11T00:00:00.000Z", size: 999999999, webViewLink: "", isFolder: false},
+      {id: "kept-1", name: "kept.pdf", mimeType: "application/pdf", parentId: "inbox", parentPath: "Inbox", createdTime: "2026-04-12T00:00:00.000Z", size: 999999999, webViewLink: "", isFolder: false},
+    ];
+
+    await db.collection("DriveUsers").doc(uid).set({
+      access_token: "test-access-token",
+      refresh_token: "test-refresh-token",
+    });
+    await db.collection("OrganizeProposals").doc(proposalId).set({
+      uid,
+      senderEmail: sender,
+      emailId: "execution-ignore-planning-email-id",
+      status: "planning",
+      phase: "plan_review",
+      createdAt: "2026-04-16T00:00:00.000Z",
+      expiresAt: "2099-04-16T00:00:00.000Z",
+      storagePath,
+      ignoredFolders: ["IgnoreMe"],
+      phaseData,
+      cost: {},
+    });
+
+    const bucket = getStorage().bucket();
+    await bucket.file(storagePath).save(JSON.stringify({
+      fileEntries: chunkFiles,
+      senderEmail: sender,
+      phaseData,
+    }), {contentType: "application/json"});
+    await bucket.file(`organize-proposals/${proposalId}-execution-tree--1.json`).save(JSON.stringify([{
+      folder_path: "01-Docs",
+      description: "Documents",
+    }]), {contentType: "application/json"});
+
+    const requestedFileIds: string[] = [];
+    setOpenAIClientForTest({
+      chat: {
+        completions: {
+          create: async (params: {messages: Array<{content: unknown}>}) => {
+            const systemContent = params.messages[0]?.content;
+            const userContent = params.messages[1]?.content;
+            const promptText = typeof systemContent === "string" ? systemContent : "";
+            const requestText = typeof userContent === "string" ?
+              userContent :
+              Array.isArray(userContent) ?
+                userContent.map((part) => typeof part === "object" && part && "text" in part ?
+                  String((part as {text?: string}).text || "") :
+                  "").join("\n") :
+                "";
+            const fileId = requestText.match(/ID:\s*([^\n]+)/)?.[1]?.trim() || "unknown-file";
+            const fileName = requestText.match(/Name:\s*([^\n]+)/)?.[1]?.trim() || "unknown.pdf";
+            const currentPath = requestText.match(/Current Path:\s*([^\n]+)/)?.[1]?.trim() || "My Drive";
+            requestedFileIds.push(fileId);
+
+            const content: unknown = promptText === proposeFileNamePrompt.prompt ?
+              {
+                file_id: fileId,
+                current_name: fileName,
+                current_path: currentPath,
+                new_name: fileName,
+                reason: "Keep name",
+              } :
+              {
+                file_id: fileId,
+                current_name: fileName,
+                current_path: currentPath,
+                target_directory: "01-Docs",
+                action: "move",
+                needs_new_directory: false,
+                new_directory: null,
+                reason: "Move into documents",
+              };
+
+            return {
+              choices: [{
+                message: {content: JSON.stringify(content)},
+                finish_reason: "stop",
+              }],
+              usage: {total_tokens: 1},
+            };
+          },
+        },
+      },
+    } as unknown as OpenAI);
+
+    await processPlanningChunk(makeTestEmail("plan"), {
+      proposalId,
+      emailId: "execution-ignore-planning-email-id",
+      uid,
+      chunkIndex: 0,
+    });
+
+    const [planningChunkContents] = await bucket.file(`organize-proposals/${proposalId}-planning-chunk-0.json`).download();
+    const planningChunk = JSON.parse(planningChunkContents.toString()) as {
+      file_actions: DriveOrganizeProposal["file_actions"];
+      stats: {planned: number; failed: number; skipped: number};
+    };
+    const savedPlan = await loadSavedPlan(proposalId);
+
+    expect(requestedFileIds).to.deep.equal(["kept-1", "kept-1"]);
+    expect(planningChunk.file_actions.map((action) => action.file_id)).to.deep.equal(["kept-1"]);
+    expect(planningChunk.stats).to.deep.equal({planned: 1, failed: 0, skipped: 0});
+    expect(savedPlan.file_actions.map((action) => action.file_id)).to.deep.equal(["kept-1"]);
+  });
+
   async function runProcessExecutionOverrideCase(options: {
     testId: string;
     file: DriveFileEntry;
@@ -5367,27 +5451,23 @@ describe("admin resume routes", function() {
         fileEntries: DriveFileEntry[];
       };
 
-      expect(proposal.status).to.equal("pending");
-      expect(proposal.phase).to.equal("plan_review");
+      expect(proposal.status).to.equal("completed");
+      expect(proposal.phase).to.equal("completed");
       expect(proposal.emailId).to.match(/^admin-organize-rerun-\d+$/);
       expect(proposal.phaseData?.directoryLayout?.approvedStructure).to.deep.equal([{
         folder_path: "001-Invoices",
         description: "Invoices",
       }]);
-      expect(proposal.phaseData?.execution?.completedChunks).to.equal(1);
-      expect(proposal.phaseData?.execution?.totalChunks).to.equal(1);
-      expect(proposal.phaseData?.planReview?.fileActionsVersion).to.equal(1);
+      expect(proposal.phaseData?.execution?.completedChunks).to.equal(0);
+      expect(proposal.phaseData?.execution?.totalChunks).to.equal(0);
+      expect(proposal.phaseData?.planReview?.fileActionsVersion).to.equal(0);
       expect(savedState.fileEntries.map((entry) => entry.id)).to.deep.equal(["fresh-1", "folder-inbox"]);
-      expect(savedPlan.file_actions).to.deep.equal([{
-        file_id: "fresh-1",
-        current_name: "invoice-renamed.pdf",
-        current_path: "Inbox",
-        new_name: "invoice-renamed.pdf",
-        new_folder: "Inbox",
-        action: "keep",
-        reason: "Preserved by user: \"Inbox\" left as-is",
+      expect(savedPlan.proposed_folders).to.deep.equal([{
+        folder_path: "001-Invoices",
+        description: "Invoices",
       }]);
-      expect(savedPlan.file_actions.some((action) => action.file_id === "stale-1")).to.equal(false);
+      expect(savedPlan.file_actions).to.deep.equal([]);
+      expect(savedPlan.ignoredFolders).to.deep.equal(["Inbox"]);
     });
 
     it("DT00uf returns 409 when proposal is not at plan_review", async function() {

@@ -10,6 +10,7 @@ import {handleOrganizeDrive} from "./organizeMain";
 import {handleOrganizeProposalReply} from "./organizeProposal";
 import {processMoveChunk, processPlanningChunk, startChunkedMove} from "./organizeExecution";
 import {signActionToken} from "./organizeHelpers";
+import {isAdminEmailId, resolveOutboundRecipient} from "../driveUtils";
 import {driveSignupUrl} from "../mailTemplates";
 import {ENVIRONMENT_NAME, RESEND_API_KEY} from "../../../util/config";
 import {AGENT_EMAIL_ADDRESS} from "../config";
@@ -68,11 +69,6 @@ export function parseOAuthState(
   const json = Buffer.from(state, "base64url").toString();
   const parsed = JSON.parse(json);
   return {emailId: parsed.emailId, proposal: parsed.proposal, organize: parsed.organize};
-}
-
-/** Detects synthetic email IDs created by the admin organize endpoint. */
-function isAdminEmailId(emailId: string): boolean {
-  return emailId.startsWith("admin-organize-");
 }
 
 /** Builds a synthetic email object for admin-triggered organize work. */
@@ -293,8 +289,8 @@ export async function dispatchPlanningChunkTask(
     let transformedEmail: TransformedEmail;
     if (isAdminEmailId(data.emailId)) {
       const proposal = await getOrganizeProposal(data.proposalId);
-      const senderEmail = (proposal as unknown as OrganizeProposalDoc)?.senderEmail || "";
-      transformedEmail = buildAdminSyntheticEmail(senderEmail);
+      const recipient = resolveOutboundRecipient(proposal as unknown as OrganizeProposalDoc);
+      transformedEmail = buildAdminSyntheticEmail(recipient);
     } else {
       ({transformedEmail} = await fetchEmailById(data.emailId));
     }
@@ -328,8 +324,8 @@ export async function dispatchMoveChunkTask(
     let transformedEmail: TransformedEmail;
     if (isAdminEmailId(data.emailId)) {
       const proposal = await getOrganizeProposal(data.proposalId);
-      const senderEmail = (proposal as unknown as OrganizeProposalDoc)?.senderEmail || "";
-      transformedEmail = buildAdminSyntheticEmail(senderEmail);
+      const recipient = resolveOutboundRecipient(proposal as unknown as OrganizeProposalDoc);
+      transformedEmail = buildAdminSyntheticEmail(recipient);
     } else {
       ({transformedEmail} = await fetchEmailById(data.emailId));
     }
@@ -337,10 +333,16 @@ export async function dispatchMoveChunkTask(
     return;
   }
 
+  const moveTaskId = [
+    sanitizeProposalIdForTaskId(data.proposalId),
+    sanitizeProposalIdForTaskId(data.emailId),
+    "move",
+    String(data.chunkIndex),
+  ].join("-").slice(0, 500);
   await enqueueChunkTask(
       "locations/us-central1/functions/v2driveMoveChunkTask",
       data,
-      `${sanitizeProposalIdForTaskId(data.proposalId)}-move-${data.chunkIndex}`,
+      moveTaskId,
       {proposalId: data.proposalId, chunkIndex: data.chunkIndex, phase: "move"},
   );
   logger.info("Drive move chunk: Dispatched task", {
@@ -588,8 +590,8 @@ export async function handleOrganizeActionTask(
   let transformedEmail: TransformedEmail;
   if (isAdminEmailId(emailId)) {
     const proposal = await getOrganizeProposal(proposalId);
-    const senderEmail = (proposal as unknown as OrganizeProposalDoc)?.senderEmail || "";
-    transformedEmail = buildAdminSyntheticEmail(senderEmail);
+    const recipient = resolveOutboundRecipient(proposal as unknown as OrganizeProposalDoc);
+    transformedEmail = buildAdminSyntheticEmail(recipient);
   } else {
     ({transformedEmail} = await fetchEmailById(emailId));
   }
@@ -599,7 +601,8 @@ export async function handleOrganizeActionTask(
       throw new Error("Organize proposal not found");
     }
     const proposalDoc = rawProposal as unknown as OrganizeProposalDoc;
-    await startChunkedMove(transformedEmail, proposalDoc.senderEmail, proposalDoc.uid, proposalId, proposalDoc);
+    const recipient = resolveOutboundRecipient(proposalDoc);
+    await startChunkedMove(transformedEmail, recipient, proposalDoc.uid, proposalId, proposalDoc);
     logger.info("Drive organize action task: Complete", {proposalId, action});
     return;
   }
@@ -619,8 +622,8 @@ export async function handlePlanningChunkTask(
   let transformedEmail: TransformedEmail;
   if (isAdminEmailId(emailId)) {
     const proposal = await getOrganizeProposal(proposalId);
-    const senderEmail = (proposal as unknown as OrganizeProposalDoc)?.senderEmail || "";
-    transformedEmail = buildAdminSyntheticEmail(senderEmail);
+    const recipient = resolveOutboundRecipient(proposal as unknown as OrganizeProposalDoc);
+    transformedEmail = buildAdminSyntheticEmail(recipient);
   } else {
     ({transformedEmail} = await fetchEmailById(emailId));
   }
@@ -639,8 +642,8 @@ export async function handleMoveChunkTask(
   let transformedEmail: TransformedEmail;
   if (isAdminEmailId(emailId)) {
     const proposal = await getOrganizeProposal(proposalId);
-    const senderEmail = (proposal as unknown as OrganizeProposalDoc)?.senderEmail || "";
-    transformedEmail = buildAdminSyntheticEmail(senderEmail);
+    const recipient = resolveOutboundRecipient(proposal as unknown as OrganizeProposalDoc);
+    transformedEmail = buildAdminSyntheticEmail(recipient);
   } else {
     ({transformedEmail} = await fetchEmailById(emailId));
   }
