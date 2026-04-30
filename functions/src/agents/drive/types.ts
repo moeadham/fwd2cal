@@ -355,6 +355,7 @@ export interface DrivePrompts {
   proposePlacement: DrivePromptConfig;
   interpretMoveInstructions: DrivePromptConfig;
   reviseOrganization: DrivePromptConfig;
+  refineDirectoryTree: DrivePromptConfig;
   setPreferences: DrivePromptConfig;
   detectFolderConvention: DrivePromptConfig;
   analyzeDirectoryStructure: DrivePromptConfig;

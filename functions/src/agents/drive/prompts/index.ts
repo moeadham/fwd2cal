@@ -16,6 +16,11 @@ import {
   VERSION_PARAM as REVISE_ORGANIZATION_VERSION_PARAM,
 } from "./reviseOrganization";
 import {
+  versions as refineDirectoryTreeVersions,
+  VERSION_KEY as REFINE_DIRECTORY_TREE_VERSION_KEY,
+  VERSION_PARAM as REFINE_DIRECTORY_TREE_VERSION_PARAM,
+} from "./refineDirectoryTree";
+import {
   versions as setPreferencesVersions,
   VERSION_KEY as SET_PREFERENCES_VERSION_KEY,
   VERSION_PARAM as SET_PREFERENCES_VERSION_PARAM,
@@ -90,6 +95,10 @@ function getPrompts(): { prompts: DrivePrompts; versions: Record<string, string>
       REVISE_ORGANIZATION_VERSION_PARAM,
       reviseOrganizationVersions,
   );
+  const refineDirectoryTree = resolvePrompt(
+      REFINE_DIRECTORY_TREE_VERSION_PARAM,
+      refineDirectoryTreeVersions,
+  );
   const setPreferences = resolvePrompt(
       SET_PREFERENCES_VERSION_PARAM,
       setPreferencesVersions,
@@ -145,6 +154,7 @@ function getPrompts(): { prompts: DrivePrompts; versions: Record<string, string>
     proposePlacement: proposePlacement.prompt,
     interpretMoveInstructions: interpretMoveInstructions.prompt,
     reviseOrganization: reviseOrganization.prompt,
+    refineDirectoryTree: refineDirectoryTree.prompt,
     setPreferences: setPreferences.prompt,
     detectFolderConvention: detectFolderConvention.prompt,
     analyzeDirectoryStructure: analyzeDirectoryStructure.prompt,
@@ -163,6 +173,7 @@ function getPrompts(): { prompts: DrivePrompts; versions: Record<string, string>
     [PROPOSE_PLACEMENT_VERSION_KEY]: proposePlacement.version,
     [INTERPRET_MOVE_INSTRUCTIONS_VERSION_KEY]: interpretMoveInstructions.version,
     [REVISE_ORGANIZATION_VERSION_KEY]: reviseOrganization.version,
+    [REFINE_DIRECTORY_TREE_VERSION_KEY]: refineDirectoryTree.version,
     [SET_PREFERENCES_VERSION_KEY]: setPreferences.version,
     [DETECT_FOLDER_CONVENTION_VERSION_KEY]: detectFolderConvention.version,
     [ANALYZE_DIRECTORY_STRUCTURE_VERSION_KEY]: analyzeDirectoryStructure.version,

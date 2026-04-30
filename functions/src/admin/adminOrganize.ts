@@ -6,7 +6,6 @@ import * as driveHelper from "../agents/drive/driveHelper";
 import {dispatchOrganizeActionTask} from "../agents/drive/handlers/dispatchHandler";
 import {loadSavedPlan} from "../agents/drive/handlers/organizeExecution";
 import {buildDriveStructureSummary, buildFileEntries} from "../agents/drive/handlers/organizeHelpers";
-import {findIgnoredRoot, normalizeIgnoredFolderPaths} from "../agents/drive/handlers/organizeProposal";
 import {findGeneratingProposal, hasFullDriveScope, scanAndPropose} from "../agents/drive/organizeHandler";
 import {isDriveAuthError} from "../agents/drive/driveUtils";
 import {
@@ -250,10 +249,8 @@ export async function handleAdminOrganizeRequest(req: Request, res: Response): P
       return;
     }
 
-    const normalizedIgnoredFolders = normalizeIgnoredFolderPaths(ignoredFolders);
     const nonFolderEntries = fileEntries
-        .filter((entry) => !entry.isFolder)
-        .filter((entry) => findIgnoredRoot(entry.parentPath || "", normalizedIgnoredFolders) === null);
+        .filter((entry) => !entry.isFolder);
     const totalNonFolderFiles = nonFolderEntries.length;
     let sampledNonFolderEntries = nonFolderEntries;
     if (totalNonFolderFiles > fileLimit) {

@@ -16,11 +16,13 @@ import {
   MAX_DRIVE_UPLOAD_BYTES,
   ORGANIZE_DRIVE_CHUNK_SIZE,
   ORGANIZE_DRIVE_PLAN_CONCURRENCY,
+  ORGANIZE_DRIVE_REFINE_TREE_PER_CHUNK,
 } from "../config";
 import {driveMailTemplates, driveOrganizeActionUrl} from "../mailTemplates";
 import {
   DriveFileEntry,
   DriveOrganizeProposal,
+  FolderOperation,
   MoveChunkTaskData,
   OrganizeEmbeddedData,
   OrganizeIntermediateState,
@@ -31,7 +33,13 @@ import {
 } from "../types";
 import {buildOrganizeEmbeddedData, renderFolderTree} from "../templates/folderTree";
 import {extractContentSummary, extractDocumentImageUrls} from "../fileProcessor";
-import {DEFAULT_FOLDER_CONVENTION, proposeFileName, proposePlacement as defaultProposePlacement} from "../llm";
+import {
+  applyFolderOperations,
+  DEFAULT_FOLDER_CONVENTION,
+  proposeFileName,
+  proposePlacement as defaultProposePlacement,
+  refineDirectoryTree,
+} from "../llm";
 import {ProposeFileNameResult} from "../prompts/proposeFileName/v1";
 import {ProposePlacementResult} from "../prompts/proposePlacement/v1";
 import {applyTemplate, resolveOutboundRecipient, toTitleCase} from "../driveUtils";
@@ -144,6 +152,7 @@ export const getPlanCsvStoragePath = (proposalId: string) =>
 export const getSampledPlanCsvStoragePath = (proposalId: string, timestamp: number) =>
   `organize-proposals/proposal-${proposalId}-sample-${timestamp}.csv`;
 let createOrUpdateProposalSheetImpl = createOrUpdateProposalSheet;
+let refineDirectoryTreeImpl = refineDirectoryTree;
 
 function getProposalSheetRef(
     proposalId: string,
@@ -356,6 +365,119 @@ export function reconcilePlanningChunkResults(
   }
 
   return fileActions;
+}
+
+function isRefinementFolderOperation(op: FolderOperation): op is FolderOperation & {action: "rename" | "merge"} {
+  return op.action === "rename" || op.action === "merge";
+}
+
+function reassignFileActionsById(
+    originalActions: DriveOrganizeProposal["file_actions"],
+    refinedActionsById: Map<string, DriveOrganizeProposal["file_actions"][number]>,
+    context: {proposalId: string; chunkIndex: number; sourceChunkIndex: number},
+): DriveOrganizeProposal["file_actions"] {
+  return originalActions.map((action) => {
+    const refinedAction = refinedActionsById.get(action.file_id);
+    if (!refinedAction) {
+      logger.warn("Drive organize tree refinement: missing refined file action", {
+        proposalId: context.proposalId,
+        chunkIndex: context.chunkIndex,
+        sourceChunkIndex: context.sourceChunkIndex,
+        fileId: action.file_id,
+      });
+      return action;
+    }
+    return refinedAction;
+  });
+}
+
+async function maybeRefinePlanningTree(
+    proposalId: string,
+    uid: string,
+    chunkIndex: number,
+    runningTree: DriveOrganizeProposal["proposed_folders"],
+    fileActions: DriveOrganizeProposal["file_actions"],
+    newDirsCount: number,
+): Promise<{
+  runningTree: DriveOrganizeProposal["proposed_folders"];
+  fileActions: DriveOrganizeProposal["file_actions"];
+}> {
+  if (ORGANIZE_DRIVE_REFINE_TREE_PER_CHUNK.value() !== "true" || newDirsCount <= 0) {
+    return {runningTree, fileActions};
+  }
+
+  const cancelledBeforeRefinement = await isOrganizeProposalCancelled(proposalId);
+  if (cancelledBeforeRefinement) {
+    logger.info("Drive organize tree refinement: Proposal cancelled, skipping refinement", {
+      proposalId,
+      chunkIndex,
+    });
+    return {runningTree, fileActions};
+  }
+
+  const priorChunks = await Promise.all(
+      Array.from({length: chunkIndex}, async (_value, i) => ({
+        chunkIndex: i,
+        result: await loadExecutionJson<PlanningChunkResult>(getPlanningChunkPath(proposalId, i)),
+      })),
+  );
+  const combinedActions = [
+    ...priorChunks.flatMap((chunk) => chunk.result.file_actions),
+    ...fileActions,
+  ];
+  const refinement = await refineDirectoryTreeImpl(runningTree, uid);
+  const droppedOps = refinement.folder_operations.filter((op) => !isRefinementFolderOperation(op));
+  for (const op of droppedOps) {
+    logger.warn("Drive organize tree refinement: dropped op", {
+      action: op.action,
+      path: op.path || op.from || op.to || op.into || op.source_path,
+    });
+  }
+  const filteredOps = refinement.folder_operations.filter(isRefinementFolderOperation);
+  if (filteredOps.length === 0) {
+    logger.info("Drive organize tree refinement: no allowed ops", {
+      proposalId,
+      chunkIndex,
+      droppedCount: droppedOps.length,
+    });
+    return {runningTree, fileActions};
+  }
+
+  const {proposal: refined} = applyFolderOperations({
+    proposed_folders: runningTree,
+    file_actions: combinedActions,
+    summary: "",
+  }, filteredOps, refinement.summary);
+  const refinedActionsById = new Map(refined.file_actions.map((action) => [action.file_id, action]));
+
+  await Promise.all(priorChunks.map((chunk) => {
+    const refinedPriorActions = reassignFileActionsById(
+        chunk.result.file_actions,
+        refinedActionsById,
+        {proposalId, chunkIndex, sourceChunkIndex: chunk.chunkIndex},
+    );
+    return saveExecutionJson(getPlanningChunkPath(proposalId, chunk.chunkIndex), {
+      file_actions: refinedPriorActions,
+      stats: chunk.result.stats,
+    } satisfies PlanningChunkResult);
+  }));
+
+  const refinedCurrentActions = reassignFileActionsById(
+      fileActions,
+      refinedActionsById,
+      {proposalId, chunkIndex, sourceChunkIndex: chunkIndex},
+  );
+  logger.info("Drive organize tree refinement: applied", {
+    proposalId,
+    chunkIndex,
+    opsCount: filteredOps.length,
+    droppedCount: droppedOps.length,
+  });
+
+  return {
+    runningTree: refined.proposed_folders,
+    fileActions: refinedCurrentActions,
+  };
 }
 
 function getParentFolderPath(folderPath: string): string {
@@ -748,7 +870,7 @@ export async function processPlanningChunk(
   const convention =
     proposalDoc.phaseData?.filenameConvention?.convention ||
     "YYYY.MM.DD - Description.ext";
-  const runningTree = await loadExecutionJson<DriveOrganizeProposal["proposed_folders"]>(
+  let runningTree = await loadExecutionJson<DriveOrganizeProposal["proposed_folders"]>(
       getExecutionTreePath(proposalId, chunkIndex - 1),
   );
   const knownDirectories = new Set(runningTree.map((folder) => folder.folder_path));
@@ -791,13 +913,24 @@ export async function processPlanningChunk(
     }
     return {kind: "error", file, error: lastError} satisfies PlanningWorkerResult;
   });
-  const fileActions = reconcilePlanningChunkResults(
+  const sizeBeforeReconcile = runningTree.length;
+  let fileActions = reconcilePlanningChunkResults(
       results,
       runningTree,
       knownDirectories,
       stats,
       {proposalId, chunkIndex},
   );
+  const refined = await maybeRefinePlanningTree(
+      proposalId,
+      uid,
+      chunkIndex,
+      runningTree,
+      fileActions,
+      runningTree.length - sizeBeforeReconcile,
+  );
+  runningTree = refined.runningTree;
+  fileActions = refined.fileActions;
 
   await saveExecutionJson(getPlanningChunkPath(proposalId, chunkIndex), {
     file_actions: fileActions,
@@ -1394,5 +1527,8 @@ export async function findSubfolder(
 export const organizeExecutionTestHooks = {
   setCreateOrUpdateProposalSheetForTest(fn: typeof createOrUpdateProposalSheetImpl | null): void {
     createOrUpdateProposalSheetImpl = fn || createOrUpdateProposalSheet;
+  },
+  setRefineDirectoryTreeForTest(fn: typeof refineDirectoryTreeImpl | null): void {
+    refineDirectoryTreeImpl = fn || refineDirectoryTree;
   },
 };

@@ -425,6 +425,41 @@ async function reviseOrganization(
   return {proposal: revisedProposal, preservedRootPaths};
 }
 
+/** Refine the in-progress directory tree during chunked planning. */
+async function refineDirectoryTree(
+    runningTree: DriveOrganizeProposal["proposed_folders"],
+    uid: string | null = null,
+): Promise<DriveOrganizeRevision> {
+  const {prompts, versions} = getPrompts();
+  const treeText = renderFolderTreePlainText({
+    proposed_folders: runningTree,
+    file_actions: [],
+    summary: "",
+  });
+  const messages: ChatMessage[] = [
+    {role: "system", content: prompts.refineDirectoryTree.prompt},
+    {role: "user", content: treeText},
+  ];
+
+  const result = await defaultCompletion<DriveOrganizeRevision>(
+      messages,
+      prompts.refineDirectoryTree.model,
+      prompts.refineDirectoryTree.temperature ?? DEFAULT_TEMP,
+      DriveOrganizeRevisionSchema,
+      uid,
+      {promptVersion: versions.PROMPT_REFINE_DIRECTORY_TREE_VERSION},
+  ) as DriveOrganizeRevision;
+
+  logger.info("Drive organize tree refinement result", {
+    proposedFolders: runningTree.length,
+    operationsCount: result.folder_operations.length,
+    operations: result.folder_operations,
+    summary: result.summary,
+  });
+
+  return result;
+}
+
 /** Generates user-facing filename examples for a confirmed convention. */
 async function generateFilenameExamples(
     convention: string,
@@ -1324,7 +1359,8 @@ function applyFolderOperations(
           continue;
         }
         action.action = promoteFolderChangeAction(action.action);
-        action.reason = `Folder renamed: ${from} → ${to}`;
+        const renameNote = `Folder renamed: ${from} → ${to}`;
+        action.reason = action.reason ? `${action.reason}\n${renameNote}` : renameNote;
       }
       if (operation.description) {
         const renamedFolder = folderIndex.get(to);
@@ -1363,7 +1399,8 @@ function applyFolderOperations(
           continue;
         }
         action.action = promoteFolderChangeAction(action.action);
-        action.reason = `Merged: ${from} → ${into}`;
+        const mergeNote = `Merged: ${from} → ${into}`;
+        action.reason = action.reason ? `${action.reason}\n${mergeNote}` : mergeNote;
       }
       continue;
     }
@@ -1913,6 +1950,7 @@ export {
   renderFolderConventionBlock,
   interpretMoveInstructions,
   reviseOrganization,
+  refineDirectoryTree,
   renderFolderTreePlainText,
   normalizeFolderPrefixes,
   normalizeFolderConventionSeparators,

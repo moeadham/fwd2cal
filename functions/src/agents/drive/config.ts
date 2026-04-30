@@ -60,6 +60,18 @@ export const REFINE_ORGANIZATION_MODEL = defineString(
     },
 );
 
+export const ORGANIZE_DRIVE_REFINE_TREE_PER_CHUNK = defineString(
+    "ORGANIZE_DRIVE_REFINE_TREE_PER_CHUNK", {
+      default: "false",
+    },
+);
+
+export const REFINE_TREE_PER_CHUNK_MODEL = defineString(
+    "REFINE_TREE_PER_CHUNK_MODEL", {
+      default: "openai/o4-mini",
+    },
+);
+
 export const ORGANIZE_DRIVE_CHUNK_SIZE = defineInt(
     "ORGANIZE_DRIVE_CHUNK_SIZE", {
       default: 30,

@@ -7,6 +7,7 @@ import * as path from "path";
 import {initializeApp} from "firebase-admin/app";
 import {getFirestore} from "firebase-admin/firestore";
 import {getStorage} from "firebase-admin/storage";
+import {logger as firebaseLogger} from "firebase-functions/v2";
 import OpenAI from "openai";
 import {google} from "googleapis";
 import type {Response} from "superagent";
@@ -3519,6 +3520,359 @@ describe("organize sequential execution proposal builder", function() {
     setOpenAIClientForTest(null);
     dispatchHandlerTestHooks.setGetFunctionsClientForTest(null);
     organizeExecutionTestHooks.setCreateOrUpdateProposalSheetForTest(null);
+    organizeExecutionTestHooks.setRefineDirectoryTreeForTest(null);
+  });
+
+  async function setupPlanningRefinementCase(options: {
+    testId: string;
+    chunkIndex?: number;
+    totalChunks?: number;
+    approvedStructure?: DriveOrganizeProposal["proposed_folders"];
+    previousTree?: DriveOrganizeProposal["proposed_folders"];
+    file?: DriveFileEntry;
+    priorChunks?: Array<{chunkIndex: number; file_actions: DriveOrganizeProposal["file_actions"]}>;
+  }): Promise<{proposalId: string; uid: string; bucket: ReturnType<typeof getStorage>["bucket"] extends () => infer B ? B : never}> {
+    const uid = `${options.testId}-uid`;
+    const sender = `${options.testId}@example.com`;
+    const proposalId = `${options.testId}-${Date.now()}`;
+    const storagePath = `organize-proposals/${proposalId}.json`;
+    const chunkIndex = options.chunkIndex ?? 0;
+    const totalChunks = options.totalChunks ?? 1;
+    const approvedStructure = options.approvedStructure ?? [{
+      folder_path: "Archive",
+      description: "Archived materials",
+    }];
+    const file = options.file ?? {
+      id: `${options.testId}-file`,
+      name: "note.pdf",
+      mimeType: "application/pdf",
+      parentId: "root",
+      parentPath: "Incoming",
+      createdTime: "2026-04-10T00:00:00.000Z",
+      size: 999999999,
+      webViewLink: "",
+      isFolder: false,
+    };
+    const fileEntries = [
+      ...Array.from({length: chunkIndex}, (_value, index): DriveFileEntry => ({
+        id: `${options.testId}-prior-file-${index}`,
+        name: `prior-${index}.pdf`,
+        mimeType: "application/pdf",
+        parentId: "root",
+        parentPath: "Incoming",
+        createdTime: "2026-04-09T00:00:00.000Z",
+        size: 999999999,
+        webViewLink: "",
+        isFolder: false,
+      })),
+      file,
+    ];
+    const phaseData = {
+      directoryLayout: {approvedStructure},
+      filenameConvention: {convention: "YYYY.MM.DD - Description.ext"},
+      execution: {chunkSize: 1, totalChunks, completedChunks: chunkIndex},
+    };
+    await db.collection("DriveUsers").doc(uid).set({
+      access_token: "test-access-token",
+      refresh_token: "test-refresh-token",
+    });
+    await db.collection("OrganizeProposals").doc(proposalId).set({
+      uid,
+      senderEmail: sender,
+      emailId: `${options.testId}-email-id`,
+      status: "planning",
+      phase: "plan_review",
+      createdAt: "2026-04-16T00:00:00.000Z",
+      expiresAt: "2099-04-16T00:00:00.000Z",
+      storagePath,
+      phaseData,
+      cost: {},
+    });
+
+    const bucket = getStorage().bucket();
+    await bucket.file(storagePath).save(JSON.stringify({
+      fileEntries,
+      senderEmail: sender,
+      phaseData,
+    }), {contentType: "application/json"});
+    await bucket.file(`organize-proposals/${proposalId}-execution-tree-${chunkIndex - 1}.json`)
+        .save(JSON.stringify(options.previousTree ?? approvedStructure), {contentType: "application/json"});
+    for (const priorChunk of options.priorChunks || []) {
+      await bucket.file(`organize-proposals/${proposalId}-planning-chunk-${priorChunk.chunkIndex}.json`)
+          .save(JSON.stringify({
+            file_actions: priorChunk.file_actions,
+            stats: {planned: priorChunk.file_actions.length, failed: 0, skipped: 0},
+          }), {contentType: "application/json"});
+    }
+
+    return {proposalId, uid, bucket};
+  }
+
+  function queuePlanningCompletions(options: {
+    file: DriveFileEntry;
+    targetDirectory: string;
+    needsNewDirectory: boolean;
+    newDirectoryPath?: string;
+  }): void {
+    setFakeStructuredCompletions([
+      {
+        file_id: options.file.id,
+        current_name: options.file.name,
+        current_path: options.file.parentPath,
+        new_name: options.file.name,
+        reason: "Keep filename",
+      },
+      {
+        file_id: options.file.id,
+        current_name: options.file.name,
+        current_path: options.file.parentPath,
+        target_directory: options.targetDirectory,
+        action: "move",
+        needs_new_directory: options.needsNewDirectory,
+        new_directory: options.needsNewDirectory ? {
+          folder_path: options.newDirectoryPath || options.targetDirectory,
+          description: "Refined grouping",
+        } : null,
+        reason: "Plan placement",
+      },
+    ]);
+  }
+
+  function makeAction(fileId: string, newFolder: string): DriveOrganizeProposal["file_actions"][number] {
+    return {
+      file_id: fileId,
+      current_name: `${fileId}.pdf`,
+      current_path: "Incoming",
+      new_name: `${fileId}.pdf`,
+      new_folder: newFolder,
+      action: "move",
+      reason: "Test action",
+    };
+  }
+
+  it("DT00ubp keeps per-chunk tree refinement off by default", async function() {
+    const previousFlag = process.env.ORGANIZE_DRIVE_REFINE_TREE_PER_CHUNK;
+    delete process.env.ORGANIZE_DRIVE_REFINE_TREE_PER_CHUNK;
+    const file: DriveFileEntry = {
+      id: "flag-off-file",
+      name: "legacy-note.pdf",
+      mimeType: "application/pdf",
+      parentId: "root",
+      parentPath: "Incoming",
+      createdTime: "2026-04-10T00:00:00.000Z",
+      size: 999999999,
+      webViewLink: "",
+      isFolder: false,
+    };
+    const {proposalId, uid, bucket} = await setupPlanningRefinementCase({testId: "refine-flag-off", file});
+    let refineCalls = 0;
+    organizeExecutionTestHooks.setRefineDirectoryTreeForTest(async () => {
+      refineCalls++;
+      throw new Error("Refinement should not run when the flag is off");
+    });
+    queuePlanningCompletions({
+      file,
+      targetDirectory: "Archive",
+      needsNewDirectory: true,
+      newDirectoryPath: "Archive/Old/X",
+    });
+
+    try {
+      await processPlanningChunk(makeTestEmail("plan"), {
+        proposalId,
+        emailId: "refine-flag-off-email-id",
+        uid,
+        chunkIndex: 0,
+      });
+    } finally {
+      if (previousFlag === undefined) {
+        delete process.env.ORGANIZE_DRIVE_REFINE_TREE_PER_CHUNK;
+      } else {
+        process.env.ORGANIZE_DRIVE_REFINE_TREE_PER_CHUNK = previousFlag;
+      }
+    }
+
+    const [treeContents] = await bucket.file(`organize-proposals/${proposalId}-execution-tree-0.json`).download();
+    const tree = JSON.parse(treeContents.toString()) as DriveOrganizeProposal["proposed_folders"];
+    expect(refineCalls).to.equal(0);
+    expect(tree.map((folder) => folder.folder_path)).to.include("Archive/Old/X");
+  });
+
+  it("DT00ubq skips per-chunk tree refinement when no new directories were added", async function() {
+    const previousFlag = process.env.ORGANIZE_DRIVE_REFINE_TREE_PER_CHUNK;
+    process.env.ORGANIZE_DRIVE_REFINE_TREE_PER_CHUNK = "true";
+    const file: DriveFileEntry = {
+      id: "zero-new-dir-file",
+      name: "archive-note.pdf",
+      mimeType: "application/pdf",
+      parentId: "root",
+      parentPath: "Incoming",
+      createdTime: "2026-04-10T00:00:00.000Z",
+      size: 999999999,
+      webViewLink: "",
+      isFolder: false,
+    };
+    const {proposalId, uid} = await setupPlanningRefinementCase({testId: "refine-zero-new-dir", file});
+    let refineCalls = 0;
+    organizeExecutionTestHooks.setRefineDirectoryTreeForTest(async () => {
+      refineCalls++;
+      throw new Error("Refinement should not run without new directories");
+    });
+    queuePlanningCompletions({
+      file,
+      targetDirectory: "Archive",
+      needsNewDirectory: false,
+    });
+
+    try {
+      await processPlanningChunk(makeTestEmail("plan"), {
+        proposalId,
+        emailId: "refine-zero-new-dir-email-id",
+        uid,
+        chunkIndex: 0,
+      });
+    } finally {
+      if (previousFlag === undefined) {
+        delete process.env.ORGANIZE_DRIVE_REFINE_TREE_PER_CHUNK;
+      } else {
+        process.env.ORGANIZE_DRIVE_REFINE_TREE_PER_CHUNK = previousFlag;
+      }
+    }
+
+    expect(refineCalls).to.equal(0);
+  });
+
+  it("DT00ubr cascades per-chunk tree refinement renames into prior chunk blobs", async function() {
+    const previousFlag = process.env.ORGANIZE_DRIVE_REFINE_TREE_PER_CHUNK;
+    process.env.ORGANIZE_DRIVE_REFINE_TREE_PER_CHUNK = "true";
+    const file: DriveFileEntry = {
+      id: "current-file",
+      name: "x-note.pdf",
+      mimeType: "application/pdf",
+      parentId: "root",
+      parentPath: "Incoming",
+      createdTime: "2026-04-10T00:00:00.000Z",
+      size: 999999999,
+      webViewLink: "",
+      isFolder: false,
+    };
+    const {proposalId, uid, bucket} = await setupPlanningRefinementCase({
+      testId: "refine-rename-cascade",
+      chunkIndex: 2,
+      totalChunks: 3,
+      file,
+      priorChunks: [
+        {chunkIndex: 0, file_actions: [makeAction("prior-0", "Archive/Old/X")]},
+        {chunkIndex: 1, file_actions: [makeAction("prior-1", "Archive/Old/X")]},
+      ],
+    });
+    organizeExecutionTestHooks.setRefineDirectoryTreeForTest(async () => ({
+      folder_operations: [{
+        action: "rename",
+        path: null,
+        description: "Archived X",
+        from: "Archive/Old/X",
+        to: "Archive/X",
+        into: null,
+        source_path: null,
+      }],
+      summary: "Collapsed redundant old nesting",
+    }));
+    queuePlanningCompletions({
+      file,
+      targetDirectory: "Archive",
+      needsNewDirectory: true,
+      newDirectoryPath: "Archive/Old/X",
+    });
+
+    try {
+      await processPlanningChunk(makeTestEmail("plan"), {
+        proposalId,
+        emailId: "refine-rename-cascade-email-id",
+        uid,
+        chunkIndex: 2,
+      });
+    } finally {
+      if (previousFlag === undefined) {
+        delete process.env.ORGANIZE_DRIVE_REFINE_TREE_PER_CHUNK;
+      } else {
+        process.env.ORGANIZE_DRIVE_REFINE_TREE_PER_CHUNK = previousFlag;
+      }
+    }
+
+    const [treeContents] = await bucket.file(`organize-proposals/${proposalId}-execution-tree-2.json`).download();
+    const tree = JSON.parse(treeContents.toString()) as DriveOrganizeProposal["proposed_folders"];
+    expect(tree.map((folder) => folder.folder_path)).to.include("Archive/X");
+    expect(tree.map((folder) => folder.folder_path)).not.to.include("Archive/Old/X");
+
+    for (const index of [0, 1, 2]) {
+      const [chunkContents] = await bucket.file(`organize-proposals/${proposalId}-planning-chunk-${index}.json`)
+          .download();
+      const chunk = JSON.parse(chunkContents.toString()) as {file_actions: DriveOrganizeProposal["file_actions"]};
+      expect(chunk.file_actions.map((action) => action.new_folder)).to.deep.equal(["Archive/X"]);
+    }
+  });
+
+  it("DT00ubs drops forbidden per-chunk tree refinement operations", async function() {
+    const previousFlag = process.env.ORGANIZE_DRIVE_REFINE_TREE_PER_CHUNK;
+    process.env.ORGANIZE_DRIVE_REFINE_TREE_PER_CHUNK = "true";
+    const file: DriveFileEntry = {
+      id: "forbidden-op-file",
+      name: "old-note.pdf",
+      mimeType: "application/pdf",
+      parentId: "root",
+      parentPath: "Incoming",
+      createdTime: "2026-04-10T00:00:00.000Z",
+      size: 999999999,
+      webViewLink: "",
+      isFolder: false,
+    };
+    const {proposalId, uid, bucket} = await setupPlanningRefinementCase({testId: "refine-forbidden-op", file});
+    organizeExecutionTestHooks.setRefineDirectoryTreeForTest(async () => ({
+      folder_operations: [{
+        action: "delete",
+        path: "Archive/Old/X",
+        description: null,
+        from: null,
+        to: null,
+        into: null,
+        source_path: null,
+      }],
+      summary: "Forbidden operation",
+    }));
+    const warnCalls: unknown[][] = [];
+    const originalWarn = firebaseLogger.warn;
+    (firebaseLogger as unknown as {warn: (...args: unknown[]) => void}).warn = (...args: unknown[]) => {
+      warnCalls.push(args);
+      originalWarn(...args);
+    };
+    queuePlanningCompletions({
+      file,
+      targetDirectory: "Archive",
+      needsNewDirectory: true,
+      newDirectoryPath: "Archive/Old/X",
+    });
+
+    try {
+      await processPlanningChunk(makeTestEmail("plan"), {
+        proposalId,
+        emailId: "refine-forbidden-op-email-id",
+        uid,
+        chunkIndex: 0,
+      });
+    } finally {
+      (firebaseLogger as unknown as {warn: typeof originalWarn}).warn = originalWarn;
+      if (previousFlag === undefined) {
+        delete process.env.ORGANIZE_DRIVE_REFINE_TREE_PER_CHUNK;
+      } else {
+        process.env.ORGANIZE_DRIVE_REFINE_TREE_PER_CHUNK = previousFlag;
+      }
+    }
+
+    const [treeContents] = await bucket.file(`organize-proposals/${proposalId}-execution-tree-0.json`).download();
+    const tree = JSON.parse(treeContents.toString()) as DriveOrganizeProposal["proposed_folders"];
+    expect(tree.map((folder) => folder.folder_path)).to.include("Archive/Old/X");
+    expect(warnCalls.some((call) => call[0] === "Drive organize tree refinement: dropped op")).to.equal(true);
   });
 
   it("DT00ubeF sends multimodal content from proposeFileName only when imageUrls are present", async function() {
@@ -4567,7 +4921,7 @@ describe("organize sequential execution proposal builder", function() {
     expect(enqueueCalls).to.have.length(1);
     expect(enqueueCalls[0].opts).to.deep.equal({
       dispatchDeadlineSeconds: 60 * 30,
-      id: "proposal-id-with-bad-chars-plan-3",
+      id: "proposal-id-with-bad-chars-email-id-plan-3",
     });
   });
 
@@ -5461,7 +5815,7 @@ describe("admin resume routes", function() {
       expect(proposal.phaseData?.execution?.completedChunks).to.equal(0);
       expect(proposal.phaseData?.execution?.totalChunks).to.equal(0);
       expect(proposal.phaseData?.planReview?.fileActionsVersion).to.equal(0);
-      expect(savedState.fileEntries.map((entry) => entry.id)).to.deep.equal(["fresh-1", "folder-inbox"]);
+      expect(savedState.fileEntries.map((entry) => entry.id).sort()).to.deep.equal(["folder-inbox", "fresh-1"]);
       expect(savedPlan.proposed_folders).to.deep.equal([{
         folder_path: "001-Invoices",
         description: "Invoices",
