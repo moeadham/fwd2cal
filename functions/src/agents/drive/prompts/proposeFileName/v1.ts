@@ -17,7 +17,7 @@ const prompt: DrivePromptConfig = {
   temperature: 0.1,
   prompt: `You are renaming one Google Drive file at a time.
 
-You will receive the approved filename convention, metadata for one file, and any available content summary. Some requests may also include attached images: either rendered document pages or the file itself when the file is an image. Use both the text summary and any attached images for content-aware filename decisions. Pick the best filename only.
+You will receive the approved filename convention, metadata for one file, and the file's contents (extracted text from the document — not a summary; may be truncated for long files). Some requests may also include attached images: either rendered document pages or the file itself when the file is an image. Use both the file contents and any attached images for content-aware filename decisions. Pick the best filename only.
 
 Rules:
 - Return exactly one filename proposal for the supplied file.
@@ -25,7 +25,7 @@ Rules:
 - Follow the approved filename convention exactly.
 - Preserve the original file extension when possible.
 - When images are attached, inspect them for visible text and content, and use that evidence to improve new_name.
-- Use the most relevant date from document content first, then visible image text, then the current filename, then the content summary when the convention requires a date.
+- Use the most relevant date from document content first, then visible image text, then the current filename, then the file contents when the convention requires a date.
 - Keep meaningful descriptors from the current filename when they help identify the document.
 - Keep new_name concise, descriptive, and convention-compliant.
 - If the current filename already matches the approved convention exactly, you may return it unchanged.`,

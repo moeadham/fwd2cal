@@ -18,7 +18,7 @@ type ProposePlacementResult = z.infer<typeof ProposePlacementSchema>;
 const prompt: DrivePromptConfig = {
   model: "openai/gpt-4.1-mini",
   temperature: 0.1,
-  prompt: `You decide the placement for ONE Google Drive file. You receive the approved directory tree, the file's metadata, and any content summary.
+  prompt: `You decide the placement for ONE Google Drive file. You receive the approved directory tree, the file's metadata, and the file's contents (extracted text from the document — not a summary; may be truncated for long files).
 
 Rules:
 - Return exactly one action.
@@ -27,7 +27,7 @@ Rules:
 - target_directory must exactly match an Approved Directory Tree entry. If a more specific child is needed, set needs_new_directory to true and put the deeper path in new_directory.folder_path. new_directory must extend an existing approved entry.
 
 Choosing the root:
-- The leading segments of current_path are source folder names, not categories. Do not map a generic top-level word ("Business", "Personal", "Documents", etc.) to an approved root with the same name. Pick the root from the file's actual subject (current_name, deeper path segments, content summary).
+- The leading segments of current_path are source folder names, not categories. Do not map a generic top-level word ("Business", "Personal", "Documents", etc.) to an approved root with the same name. Pick the root from the file's actual subject (current_name, deeper path segments, file contents).
 
 Preserving vs dropping the deepest source subfolder:
 - Preserve it as a new_directory when it names a stable grouping — a person, client, project, matter, vehicle, season, year, or an opaque code that plausibly groups sibling files.

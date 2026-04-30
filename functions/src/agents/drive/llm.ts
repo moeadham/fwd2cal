@@ -843,7 +843,7 @@ async function proposeFileName(
   const userText = `## Filename Convention\n${convention}\n\n` +
     renderFileMetadataBlock(fileInfo) +
     `\n` +
-    `## Content Summary\n${contentSummary || "(none)"}\n`;
+    `## File Contents\n${contentSummary || "(none)"}\n`;
   let userContent: string | Array<TextContent | ImageURLContent>;
   if (imageUrls.length > 0) {
     const contentArray: Array<TextContent | ImageURLContent> = [
@@ -884,7 +884,7 @@ async function proposePlacement(
   const userText = `## Approved Directory Tree\n${tree || "(none)"}\n\n` +
     renderFileMetadataBlock(fileInfo) +
     `\n` +
-    `## Content Summary\n${contentSummary || "(none)"}\n`;
+    `## File Contents\n${contentSummary || "(none)"}\n`;
   const messages: ChatMessage[] = [
     {role: "system", content: prompts.proposePlacement.prompt},
     {role: "user", content: userText},
