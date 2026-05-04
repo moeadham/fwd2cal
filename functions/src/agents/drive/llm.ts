@@ -61,7 +61,6 @@ import {
   ScopePlanRevisionSchema,
   ScopePlanRevisionResult,
 } from "./prompts/scopePlanRevision/v1";
-
 const DEFAULT_FOLDER_CONVENTION = "NN-Category";
 const DEFAULT_FILENAME_CONVENTION = "YYYY.MM.DD - Description.ext";
 
@@ -428,12 +427,13 @@ async function reviseOrganization(
 /** Refine the in-progress directory tree during chunked planning. */
 async function refineDirectoryTree(
     runningTree: DriveOrganizeProposal["proposed_folders"],
+    fileActions: DriveOrganizeProposal["file_actions"],
     uid: string | null = null,
 ): Promise<DriveOrganizeRevision> {
   const {prompts, versions} = getPrompts();
   const treeText = renderFolderTreePlainText({
     proposed_folders: runningTree,
-    file_actions: [],
+    file_actions: fileActions,
     summary: "",
   });
   const messages: ChatMessage[] = [
@@ -878,7 +878,7 @@ async function proposePlacement(
     uid: string | null = null,
 ): Promise<ProposePlacementResult> {
   const {prompts, versions} = getPrompts();
-  const tree = directoryTree
+  const tree = expandApprovedTreeWithAncestors(directoryTree)
       .map((folder) => `- ${folder.folder_path}: ${folder.description}`)
       .join("\n");
   const userText = `## Approved Directory Tree\n${tree || "(none)"}\n\n` +
@@ -1219,6 +1219,40 @@ function normalizeFolderPath(folderPath: string): string {
       .join("/");
 }
 
+type FolderCanonicalRegistry = Map<string, string>;
+
+/** Builds a case-folded folder path registry whose first casing wins. */
+function buildFolderCanonicalRegistry(paths: Iterable<string>): FolderCanonicalRegistry {
+  const registry: FolderCanonicalRegistry = new Map();
+  for (const folderPath of paths) {
+    canonicalizeFolderPath(folderPath, registry);
+  }
+  return registry;
+}
+
+/** Canonicalizes a folder path segment-by-segment against an existing registry. */
+function canonicalizeFolderPath(folderPath: string, registry: FolderCanonicalRegistry): string {
+  const segments = normalizeFolderPath(folderPath).split("/").filter(Boolean);
+  if (segments.length === 0) {
+    return "";
+  }
+
+  let canonicalPath = "";
+  for (const segment of segments) {
+    const candidatePath = canonicalPath ? `${canonicalPath}/${segment}` : segment;
+    const key = candidatePath.toLowerCase();
+    const registeredPath = registry.get(key);
+    if (registeredPath) {
+      canonicalPath = registeredPath;
+      continue;
+    }
+    registry.set(key, candidatePath);
+    canonicalPath = candidatePath;
+  }
+
+  return canonicalPath;
+}
+
 /** Removes a numeric prefix from a folder path segment. */
 function stripFolderPrefix(segment: string): string {
   return segment.replace(/^\d{1,4}[^A-Za-z0-9]+/, "");
@@ -1229,6 +1263,48 @@ function getFolderSegments(folderPath: string): string[] {
   return normalizeFolderPath(folderPath)
       .split("/")
       .filter(Boolean);
+}
+
+const SYNTHESIZED_ANCESTOR_DESCRIPTION =
+  "(category root — extend with new entity sibling)";
+
+/**
+ * Expands an approved folder list with synthesized ancestor entries so the
+ * placement LLM can extend a category root with a new sibling entity folder.
+ * Existing approved entries are preserved verbatim; only missing ancestors
+ * are added, marked with a constant description.
+ */
+function expandApprovedTreeWithAncestors(
+    folders: DriveOrganizeProposal["proposed_folders"],
+): DriveOrganizeProposal["proposed_folders"] {
+  const byPath = new Map<string, DriveOrganizeProposal["proposed_folders"][number]>();
+  for (const folder of folders) {
+    const normalized = normalizeFolderPath(folder.folder_path);
+    if (!normalized || byPath.has(normalized)) {
+      continue;
+    }
+    byPath.set(normalized, {...folder, folder_path: normalized});
+  }
+
+  for (const folderPath of [...byPath.keys()]) {
+    const segments = folderPath.split("/");
+    let ancestor = "";
+    for (let i = 0; i < segments.length - 1; i++) {
+      ancestor = ancestor ? `${ancestor}/${segments[i]}` : segments[i];
+      if (byPath.has(ancestor)) continue;
+      byPath.set(ancestor, {
+        folder_path: ancestor,
+        description: SYNTHESIZED_ANCESTOR_DESCRIPTION,
+      });
+    }
+  }
+
+  return [...byPath.values()].sort((left, right) => {
+    const leftDepth = left.folder_path.split("/").length;
+    const rightDepth = right.folder_path.split("/").length;
+    if (leftDepth !== rightDepth) return leftDepth - rightDepth;
+    return left.folder_path.localeCompare(right.folder_path);
+  });
 }
 
 /** Promotes folder-level changes into file-action entries. */
@@ -1250,16 +1326,19 @@ function applyFolderOperations(
     operations: FolderOperation[],
     summary: string,
 ): { proposal: DriveOrganizeProposal; preservedRootPaths: Set<string> } {
+  const canonicalRegistry = buildFolderCanonicalRegistry(
+      original.proposed_folders.map((folder) => normalizeFolderPath(folder.folder_path)),
+  );
   let proposedFolders = original.proposed_folders.map((folder) => ({
     ...folder,
-    folder_path: normalizeFolderPath(folder.folder_path),
+    folder_path: canonicalizeFolderPath(folder.folder_path, canonicalRegistry),
   })).filter((folder) => Boolean(folder.folder_path));
   const pinnedFolders = new Set<string>();
   const preservedRootPaths = new Set<string>();
   const fileActions = original.file_actions.map((action) => ({
     ...action,
     current_path: normalizeFolderPath(action.current_path || "My Drive") || "My Drive",
-    new_folder: normalizeFolderPath(action.new_folder),
+    new_folder: canonicalizeFolderPath(action.new_folder, canonicalRegistry),
   }));
 
   const folderIndex = new Map<string, DriveOrganizeProposal["proposed_folders"][number]>();
@@ -1287,7 +1366,7 @@ function applyFolderOperations(
       if (!nextPath) {
         continue;
       }
-      const normalizedPath = normalizeFolderPath(nextPath);
+      const normalizedPath = canonicalizeFolderPath(nextPath, canonicalRegistry);
       if (!normalizedPath || seen.has(normalizedPath)) {
         continue;
       }
@@ -1303,7 +1382,7 @@ function applyFolderOperations(
   };
 
   const ensureFolder = (folderPath: string, description: string): void => {
-    const normalizedPath = normalizeFolderPath(folderPath);
+    const normalizedPath = canonicalizeFolderPath(folderPath, canonicalRegistry);
     if (!normalizedPath || folderIndex.has(normalizedPath)) {
       return;
     }
@@ -1317,7 +1396,7 @@ function applyFolderOperations(
 
   for (const operation of operations) {
     if (operation.action === "create") {
-      const createdPath = normalizeFolderPath(operation.path || "");
+      const createdPath = canonicalizeFolderPath(operation.path || "", canonicalRegistry);
       ensureFolder(createdPath, operation.description || "");
       if (createdPath) {
         let currentPath = "";
@@ -1330,8 +1409,8 @@ function applyFolderOperations(
     }
 
     if (operation.action === "rename") {
-      const from = normalizeFolderPath(operation.from || "");
-      const to = normalizeFolderPath(operation.to || "");
+      const from = canonicalizeFolderPath(operation.from || "", canonicalRegistry);
+      const to = canonicalizeFolderPath(operation.to || "", canonicalRegistry);
       if (!from || !to || from === to) {
         continue;
       }
@@ -1372,8 +1451,8 @@ function applyFolderOperations(
     }
 
     if (operation.action === "merge") {
-      const from = normalizeFolderPath(operation.from || "");
-      const into = normalizeFolderPath(operation.into || "");
+      const from = canonicalizeFolderPath(operation.from || "", canonicalRegistry);
+      const into = canonicalizeFolderPath(operation.into || "", canonicalRegistry);
       if (!from || !into || from === into) {
         logger.warn("Drive organize revision: merge skipped", {from, into});
         continue;
@@ -1406,7 +1485,7 @@ function applyFolderOperations(
     }
 
     if (operation.action === "delete") {
-      const folderPath = normalizeFolderPath(operation.path || "");
+      const folderPath = canonicalizeFolderPath(operation.path || "", canonicalRegistry);
       if (!folderPath) {
         continue;
       }
@@ -1439,10 +1518,10 @@ function applyFolderOperations(
     }
 
     if (operation.action === "preserve_source") {
-      const sourcePath = normalizeFolderPath(operation.source_path || "My Drive") || "My Drive";
+      const sourcePath = canonicalizeFolderPath(operation.source_path || "My Drive", canonicalRegistry) || "My Drive";
       const preservedFolders = new Set<string>();
       for (const action of fileActions) {
-        const currentPath = normalizeFolderPath(action.current_path || "My Drive") || "My Drive";
+        const currentPath = canonicalizeFolderPath(action.current_path || "My Drive", canonicalRegistry) || "My Drive";
         if (currentPath !== sourcePath && !currentPath.startsWith(`${sourcePath}/`)) {
           continue;
         }
@@ -1487,7 +1566,7 @@ function applyFolderOperations(
 
   const referencedFolders = new Set<string>();
   for (const action of fileActions) {
-    const folderPath = normalizeFolderPath(action.new_folder);
+    const folderPath = canonicalizeFolderPath(action.new_folder, canonicalRegistry);
     if (!folderPath) {
       continue;
     }
@@ -1957,6 +2036,9 @@ export {
   renumberFoldersContiguously,
   mergeRevisedProposal,
   applyFolderOperations,
+  buildFolderCanonicalRegistry,
+  canonicalizeFolderPath,
+  expandApprovedTreeWithAncestors,
   detectFolderConvention,
   setPreferences,
   analyzeDirectoryStructure,
@@ -1972,3 +2054,4 @@ export {
   sampleFilenamesPerFolder,
   filterFileActionsByScope,
 };
+export type {FolderCanonicalRegistry};

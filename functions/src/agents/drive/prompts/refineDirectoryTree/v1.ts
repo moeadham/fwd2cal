@@ -25,15 +25,42 @@ You will receive only the proposed folder tree accumulated so far during automat
 
 ## Refinement guidance
 - Collapse status, era, or scope nesting that is redundant with the parent. Examples: a legacy or inactive segment under an archive root; an active or current segment under a live-work root; a year segment under a parent already scoped to that same year.
-- Merge near-duplicate siblings caused by casing, whitespace, punctuation, or numeric-prefix drift when their names clearly refer to the same category.
+- Merge folders that name the same proper-noun entity whether they appear under the same parent or different roots. Treat deepest-segment matches case-insensitively when the surrounding paths show the same named subject.
+- Choose the merge destination by preferring an active root over an archive root when both are in use, then the more specific or convention-consistent ancestry, then the higher "(N files)" count as a tiebreaker.
+- Entities are named subjects only, such as a client, vendor, project, matter, place, vehicle, season, or opaque code. Never treat generic category words as entities.
 - Prefer the shorter, cleaner, convention-consistent destination.
-- Preserve meaningful project, client, matter, person, vehicle, season, or opaque-code subfolders.
+- Preserve meaningful project, client, matter, vehicle, season, or opaque-code subfolders.
+- Use "rename" only when the "from" path appears verbatim (including casing) in the input tree. For casing-only consolidation, use "merge" with the surviving casing as "into".
 - When uncertain, return no operation rather than risking a bad consolidation.
 
 ## Operation fields
 - rename: action, from, to, description
 - merge: action, from, into
-- Set unused fields to null.`,
+- Set unused fields to null.
+
+## Example: cross-root entity dedup
+Input tree:
+- 02-Business/Holdings/AcmeCo (5 files)
+- 07-Archive/AcmeCo (3 files)
+- 07-Archive/AcmeCo/Graphical Assets (3 files)
+
+Correct response:
+{
+  "folder_operations": [
+    {
+      "action": "merge",
+      "from": "07-Archive/AcmeCo",
+      "into": "02-Business/Holdings/AcmeCo",
+      "path": null,
+      "to": null,
+      "description": null,
+      "source_path": null
+    }
+  ],
+  "summary": "Merged duplicate AcmeCo entity folders into the active business holdings path."
+}
+
+Reasoning: AcmeCo is the same named entity under two roots. The active 02-Business/Holdings path is already in use and has the higher file count, so it is the canonical destination while 07-Archive/AcmeCo and its descendants fold underneath it.`,
 };
 
 export {prompt};

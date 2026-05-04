@@ -29,6 +29,9 @@ import {
 import {extractDocumentImages} from "../src/util/documentParser";
 import {
   applyFolderOperations,
+  buildFolderCanonicalRegistry,
+  canonicalizeFolderPath,
+  expandApprovedTreeWithAncestors,
   DEFAULT_FOLDER_CONVENTION,
   detectFolderConvention,
   filterFileActionsByScope,
@@ -38,6 +41,7 @@ import {
   proposeFileName,
   proposeFilePlacement,
   proposePlacement,
+  refineDirectoryTree,
   renumberFoldersContiguously,
   renderFolderTreePlainText,
   scopePlanRevision,
@@ -755,6 +759,107 @@ describe("mergeRevisedProposal", function() {
 
 });
 
+describe("canonicalizeFolderPath", function() {
+  it("returns the same canonical string when called with the same case-folded path twice", function() {
+    const registry = buildFolderCanonicalRegistry([]);
+
+    expect(canonicalizeFolderPath("01-Docs/AcmeCo", registry)).to.equal("01-Docs/AcmeCo");
+    expect(canonicalizeFolderPath("01-docs/acmeco", registry)).to.equal("01-Docs/AcmeCo");
+  });
+
+  it("rewrites ancestor segments to the registered casing when only ancestor case differs", function() {
+    const registry = buildFolderCanonicalRegistry(["01-Docs"]);
+
+    expect(canonicalizeFolderPath("01-docs/Receipts", registry)).to.equal("01-Docs/Receipts");
+  });
+
+  it("registers a new leaf casing when the leaf has no case-folded match", function() {
+    const registry = buildFolderCanonicalRegistry(["01-Docs"]);
+
+    expect(canonicalizeFolderPath("01-docs/Receipts", registry)).to.equal("01-Docs/Receipts");
+    expect(canonicalizeFolderPath("01-DOCS/receipts", registry)).to.equal("01-Docs/Receipts");
+  });
+
+  it("returns an empty string for empty or whitespace-only input", function() {
+    const registry = buildFolderCanonicalRegistry([]);
+
+    expect(canonicalizeFolderPath("", registry)).to.equal("");
+    expect(canonicalizeFolderPath("  /   ", registry)).to.equal("");
+  });
+
+  it("buildFolderCanonicalRegistry preserves first-registered casing across the input iterable", function() {
+    const registry = buildFolderCanonicalRegistry(["01-Docs/AcmeCo", "01-docs/acmeco"]);
+
+    expect(canonicalizeFolderPath("01-DOCS/ACMECO", registry)).to.equal("01-Docs/AcmeCo");
+  });
+});
+
+describe("expandApprovedTreeWithAncestors", function() {
+  const MARKER = "(category root — extend with new entity sibling)";
+
+  it("synthesizes a single category-root ancestor for one approved leaf", function() {
+    const expanded = expandApprovedTreeWithAncestors([
+      {folder_path: "02-Business/AcmeCo", description: "AcmeCo active work"},
+    ]);
+
+    expect(expanded).to.deep.equal([
+      {folder_path: "02-Business", description: MARKER},
+      {folder_path: "02-Business/AcmeCo", description: "AcmeCo active work"},
+    ]);
+  });
+
+  it("does not duplicate ancestors shared by two approved leaves", function() {
+    const expanded = expandApprovedTreeWithAncestors([
+      {folder_path: "02-Business/AcmeCo", description: "AcmeCo"},
+      {folder_path: "02-Business/FooLabs", description: "FooLabs"},
+    ]);
+
+    expect(expanded.map((folder) => folder.folder_path)).to.deep.equal([
+      "02-Business",
+      "02-Business/AcmeCo",
+      "02-Business/FooLabs",
+    ]);
+    expect(expanded[0].description).to.equal(MARKER);
+  });
+
+  it("preserves the original description for an approved entry that is also an ancestor", function() {
+    const expanded = expandApprovedTreeWithAncestors([
+      {folder_path: "02-Business", description: "active business"},
+      {folder_path: "02-Business/AcmeCo", description: "AcmeCo"},
+    ]);
+
+    const business = expanded.find((folder) => folder.folder_path === "02-Business");
+    expect(business?.description).to.equal("active business");
+  });
+
+  it("orders ancestors before their descendants", function() {
+    const expanded = expandApprovedTreeWithAncestors([
+      {folder_path: "02-Business/Holdings/AcmeCo", description: "AcmeCo legal entity"},
+    ]);
+
+    expect(expanded.map((folder) => folder.folder_path)).to.deep.equal([
+      "02-Business",
+      "02-Business/Holdings",
+      "02-Business/Holdings/AcmeCo",
+    ]);
+  });
+
+  it("returns an empty list for an empty input", function() {
+    expect(expandApprovedTreeWithAncestors([])).to.deep.equal([]);
+  });
+
+  it("normalizes whitespace and skips empty segments", function() {
+    const expanded = expandApprovedTreeWithAncestors([
+      {folder_path: "  02-Business / AcmeCo  ", description: "AcmeCo"},
+    ]);
+
+    expect(expanded.map((folder) => folder.folder_path)).to.deep.equal([
+      "02-Business",
+      "02-Business/AcmeCo",
+    ]);
+  });
+});
+
 describe("applyFolderOperations", function() {
   function runOps(
       proposal: DriveOrganizeProposal,
@@ -818,6 +923,34 @@ describe("applyFolderOperations", function() {
         .to.deep.equal(["09-Archive"]);
   });
 
+  it("applies a singleton-collapse merge and promotes changed file actions", function() {
+    const proposal = makeOrganizeProposal(
+        ["keep-file", "rename-file"],
+        {
+          "keep-file": "02-Business/AcmeCo/Banking",
+          "rename-file": "02-Business/AcmeCo/Banking",
+        },
+        ["02-Business", "02-Business/AcmeCo", "02-Business/AcmeCo/Banking"],
+    );
+    proposal.file_actions[0].action = "keep";
+    proposal.file_actions[1].action = "rename";
+
+    const result = runOps(proposal, [{
+      action: "merge",
+      path: null,
+      description: null,
+      from: "02-Business/AcmeCo/Banking",
+      to: null,
+      into: "02-Business/AcmeCo",
+      source_path: null,
+    }]);
+
+    expect(result.proposal.file_actions.map((action) => action.new_folder))
+        .to.deep.equal(["02-Business/AcmeCo", "02-Business/AcmeCo"]);
+    expect(result.proposal.file_actions.map((action) => action.action))
+        .to.deep.equal(["move", "move_and_rename"]);
+  });
+
   it("DT00m merge preserves subpath", function() {
     const proposal = makeOrganizeProposal(
         ["1"],
@@ -836,6 +969,86 @@ describe("applyFolderOperations", function() {
     }]);
 
     expect(result.proposal.file_actions[0].new_folder).to.equal("09-Archive/Taxes");
+  });
+
+  it("applies a rename whose from differs only in casing without logging a missing source", function() {
+    const proposal = makeOrganizeProposal(
+        ["1"],
+        {"1": "01-Docs/AcmeCo"},
+        ["01-Docs", "01-Docs/AcmeCo"],
+    );
+    const warnCalls: unknown[][] = [];
+    const originalWarn = firebaseLogger.warn;
+    (firebaseLogger as unknown as {warn: (...args: unknown[]) => void}).warn = (...args: unknown[]) => {
+      warnCalls.push(args);
+    };
+
+    try {
+      const result = runOps(proposal, [{
+        action: "rename",
+        path: null,
+        from: "01-docs/acmeco",
+        to: "01-Docs/AcmeCo Legal",
+        description: "Legal files",
+        into: null,
+        source_path: null,
+      }]);
+
+      expect(result.proposal.proposed_folders.map((folder) => folder.folder_path))
+          .to.deep.equal(["01-Docs", "01-Docs/AcmeCo Legal"]);
+      expect(result.proposal.file_actions[0].new_folder).to.equal("01-Docs/AcmeCo Legal");
+      expect(warnCalls.some((call) => call[0] === "Drive organize revision: rename source folder missing"))
+          .to.equal(false);
+    } finally {
+      (firebaseLogger as unknown as {warn: typeof originalWarn}).warn = originalWarn;
+    }
+  });
+
+  it("cross-root merge rewrites affected file_action folders, preserves subpaths, and promotes actions", function() {
+    const proposal = makeOrganizeProposal(
+        ["1", "2", "3"],
+        {
+          "1": "07-Archive/AcmeCo",
+          "2": "07-Archive/AcmeCo/Graphical Assets",
+          "3": "02-Business/Holdings/AcmeCo",
+        },
+        [
+          "02-Business",
+          "02-Business/Holdings",
+          "02-Business/Holdings/AcmeCo",
+          "07-Archive",
+          "07-Archive/AcmeCo",
+          "07-Archive/AcmeCo/Graphical Assets",
+        ],
+    );
+    proposal.file_actions[0].action = "keep";
+    proposal.file_actions[1].action = "rename";
+    proposal.file_actions[2].action = "move";
+
+    const result = runOps(proposal, [{
+      action: "merge",
+      path: null,
+      description: null,
+      from: "07-Archive/AcmeCo",
+      to: null,
+      into: "02-Business/Holdings/AcmeCo",
+      source_path: null,
+    }]);
+
+    expect(result.proposal.file_actions.map((action) => action.new_folder)).to.deep.equal([
+      "02-Business/Holdings/AcmeCo",
+      "02-Business/Holdings/AcmeCo/Graphical Assets",
+      "02-Business/Holdings/AcmeCo",
+    ]);
+    expect(result.proposal.file_actions.map((action) => action.action)).to.deep.equal([
+      "move",
+      "move_and_rename",
+      "move",
+    ]);
+    expect(result.proposal.proposed_folders.map((folder) => folder.folder_path))
+        .to.include("02-Business/Holdings/AcmeCo/Graphical Assets");
+    expect(result.proposal.proposed_folders.map((folder) => folder.folder_path))
+        .not.to.include("07-Archive/AcmeCo");
   });
 
   it("DT00n create adds folder", function() {
@@ -3938,7 +4151,7 @@ describe("organize sequential execution proposal builder", function() {
             "MIME Type: image/png\n" +
             "Created: 2026-04-10T00:00:00.000Z\n" +
             "Size: 100 bytes\n\n" +
-            "## Content Summary\nReceipt from a cafe\n",
+            "## File Contents\nReceipt from a cafe\n",
         },
         {type: "image_url", image_url: {url: "data:image/png;base64,QUJD"}},
         {type: "image_url", image_url: {url: "data:image/png;base64,REVG"}},
@@ -3973,7 +4186,7 @@ describe("organize sequential execution proposal builder", function() {
         "MIME Type: application/pdf\n" +
         "Created: 2026-04-11T00:00:00.000Z\n" +
         "Size: 200 bytes\n\n" +
-        "## Content Summary\n(none)\n",
+        "## File Contents\n(none)\n",
     });
   });
 
@@ -4039,8 +4252,67 @@ describe("organize sequential execution proposal builder", function() {
         "MIME Type: image/png\n" +
         "Created: 2026-04-10T00:00:00.000Z\n" +
         "Size: 100 bytes\n\n" +
-        "## Content Summary\nReceipt from a cafe\n",
+        "## File Contents\nReceipt from a cafe\n",
     });
+  });
+
+  it("proposePlacement system prompt contains the tighter new_directory rule and Example 5", function() {
+    expect(proposePlacementPrompt.prompt).to.include(
+        "Only create a new_directory when (a) the file's contents or filename clearly identifies a specific named company, organization, or institution",
+    );
+    expect(proposePlacementPrompt.prompt).to.include(
+        "no existing entry in the Approved Directory Tree already represents that entity by case-insensitive name match",
+    );
+    expect(proposePlacementPrompt.prompt).to.include(
+        "Example 5 (do NOT create a folder for a single one-off document)",
+    );
+    expect(proposePlacementPrompt.prompt).to.include("Name: shipping-receipt.pdf");
+    expect(proposePlacementPrompt.prompt).to.include("needs_new_directory: false");
+  });
+
+  it("refineDirectoryTree renders accurate file counts from supplied fileActions", async function() {
+    let capturedRequest: OpenAI.ChatCompletionCreateParams | null = null;
+    setOpenAIClientForTest({
+      chat: {
+        completions: {
+          create: async (request: OpenAI.ChatCompletionCreateParams) => {
+            capturedRequest = request;
+            return {
+              choices: [{
+                message: {
+                  content: JSON.stringify({
+                    folder_operations: [],
+                    summary: "No refinement needed",
+                  }),
+                },
+                finish_reason: "stop",
+              }],
+              usage: {total_tokens: 1},
+            };
+          },
+        },
+      },
+    } as unknown as OpenAI);
+
+    await refineDirectoryTree(
+        [
+          {folder_path: "02-Business/AcmeCo", description: "Business entity"},
+          {folder_path: "02-Business/AcmeCo/Banking", description: "Banking"},
+          {folder_path: "03-Personal/Receipts", description: "Receipts"},
+        ],
+        [
+          makeOrganizeProposal(["1"], {"1": "02-Business/AcmeCo"}).file_actions[0],
+          makeOrganizeProposal(["2"], {"2": "02-Business/AcmeCo/Banking"}).file_actions[0],
+          makeOrganizeProposal(["3"], {"3": "02-Business/AcmeCo/Banking"}).file_actions[0],
+        ],
+        "uid-test",
+    );
+
+    const userContent = capturedRequest?.messages[1]?.content;
+    expect(userContent).to.be.a("string");
+    expect(userContent).to.include("AcmeCo/  (1 files)");
+    expect(userContent).to.include("Banking/  (2 files)");
+    expect(userContent).to.include("Receipts/  (0 files)");
   });
 
   it("DT00ubp synthesizes keep/rename/move/move_and_rename from split naming and placement calls", async function() {
@@ -4332,6 +4604,124 @@ describe("organize sequential execution proposal builder", function() {
     expect(runningTree.map((folder) => folder.folder_path)).to.deep.equal(["01-Docs", "02-Travel"]);
     expect(fileActions.map((action) => action.new_folder)).to.deep.equal(["02-Travel", "02-Travel"]);
     expect(stats).to.deep.equal({planned: 2, failed: 0, skipped: 0});
+  });
+
+  it("dedupes case-different new_directory paths to one runningTree folder and canonical file_action folders", function() {
+    const runningTree: DriveOrganizeProposal["proposed_folders"] = [{
+      folder_path: "01-Docs",
+      description: "Documents",
+    }];
+    const knownDirectories = new Set(runningTree.map((folder) => folder.folder_path));
+    const stats = {planned: 0, failed: 0, skipped: 0};
+    const makeFile = (id: string): DriveFileEntry => ({
+      id,
+      name: `${id}.pdf`,
+      mimeType: "application/pdf",
+      parentId: "root",
+      parentPath: "Inbox",
+      createdTime: "2026-04-10T00:00:00.000Z",
+      size: 100,
+      webViewLink: "",
+      isFolder: false,
+    });
+    const results: Parameters<typeof reconcilePlanningChunkResults>[0] = [
+      {
+        kind: "proposed",
+        file: makeFile("file-1"),
+        proposed: {
+          file_id: "file-1",
+          current_name: "file-1.pdf",
+          current_path: "Inbox",
+          new_name: "file-1.pdf",
+          target_directory: "01-Docs/AcmeCo",
+          action: "move",
+          needs_new_directory: true,
+          new_directory: {
+            folder_path: "01-Docs/AcmeCo",
+            description: "Entity files",
+          },
+          reason: "Entity files",
+        },
+      },
+      {
+        kind: "proposed",
+        file: makeFile("file-2"),
+        proposed: {
+          file_id: "file-2",
+          current_name: "file-2.pdf",
+          current_path: "Inbox",
+          new_name: "file-2.pdf",
+          target_directory: "01-docs/acmeco",
+          action: "move",
+          needs_new_directory: true,
+          new_directory: {
+            folder_path: "01-docs/acmeco",
+            description: "Duplicate entity files",
+          },
+          reason: "Entity files",
+        },
+      },
+    ];
+
+    const fileActions = reconcilePlanningChunkResults(
+        results,
+        runningTree,
+        knownDirectories,
+        stats,
+        {proposalId: "proposal-casing", chunkIndex: 0},
+    );
+
+    expect(runningTree.map((folder) => folder.folder_path)).to.deep.equal(["01-Docs", "01-Docs/AcmeCo"]);
+    expect(fileActions.map((action) => action.new_folder)).to.deep.equal(["01-Docs/AcmeCo", "01-Docs/AcmeCo"]);
+  });
+
+  it("uses approved structure casing over LLM-supplied casing when paths case-fold to the same key", function() {
+    const runningTree: DriveOrganizeProposal["proposed_folders"] = [{
+      folder_path: "01-docs",
+      description: "Documents from previous tree",
+    }];
+    const knownDirectories = new Set(runningTree.map((folder) => folder.folder_path));
+    const stats = {planned: 0, failed: 0, skipped: 0};
+    const fileActions = reconcilePlanningChunkResults(
+        [{
+          kind: "proposed",
+          file: {
+            id: "file-1",
+            name: "entity.pdf",
+            mimeType: "application/pdf",
+            parentId: "root",
+            parentPath: "Inbox",
+            createdTime: "2026-04-10T00:00:00.000Z",
+            size: 100,
+            webViewLink: "",
+            isFolder: false,
+          },
+          proposed: {
+            file_id: "file-1",
+            current_name: "entity.pdf",
+            current_path: "Inbox",
+            new_name: "entity.pdf",
+            target_directory: "01-docs/acmeco",
+            action: "move",
+            needs_new_directory: true,
+            new_directory: {
+              folder_path: "01-docs/acmeco",
+              description: "Entity files",
+            },
+            reason: "Entity files",
+          },
+        }],
+        runningTree,
+        knownDirectories,
+        stats,
+        {proposalId: "proposal-approved-casing", chunkIndex: 0, approvedStructure: [
+          {folder_path: "01-Docs", description: "Approved documents"},
+          {folder_path: "01-Docs/AcmeCo", description: "Approved entity files"},
+        ]},
+    );
+
+    expect(runningTree.map((folder) => folder.folder_path)).to.deep.equal(["01-Docs", "01-Docs/AcmeCo"]);
+    expect(fileActions[0].new_folder).to.equal("01-Docs/AcmeCo");
   });
 
   it("DT00ubh1b uses new_directory.folder_path for reconciled file actions", function() {

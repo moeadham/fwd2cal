@@ -35,11 +35,14 @@ import {buildOrganizeEmbeddedData, renderFolderTree} from "../templates/folderTr
 import {extractContentSummary, extractDocumentImageUrls} from "../fileProcessor";
 import {
   applyFolderOperations,
+  buildFolderCanonicalRegistry,
+  canonicalizeFolderPath,
   DEFAULT_FOLDER_CONVENTION,
   proposeFileName,
   proposePlacement as defaultProposePlacement,
   refineDirectoryTree,
 } from "../llm";
+import type {FolderCanonicalRegistry} from "../llm";
 import {ProposeFileNameResult} from "../prompts/proposeFileName/v1";
 import {ProposePlacementResult} from "../prompts/proposePlacement/v1";
 import {applyTemplate, resolveOutboundRecipient, toTitleCase} from "../driveUtils";
@@ -253,18 +256,23 @@ function deriveEffectiveAction(
     proposed: DerivedFileActionProposal,
     file: DriveFileEntry,
     knownDirectories: Set<string>,
+    canonicalRegistry: FolderCanonicalRegistry,
 ): {
   action: OrganizeFileActionType;
   currentPath: string;
   newFolder: string;
   currentInApprovedTree: boolean;
 } {
-  const currentPath = proposed.current_path || file.parentPath;
+  const currentPath = canonicalizeFolderPath(proposed.current_path || file.parentPath, canonicalRegistry);
+  const proposedNewDirectoryPath = proposed.new_directory ?
+    canonicalizeFolderPath(proposed.new_directory.folder_path, canonicalRegistry) :
+    "";
+  const targetDirectory = canonicalizeFolderPath(proposed.target_directory || file.parentPath, canonicalRegistry);
   const newFolder = proposed.needs_new_directory &&
     proposed.new_directory &&
-    knownDirectories.has(proposed.new_directory.folder_path) ?
-      proposed.new_directory.folder_path :
-      (proposed.target_directory || file.parentPath);
+    knownDirectories.has(proposedNewDirectoryPath) ?
+      proposedNewDirectoryPath :
+      targetDirectory;
   const currentName = proposed.current_name || file.name;
   const newName = proposed.new_name || file.name;
   const currentInApprovedTree = knownDirectories.has(currentPath);
@@ -302,19 +310,48 @@ export function reconcilePlanningChunkResults(
     runningTree: DriveOrganizeProposal["proposed_folders"],
     knownDirectories: Set<string>,
     stats: PlanningChunkResult["stats"],
-    context: {proposalId: string; chunkIndex: number},
+    context: {
+      proposalId: string;
+      chunkIndex: number;
+      approvedStructure?: DriveOrganizeProposal["proposed_folders"];
+    },
 ): DriveOrganizeProposal["file_actions"] {
   const fileActions: DriveOrganizeProposal["file_actions"] = [];
+  const canonicalRegistry = buildFolderCanonicalRegistry([
+    ...(context.approvedStructure || []).map((folder) => folder.folder_path),
+    ...runningTree.map((folder) => folder.folder_path),
+  ]);
+  knownDirectories.clear();
+  const seenRunningTreePaths = new Set<string>();
+  const uniqueRunningTree: DriveOrganizeProposal["proposed_folders"] = [];
+  for (const folder of runningTree) {
+    const canonicalPath = canonicalizeFolderPath(folder.folder_path, canonicalRegistry);
+    folder.folder_path = canonicalPath;
+    if (canonicalPath && !seenRunningTreePaths.has(canonicalPath)) {
+      knownDirectories.add(canonicalPath);
+      seenRunningTreePaths.add(canonicalPath);
+      uniqueRunningTree.push(folder);
+    }
+  }
+  runningTree.splice(0, runningTree.length, ...uniqueRunningTree);
 
   for (const result of results) {
     if (result.kind === "proposed") {
       const {file, proposed} = result;
-      if (proposed.needs_new_directory && proposed.new_directory &&
-          !knownDirectories.has(proposed.new_directory.folder_path)) {
-        runningTree.push(proposed.new_directory);
-        knownDirectories.add(proposed.new_directory.folder_path);
+      if (proposed.new_directory) {
+        proposed.new_directory.folder_path = canonicalizeFolderPath(
+            proposed.new_directory.folder_path,
+            canonicalRegistry,
+        );
       }
-      const effective = deriveEffectiveAction(proposed, file, knownDirectories);
+      if (proposed.needs_new_directory && proposed.new_directory) {
+        const folderPath = proposed.new_directory.folder_path;
+        if (folderPath && !knownDirectories.has(folderPath)) {
+          runningTree.push(proposed.new_directory);
+          knownDirectories.add(folderPath);
+        }
+      }
+      const effective = deriveEffectiveAction(proposed, file, knownDirectories, canonicalRegistry);
       if (effective.action !== proposed.action) {
         logger.warn("Drive organize: LLM action overridden", {
           proposalId: context.proposalId,
@@ -425,7 +462,7 @@ async function maybeRefinePlanningTree(
     ...priorChunks.flatMap((chunk) => chunk.result.file_actions),
     ...fileActions,
   ];
-  const refinement = await refineDirectoryTreeImpl(runningTree, uid);
+  const refinement = await refineDirectoryTreeImpl(runningTree, combinedActions, uid);
   const droppedOps = refinement.folder_operations.filter((op) => !isRefinementFolderOperation(op));
   for (const op of droppedOps) {
     logger.warn("Drive organize tree refinement: dropped op", {
@@ -526,7 +563,14 @@ export async function buildSequentialExecutionProposal(
 ): Promise<DriveOrganizeProposal> {
   const nonFolderFiles = fileEntries.filter((file) => !file.isFolder);
   const runningTree = approvedStructure.map((folder) => ({...folder}));
-  const knownDirectories = new Set(runningTree.map((folder) => folder.folder_path));
+  const canonicalRegistry = buildFolderCanonicalRegistry(approvedStructure.map((folder) => folder.folder_path));
+  const knownDirectories = new Set<string>();
+  for (const folder of runningTree) {
+    folder.folder_path = canonicalizeFolderPath(folder.folder_path, canonicalRegistry);
+    if (folder.folder_path) {
+      knownDirectories.add(folder.folder_path);
+    }
+  }
   const fileActions: DriveOrganizeProposal["file_actions"] = [];
   const proposePlacementFile = proposePlacement;
 
@@ -534,13 +578,21 @@ export async function buildSequentialExecutionProposal(
     const {contentSummary, imageUrls} = await summarizeFile(file);
     const nameResult = await proposeName(file, convention, contentSummary, uid, imageUrls);
     const placementResult = await proposePlacementFile(file, runningTree, contentSummary, uid);
-    if (placementResult.needs_new_directory && placementResult.new_directory &&
-        !knownDirectories.has(placementResult.new_directory.folder_path)) {
-      runningTree.push(placementResult.new_directory);
-      knownDirectories.add(placementResult.new_directory.folder_path);
+    if (placementResult.new_directory) {
+      placementResult.new_directory.folder_path = canonicalizeFolderPath(
+          placementResult.new_directory.folder_path,
+          canonicalRegistry,
+      );
+    }
+    if (placementResult.needs_new_directory && placementResult.new_directory) {
+      const folderPath = placementResult.new_directory.folder_path;
+      if (folderPath && !knownDirectories.has(folderPath)) {
+        runningTree.push(placementResult.new_directory);
+        knownDirectories.add(folderPath);
+      }
     }
     const action = synthesizeFileActionProposal(file, nameResult, placementResult);
-    const effective = deriveEffectiveAction(action, file, knownDirectories);
+    const effective = deriveEffectiveAction(action, file, knownDirectories, canonicalRegistry);
     fileActions.push({
       file_id: action.file_id || file.id,
       current_name: action.current_name || file.name,
@@ -919,7 +971,7 @@ export async function processPlanningChunk(
       runningTree,
       knownDirectories,
       stats,
-      {proposalId, chunkIndex},
+      {proposalId, chunkIndex, approvedStructure: proposalDoc.phaseData?.directoryLayout?.approvedStructure},
   );
   const refined = await maybeRefinePlanningTree(
       proposalId,
