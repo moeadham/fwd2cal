@@ -716,6 +716,29 @@ export async function sendOrganizePlacementRulesEmail(
   });
   await sendOrganizeEmailResponse(sender, email, html);
 }
+function renderCostEmailPlacementRulesBlock(
+    placementRules: PlacementRulesData | null | undefined,
+): string {
+  if (!placementRules) {
+    return "";
+  }
+  const rules = Array.isArray(placementRules.edgeCaseRules) ? placementRules.edgeCaseRules : [];
+  const examples = Array.isArray(placementRules.examples) ? placementRules.examples : [];
+  if (rules.length === 0 && examples.length === 0) {
+    return "";
+  }
+  const sections: string[] = [];
+  if (rules.length > 0) {
+    const items = rules.map((rule) => `<li>${escapeHtml(rule)}</li>`).join("");
+    sections.push(`<b>Placement rules:</b><br><ul style="margin:4px 0;">${items}</ul>`);
+  }
+  if (examples.length > 0) {
+    const items = examples.map((example) => `<li>${escapeHtml(example)}</li>`).join("");
+    sections.push(`<b>Examples:</b><br><ul style="margin:4px 0;">${items}</ul>`);
+  }
+  return `<br><br>${sections.join("")}`;
+}
+
 /** Sends the final cost estimate before execution. */
 export async function sendOrganizeCostEstimateEmail(
     sender: string,
@@ -726,6 +749,7 @@ export async function sendOrganizeCostEstimateEmail(
     cost: OrganizeCostBreakdown,
     filenameExamples: string[],
     preservedFolderPaths?: Set<string>,
+    placementRules?: PlacementRulesData | null,
 ): Promise<void> {
   const examples = filenameExamples
       .map((example) => `- ${escapeHtml(example)}`)
@@ -736,6 +760,7 @@ export async function sendOrganizeCostEstimateEmail(
     FOLDER_TREE: renderDirectoryList(folders, preservedFolderPaths),
     FILENAME_CONVENTION: escapeHtml(filenameConvention),
     FILENAME_EXAMPLES: examples,
+    PLACEMENT_RULES: renderCostEmailPlacementRulesBlock(placementRules ?? null),
     TOTAL_FILES: String(cost.totalFiles),
     TEXT_FILES: String(cost.textFiles),
     IMAGE_FILES: String(cost.imageFiles),

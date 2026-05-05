@@ -716,6 +716,7 @@ async function handleDirectoryAnalysisReply(
         await sendOrganizeCostEstimateEmail(
             sender, email, proposalId, approvedStructure, convention, cost, examples,
             new Set(normalizeIgnoredFolderPaths(proposalDoc.ignoredFolders ?? [])),
+            proposalDoc.phaseData?.placementRules ?? null,
         );
         return {
           totalFiles: cost.totalFiles,
@@ -1012,6 +1013,7 @@ async function handlePlacementRulesReply(
     await sendOrganizeCostEstimateEmail(
         sender, email, proposalId, approvedStructure, convention, cost, examples,
         new Set(normalizeIgnoredFolderPaths(proposalDoc.ignoredFolders ?? [])),
+        resolvedRules,
     );
     return {
       totalFiles: cost.totalFiles,
@@ -1089,6 +1091,7 @@ async function handleCostEstimateReply(
     await sendOrganizeCostEstimateEmail(
         sender, email, proposalId, approvedStructure, convention, cost, examples,
         new Set(normalizeIgnoredFolderPaths(proposalDoc.ignoredFolders ?? [])),
+        proposalDoc.phaseData?.placementRules ?? null,
     );
     return emptyResult("Awaiting button click");
   }

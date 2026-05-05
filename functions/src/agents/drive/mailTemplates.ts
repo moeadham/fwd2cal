@@ -281,6 +281,7 @@ Reply with rules/examples, or reply &quot;approve&quot; to skip and see the fina
 Examples:
 <br>
 %FILENAME_EXAMPLES%
+%PLACEMENT_RULES%
 <br><br>
 <b>%TOTAL_FILES% files scanned</b> &nbsp;|&nbsp; <b>%TEXT_FILES% text/doc files</b> &nbsp;|&nbsp; <b>%IMAGE_FILES% image files</b>
 <br><br>
