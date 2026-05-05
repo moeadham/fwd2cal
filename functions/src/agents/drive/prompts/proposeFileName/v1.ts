@@ -17,7 +17,7 @@ const prompt: DrivePromptConfig = {
   temperature: 0.1,
   prompt: `You are renaming one Google Drive file at a time.
 
-You will receive the approved filename convention, metadata for one file, and the file's contents (extracted text from the document — not a summary; may be truncated for long files). Some requests may also include attached images: either rendered document pages or the file itself when the file is an image. Use both the file contents and any attached images for content-aware filename decisions. Pick the best filename only.
+You will receive the approved filename convention, metadata for one file, and the file's contents (extracted text from the document — not a summary; may be truncated for long files). Some requests may also include attached images: either rendered document pages or the file itself when the file is an image. Use both the file contents and any attached images for content-aware filename decisions. Pick the best filename only. You may also receive user-supplied rules and examples covering filename decisions. Honor them verbatim where they apply; otherwise follow the filename convention.
 
 Rules:
 - Return exactly one filename proposal for the supplied file.

@@ -167,10 +167,12 @@ export type DriveOrganizeProposal = z.infer<typeof DriveOrganizeProposalSchema>;
 
 export type OrganizePhase =
   "folder_preferences" |
+  "placement_setup" |
   "directory_analysis" |
   "directory_placement" |
   "directory_additions" |
   "filename_convention" |
+  "placement_rules" |
   "cost_estimate" |
   "plan_review" |
   "executing" |
@@ -209,6 +211,19 @@ export interface FilenameConventionData {
   examples?: string[];
 }
 
+export type PlacementGranularity = "by_entity" | "by_document_type" | "by_date" | "mixed";
+
+export interface PlacementSetupData {
+  granularity: PlacementGranularity;
+  namedEntities: string[];
+  removedEntities: string[];
+}
+
+export interface PlacementRulesData {
+  edgeCaseRules: string[];
+  examples: string[];
+}
+
 export interface CostEstimateData {
   totalFiles: number;
   textFiles: number;
@@ -235,8 +250,10 @@ export interface PlanReviewData {
 
 export interface OrganizePhaseData {
   folderPreferences?: FolderPreferencesData;
+  placementSetup?: PlacementSetupData;
   directoryLayout?: DirectoryLayoutData;
   filenameConvention?: FilenameConventionData;
+  placementRules?: PlacementRulesData;
   costEstimate?: CostEstimateData;
   execution?: ExecutionData;
   planReview?: PlanReviewData;
@@ -247,6 +264,10 @@ export interface DriveUserPreferences {
   folderConventionDescription?: string;
   filenameConvention?: string;
   filenameConventionDescription?: string;
+  placementGranularity?: string;
+  placementNamedEntities?: string[];
+  placementEdgeCaseRules?: string[];
+  placementExamples?: string[];
 }
 
 export const FolderOperationSchema = z.object({
@@ -363,6 +384,9 @@ export interface DrivePrompts {
   finalizeDirectoryMap: DrivePromptConfig;
   classifyConventionChange: DrivePromptConfig;
   classifyFolderConventionChange: DrivePromptConfig;
+  classifyPlacementSetupChange: DrivePromptConfig;
+  classifyPlacementRulesChange: DrivePromptConfig;
+  extractNamedEntities: DrivePromptConfig;
   generateFilenameExamples: DrivePromptConfig;
   revisePlanFileActions: DrivePromptConfig;
   scopePlanRevision: DrivePromptConfig;
@@ -396,8 +420,10 @@ export interface DriveMailTemplates {
   organizeExecutionStarted: DriveMailTemplate;
   organizeProposal: DriveMailTemplate;
   organizeFolderPreferences: DriveMailTemplate;
+  organizePlacementSetup: DriveMailTemplate;
   organizePhase1aProposal: DriveMailTemplate;
   organizePhase2Proposal: DriveMailTemplate;
+  organizePlacementRules: DriveMailTemplate;
   organizeCostEstimate: DriveMailTemplate;
   organizePlanReview: DriveMailTemplate;
   organizePlanReviewScopeTooBroad: DriveMailTemplate;

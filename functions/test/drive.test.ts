@@ -29,10 +29,12 @@ import {
 import {extractDocumentImages} from "../src/util/documentParser";
 import {
   applyFolderOperations,
+  analyzeDirectoryStructure,
   buildFolderCanonicalRegistry,
   canonicalizeFolderPath,
   expandApprovedTreeWithAncestors,
   DEFAULT_FOLDER_CONVENTION,
+  classifyPlacementRulesChange,
   detectFolderConvention,
   filterFileActionsByScope,
   mergeRevisedProposal,
@@ -2603,97 +2605,42 @@ describe("organize phased proposal flow", function() {
     };
   }
 
-  it("DT00ub0 routes folder_preferences approval to directory_analysis", async function() {
+  it("DT00ub0 routes folder_preferences approval to placement_setup", async function() {
     const proposalId = `phase-0-${Date.now()}`;
     const proposalDoc = makePhaseDoc("folder_preferences");
     await seedPhaseProposal(proposalId, proposalDoc);
-    const sentTrees: DriveOrganizeProposal["proposed_folders"][] = [];
-    const originalSendOrganizePhase1aEmail = organizeHelpers.sendOrganizePhase1aEmail;
-    (organizeHelpers as typeof organizeHelpers & {
-      sendOrganizePhase1aEmail: typeof organizeHelpers.sendOrganizePhase1aEmail;
-    }).sendOrganizePhase1aEmail = async (
-        _sender,
-        _email,
-        _proposalId,
-        _conventionSummary,
-        _summary,
-        folders,
-    ) => {
-      sentTrees.push(folders);
-    };
-    setFakeStructuredCompletions([
-      {
-        has_existing_convention: false,
-        convention_description: "NN-Category root folders",
-        proposed_structure: [{
-          folder_path: "01-Documents",
-          description: "Documents",
-          source: "proposed",
-        }],
-        summary: "Use numbered root folders.",
-      },
-      {
-        directory_moves: [{
-          current_path: "Inbox",
-          proposed_path: "02-Misc/Inbox",
-          reason: "Catch unmatched root files in a fallback bucket",
-        }],
-        no_changes_needed: false,
-        summary: "Add a fallback bucket for loose inbox files.",
-      },
-      {
-        final_directories: [
-          {folder_path: "01-Documents", description: "Documents"},
-          {folder_path: "02-Misc", description: "Fallback bucket"},
-          {folder_path: "02-Misc/Inbox", description: "Imported inbox files"},
-        ],
-        added_directories: ["02-Misc", "02-Misc/Inbox"],
-        summary: "Use numbered root folders with a fallback bucket.",
-      },
-    ]);
+    setFakeStructuredCompletions([{namedEntities: ["AcmeCo"]}]);
 
-    try {
-      await organizeProposalTestHooks.handleOrganizePhaseReply(
-          makeTestEmail("approve"),
-          sender,
-          uid,
-          proposalId,
-          proposalDoc,
-          "approve",
-          true,
-      );
-    } finally {
-      (organizeHelpers as typeof organizeHelpers & {
-        sendOrganizePhase1aEmail: typeof organizeHelpers.sendOrganizePhase1aEmail;
-      }).sendOrganizePhase1aEmail = originalSendOrganizePhase1aEmail;
-    }
+    await organizeProposalTestHooks.handleOrganizePhaseReply(
+        makeTestEmail("approve"),
+        sender,
+        uid,
+        proposalId,
+        proposalDoc,
+        "approve",
+        true,
+    );
 
     const stored = (await db.collection("OrganizeProposals").doc(proposalId).get()).data();
     if (stored) stored.phaseData = await getOrganizePhaseData(proposalId);
     const userDoc = (await db.collection("DriveUsers").doc(uid).get()).data();
-    expect(stored?.phase).to.equal("directory_analysis");
+    expect(stored?.phase).to.equal("placement_setup");
     expect(stored?.phaseData.folderPreferences.confirmedConvention)
         .to.equal("NN-Category");
     expect(stored?.phaseData.directoryLayout.folderConvention)
         .to.equal("NN-Category");
     expect(stored?.phaseData.directoryLayout.conventionDescription)
         .to.equal("Two-digit zero-padded prefix, a dash, then the category name (e.g. 01-Documents).");
-    expect(stored?.phaseData.directoryLayout.proposedStructure).to.deep.equal([
-      {folder_path: "01-Documents", description: "Documents"},
-      {folder_path: "02-Misc", description: "Fallback bucket"},
-      {folder_path: "02-Misc/Inbox", description: "Imported inbox files"},
-    ]);
-    expect(stored?.phaseData.directoryLayout.directoryMoves).to.deep.equal([{
-      current_path: "Inbox",
-      proposed_path: "02-Misc/Inbox",
-      reason: "Catch unmatched root files in a fallback bucket",
-    }]);
-    expect(stored?.phaseData.directoryLayout.addedDirectories).to.deep.equal(["02-Misc", "02-Misc/Inbox"]);
-    expect(stored?.phaseData.directoryLayout.summary)
-        .to.equal("Use numbered root folders with a fallback bucket.");
-    expect(sentTrees).to.deep.equal([stored?.phaseData.directoryLayout.proposedStructure]);
+    expect(stored?.phaseData.placementSetup).to.deep.equal({
+      granularity: "by_entity",
+      namedEntities: ["AcmeCo"],
+      removedEntities: [],
+    });
+    expect(stored?.phaseData.directoryLayout.proposedStructure).to.equal(undefined);
     expect(userDoc?.preferences.folderConvention)
         .to.equal("NN-Category");
+    expect(getLastSentEmail(sender)?.html).to.include("Before I propose the folder structure");
+    expect(getLastSentEmail(sender)?.html).to.include("by_entity");
   });
 
   it("DT00ub1 stores a folder_preferences convention revision as a token with description", async function() {
@@ -2706,29 +2653,7 @@ describe("organize phased proposal flow", function() {
         new_convention: "NN|Category",
         new_description: "Two-digit zero-padded prefix, a pipe, then the category name (e.g. 01|Finance).",
       },
-      {
-        has_existing_convention: true,
-        convention_description: "Two-digit zero-padded prefix, a dash, then the category name (e.g. 01-Finance).",
-        proposed_structure: [{
-          folder_path: "01-Finance",
-          description: "Financial documents",
-          source: "proposed",
-        }],
-        summary: "Use pipe folders.",
-      },
-      {
-        directory_moves: [],
-        no_changes_needed: true,
-        summary: "No directory moves required.",
-      },
-      {
-        final_directories: [{
-          folder_path: "01|Finance",
-          description: "Financial documents",
-        }],
-        added_directories: [],
-        summary: "Finalized directory map.",
-      },
+      {namedEntities: []},
     ]);
 
     await organizeProposalTestHooks.handleOrganizePhaseReply(
@@ -2744,19 +2669,308 @@ describe("organize phased proposal flow", function() {
     const stored = (await db.collection("OrganizeProposals").doc(proposalId).get()).data();
     if (stored) stored.phaseData = await getOrganizePhaseData(proposalId);
     const userDoc = (await db.collection("DriveUsers").doc(uid).get()).data();
-    expect(stored?.phase).to.equal("directory_analysis");
+    expect(stored?.phase).to.equal("placement_setup");
     expect(stored?.phaseData.folderPreferences.confirmedConvention)
         .to.equal("NN|Category");
     expect(stored?.phaseData.directoryLayout.folderConvention)
         .to.equal("NN|Category");
     expect(stored?.phaseData.directoryLayout.conventionDescription)
         .to.equal("Two-digit zero-padded prefix, a pipe, then the category name (e.g. 01|Finance).");
-    expect(stored?.phaseData.directoryLayout.proposedStructure)
-        .to.deep.equal([{folder_path: "01|Finance", description: "Financial documents"}]);
+    expect(stored?.phaseData.placementSetup).to.deep.equal({
+      granularity: "by_entity",
+      namedEntities: [],
+      removedEntities: [],
+    });
     expect(userDoc?.preferences.folderConvention)
         .to.equal("NN|Category");
     expect(userDoc?.preferences.folderConventionDescription)
         .to.equal("Two-digit zero-padded prefix, a pipe, then the category name (e.g. 01|Finance).");
+  });
+
+  it("folder_preferences approval extracts current-tree named entities for placement_setup", async function() {
+    const proposalId = `phase-0-entities-${Date.now()}`;
+    const proposalDoc = makePhaseDoc("folder_preferences");
+    proposalDoc.phaseData!.directoryLayout!.currentTreeSummary =
+      "My Drive/\n  Work/ (0 files)\n    AcmeCo/ (3 files)\n";
+    await seedPhaseProposal(proposalId, proposalDoc);
+
+    const responses = [{namedEntities: ["AcmeCo"]}];
+    const capturedMessages: Array<{role: string; content: string}> = [];
+    setOpenAIClientForTest({
+      chat: {
+        completions: {
+          create: async (params: {messages: Array<{role: string; content: string}>}) => {
+            capturedMessages.push(...params.messages);
+            const result = responses.shift();
+            if (!result) {
+              throw new Error("No fake LLM completion queued");
+            }
+            return {
+              choices: [{
+                message: {content: JSON.stringify(result)},
+                finish_reason: "stop",
+              }],
+              usage: {total_tokens: 1},
+            };
+          },
+        },
+      },
+    } as unknown as OpenAI);
+
+    await organizeProposalTestHooks.handleOrganizePhaseReply(
+        makeTestEmail("approve"),
+        sender,
+        uid,
+        proposalId,
+        proposalDoc,
+        "approve",
+        true,
+    );
+
+    const stored = (await db.collection("OrganizeProposals").doc(proposalId).get()).data();
+    if (stored) stored.phaseData = await getOrganizePhaseData(proposalId);
+    const userMessages = capturedMessages.filter((message) => message.role === "user");
+    expect(userMessages[0].content).to.include("## Folder Tree\nMy Drive/\n  Work/ (0 files)\n    AcmeCo/ (3 files)");
+    expect(userMessages).to.have.length(1);
+    expect(stored?.phase).to.equal("placement_setup");
+    expect(stored?.phaseData.placementSetup).to.deep.equal({
+      granularity: "by_entity",
+      namedEntities: ["AcmeCo"],
+      removedEntities: [],
+    });
+  });
+
+  it("placement_setup approval routes to directory_analysis with granularity and entities", async function() {
+    const proposalId = `phase-placement-setup-approve-${Date.now()}`;
+    const proposalDoc = makePhaseDoc("placement_setup");
+    proposalDoc.phaseData!.placementSetup = {
+      granularity: "by_document_type",
+      namedEntities: ["AcmeCo"],
+      removedEntities: ["Queenie"],
+    };
+    proposalDoc.phaseData!.directoryLayout!.currentTreeSummary =
+      "My Drive/\n  Work/ (0 files)\n    AcmeCo/ (3 files)\n";
+    await seedPhaseProposal(proposalId, proposalDoc);
+
+    const responses = [
+      {
+        has_existing_convention: false,
+        convention_description: "NN-Category root folders",
+        proposed_structure: [{
+          folder_path: "01-Work/AcmeCo",
+          description: "AcmeCo work files",
+          source: "proposed",
+        }],
+        folder_ignores: [] as string[],
+        summary: "Preserve AcmeCo under Work.",
+      },
+      {
+        directory_moves: [] as Array<{current_path: string; proposed_path: string; reason: string}>,
+        no_changes_needed: true,
+        summary: "No directory moves required.",
+      },
+      {
+        final_directories: [{folder_path: "01-Work/AcmeCo", description: "AcmeCo work files"}],
+        added_directories: [] as string[],
+        summary: "Preserve AcmeCo under Work.",
+      },
+    ];
+    const capturedMessages: Array<{role: string; content: string}> = [];
+    setOpenAIClientForTest({
+      chat: {
+        completions: {
+          create: async (params: {messages: Array<{role: string; content: string}>}) => {
+            capturedMessages.push(...params.messages);
+            const result = responses.shift();
+            if (!result) {
+              throw new Error("No fake LLM completion queued");
+            }
+            return {
+              choices: [{
+                message: {content: JSON.stringify(result)},
+                finish_reason: "stop",
+              }],
+              usage: {total_tokens: 1},
+            };
+          },
+        },
+      },
+    } as unknown as OpenAI);
+
+    await organizeProposalTestHooks.handleOrganizePhaseReply(
+        makeTestEmail("approve"),
+        sender,
+        uid,
+        proposalId,
+        proposalDoc,
+        "approve",
+        true,
+    );
+
+    const stored = (await db.collection("OrganizeProposals").doc(proposalId).get()).data();
+    if (stored) stored.phaseData = await getOrganizePhaseData(proposalId);
+    const prefs = await getDriveUserPreferences(uid);
+    const userMessages = capturedMessages.filter((message) => message.role === "user");
+    expect(stored?.phase).to.equal("directory_analysis");
+    expect(stored?.phaseData.directoryLayout.proposedStructure).to.deep.equal([
+      {folder_path: "01-Work/AcmeCo", description: "AcmeCo work files"},
+    ]);
+    expect(userMessages[0].content).to.include("## Granularity\nby_document_type\n\n");
+    expect(userMessages[0].content).to.include("## Known Named Entities\n- AcmeCo\n\n");
+    expect(userMessages[0].content).to.include("## Removed Entities\n- Queenie\n\n");
+    expect(prefs.placementGranularity).to.equal("by_document_type");
+    expect(prefs.placementNamedEntities).to.deep.equal(["AcmeCo"]);
+    expect(getLastSentEmail(sender)?.html).to.include("Reply with changes, or reply &quot;approve&quot; to continue.");
+  });
+
+  it("placement_setup non-approval merges granularity and resends setup email", async function() {
+    const proposalId = `phase-placement-setup-change-${Date.now()}`;
+    const proposalDoc = makePhaseDoc("placement_setup");
+    proposalDoc.phaseData!.placementSetup = {
+      granularity: "by_entity",
+      namedEntities: ["AcmeCo"],
+      removedEntities: [],
+    };
+    await seedPhaseProposal(proposalId, proposalDoc);
+    setFakeStructuredCompletions([{
+      is_change: true,
+      updated: {
+        granularity: "by_document_type",
+        namedEntities: null,
+      },
+    }]);
+
+    await organizeProposalTestHooks.handleOrganizePhaseReply(
+        makeTestEmail("use by_document_type"),
+        sender,
+        uid,
+        proposalId,
+        proposalDoc,
+        "use by_document_type",
+        false,
+    );
+
+    const stored = (await db.collection("OrganizeProposals").doc(proposalId).get()).data();
+    if (stored) stored.phaseData = await getOrganizePhaseData(proposalId);
+    expect(stored?.phase).to.equal("placement_setup");
+    expect(stored?.phaseData.placementSetup).to.deep.equal({
+      granularity: "by_document_type",
+      namedEntities: ["AcmeCo"],
+      removedEntities: [],
+    });
+    expect(getLastSentEmail(sender)?.html).to.include("<b>by_document_type</b>");
+  });
+
+  it("placement_setup non-approval merges named entity removals", async function() {
+    const proposalId = `phase-placement-setup-entity-${Date.now()}`;
+    const proposalDoc = makePhaseDoc("placement_setup");
+    proposalDoc.phaseData!.placementSetup = {
+      granularity: "by_entity",
+      namedEntities: ["AcmeCo", "FooHoldings"],
+      removedEntities: [],
+    };
+    await seedPhaseProposal(proposalId, proposalDoc);
+    setFakeStructuredCompletions([{
+      is_change: true,
+      updated: {
+        granularity: null,
+        namedEntities: ["AcmeCo"],
+      },
+    }]);
+
+    await organizeProposalTestHooks.handleOrganizePhaseReply(
+        makeTestEmail("remove FooHoldings"),
+        sender,
+        uid,
+        proposalId,
+        proposalDoc,
+        "remove FooHoldings",
+        false,
+    );
+
+    const stored = (await db.collection("OrganizeProposals").doc(proposalId).get()).data();
+    if (stored) stored.phaseData = await getOrganizePhaseData(proposalId);
+    expect(stored?.phase).to.equal("placement_setup");
+    expect(stored?.phaseData.placementSetup).to.deep.equal({
+      granularity: "by_entity",
+      namedEntities: ["AcmeCo"],
+      removedEntities: ["FooHoldings"],
+    });
+    const setupHtml = (getLastSentEmail(sender)?.html || "").split("Reply with changes")[0];
+    expect(setupHtml).to.include("AcmeCo");
+    expect(setupHtml).to.not.include("FooHoldings");
+  });
+
+  it("placement_setup non-approval clears removedEntities when an entity is re-added", async function() {
+    const proposalId = `phase-placement-setup-readd-${Date.now()}`;
+    const proposalDoc = makePhaseDoc("placement_setup");
+    proposalDoc.phaseData!.placementSetup = {
+      granularity: "by_entity",
+      namedEntities: ["AcmeCo"],
+      removedEntities: ["Queenie"],
+    };
+    await seedPhaseProposal(proposalId, proposalDoc);
+    setFakeStructuredCompletions([{
+      is_change: true,
+      updated: {
+        granularity: null,
+        namedEntities: ["AcmeCo", "Queenie"],
+      },
+    }]);
+
+    await organizeProposalTestHooks.handleOrganizePhaseReply(
+        makeTestEmail("add Queenie back"),
+        sender,
+        uid,
+        proposalId,
+        proposalDoc,
+        "add Queenie back",
+        false,
+    );
+
+    const stored = (await db.collection("OrganizeProposals").doc(proposalId).get()).data();
+    if (stored) stored.phaseData = await getOrganizePhaseData(proposalId);
+    expect(stored?.phaseData.placementSetup).to.deep.equal({
+      granularity: "by_entity",
+      namedEntities: ["AcmeCo", "Queenie"],
+      removedEntities: [],
+    });
+  });
+
+  it("placement_setup non-approval can remove an entity and update granularity together", async function() {
+    const proposalId = `phase-placement-setup-mixed-${Date.now()}`;
+    const proposalDoc = makePhaseDoc("placement_setup");
+    proposalDoc.phaseData!.placementSetup = {
+      granularity: "by_entity",
+      namedEntities: ["AcmeCo", "Queenie"],
+      removedEntities: [],
+    };
+    await seedPhaseProposal(proposalId, proposalDoc);
+    setFakeStructuredCompletions([{
+      is_change: true,
+      updated: {
+        granularity: "by_document_type",
+        namedEntities: ["AcmeCo"],
+      },
+    }]);
+
+    await organizeProposalTestHooks.handleOrganizePhaseReply(
+        makeTestEmail("remove Queenie, use by_document_type"),
+        sender,
+        uid,
+        proposalId,
+        proposalDoc,
+        "remove Queenie, use by_document_type",
+        false,
+    );
+
+    const stored = (await db.collection("OrganizeProposals").doc(proposalId).get()).data();
+    if (stored) stored.phaseData = await getOrganizePhaseData(proposalId);
+    expect(stored?.phaseData.placementSetup).to.deep.equal({
+      granularity: "by_document_type",
+      namedEntities: ["AcmeCo"],
+      removedEntities: ["Queenie"],
+    });
   });
 
   it("DT00uba routes directory_analysis approval directly to filename_convention", async function() {
@@ -2883,6 +3097,75 @@ describe("organize phased proposal flow", function() {
     expect(sentTrees).to.deep.equal([stored?.phaseData.directoryLayout.proposedStructure]);
   });
 
+  it("directory_analysis revisions reuse stored removedEntities in tree analysis", async function() {
+    const proposalId = `phase-1a-removed-entities-${Date.now()}`;
+    const proposalDoc = makePhaseDoc("directory_analysis");
+    proposalDoc.phaseData!.placementSetup = {
+      granularity: "mixed",
+      namedEntities: ["AcmeCo"],
+      removedEntities: ["Queenie"],
+    };
+    await seedPhaseProposal(proposalId, proposalDoc);
+    const responses = [
+      {
+        has_existing_convention: true,
+        convention_description: "Loose topical folders",
+        proposed_structure: [
+          {folder_path: "01-Documents", description: "Documents", source: "proposed"},
+        ],
+        folder_ignores: [] as string[],
+        summary: "Keep documents.",
+      },
+      {
+        directory_moves: [] as Array<{current_path: string; proposed_path: string; reason: string}>,
+        no_changes_needed: true,
+        summary: "No directory moves required.",
+      },
+      {
+        final_directories: [{folder_path: "01-Documents", description: "Documents"}],
+        added_directories: [] as string[],
+        summary: "Keep documents.",
+      },
+    ];
+    const capturedMessages: Array<{role: string; content: string}> = [];
+    setOpenAIClientForTest({
+      chat: {
+        completions: {
+          create: async (params: {messages: Array<{role: string; content: string}>}) => {
+            capturedMessages.push(...params.messages);
+            const result = responses.shift();
+            if (!result) {
+              throw new Error("No fake LLM completion queued");
+            }
+            return {
+              choices: [{
+                message: {content: JSON.stringify(result)},
+                finish_reason: "stop",
+              }],
+              usage: {total_tokens: 1},
+            };
+          },
+        },
+      },
+    } as unknown as OpenAI);
+
+    await organizeProposalTestHooks.handleOrganizePhaseReply(
+        makeTestEmail("Revise the tree"),
+        sender,
+        uid,
+        proposalId,
+        proposalDoc,
+        "Revise the tree",
+        false,
+    );
+
+    const firstUserMessage = capturedMessages.find((message) => message.role === "user")?.content || "";
+    expect(firstUserMessage).to.include("## Granularity\nmixed\n\n");
+    expect(firstUserMessage).to.include("## Known Named Entities\n- AcmeCo\n\n");
+    expect(firstUserMessage).to.include("## Removed Entities\n- Queenie\n\n");
+    expect(firstUserMessage).to.not.include("## Folder Tree");
+  });
+
   it("DT00ubb routes in-flight directory_placement replies to filename_convention", async function() {
     const proposalId = `phase-1b-${Date.now()}`;
     const proposalDoc = makePhaseDoc("directory_placement");
@@ -2958,6 +3241,194 @@ describe("organize phased proposal flow", function() {
     expect(stored?.phase).to.equal("filename_convention");
     expect(stored?.phaseData.filenameConvention.convention).to.equal("YYYY-MM-DD_description.ext");
     expect(getLastSentEmail(sender)?.html).to.include("YYYY-MM-DD_description.ext");
+  });
+
+  it("DT00ubd1 routes filename convention approval to placement_rules", async function() {
+    const proposalId = `phase-placement-start-${Date.now()}`;
+    const proposalDoc = makePhaseDoc("filename_convention");
+    proposalDoc.phaseData!.directoryLayout!.approvedStructure = [
+      {folder_path: "01-Documents", description: "Documents"},
+      {folder_path: "02-AcmeCo", description: "AcmeCo files"},
+    ];
+    await seedPhaseProposal(proposalId, proposalDoc);
+
+    const result = await organizeProposalTestHooks.handleOrganizePhaseReply(
+        makeTestEmail("approve"),
+        sender,
+        uid,
+        proposalId,
+        proposalDoc,
+        "approve",
+        true,
+    );
+
+    const stored = (await db.collection("OrganizeProposals").doc(proposalId).get()).data();
+    if (stored) stored.phaseData = await getOrganizePhaseData(proposalId);
+    expect(result?.proposalSent).to.equal(false);
+    expect(stored?.phase).to.equal("placement_rules");
+    expect(stored?.cost).to.equal(undefined);
+    expect(stored?.phaseData.placementRules).to.deep.equal({
+      edgeCaseRules: [],
+      examples: [],
+    });
+    expect(getLastSentEmail(sender)?.html).to.include(
+        "Any special rules or examples to guide where files should go and how they should be named?",
+    );
+    expect(getLastSentEmail(sender)?.html).to.include(
+        "Reply with any rules — for placement, filenames, or other organize-drive decisions.",
+    );
+    expect(getLastSentEmail(sender)?.html).to.not.include("final check");
+  });
+
+  it("DT00ubd2 routes placement_rules approval to cost_estimate and persists preferences", async function() {
+    const proposalId = `phase-placement-approve-${Date.now()}`;
+    const proposalDoc = makePhaseDoc("placement_rules");
+    proposalDoc.phaseData!.placementRules = {
+      edgeCaseRules: ["Put signed agreements under Legal."],
+      examples: ["wire.pdf -> 02-AcmeCo/Banking"],
+    };
+    await seedPhaseProposal(proposalId, proposalDoc);
+    setFakeStructuredCompletions([{examples: ["2026.04.20 - Agreement.pdf"]}]);
+
+    const result = await organizeProposalTestHooks.handleOrganizePhaseReply(
+        makeTestEmail("approve"),
+        sender,
+        uid,
+        proposalId,
+        proposalDoc,
+        "approve",
+        true,
+    );
+
+    const stored = (await db.collection("OrganizeProposals").doc(proposalId).get()).data();
+    if (stored) stored.phaseData = await getOrganizePhaseData(proposalId);
+    const prefs = await getDriveUserPreferences(uid);
+    expect(result?.proposalSent).to.equal(true);
+    expect(stored?.phase).to.equal("cost_estimate");
+    expect(stored?.phaseData.placementRules).to.deep.equal({
+      edgeCaseRules: ["Put signed agreements under Legal."],
+      examples: ["wire.pdf -> 02-AcmeCo/Banking"],
+    });
+    expect(prefs.placementEdgeCaseRules).to.deep.equal(["Put signed agreements under Legal."]);
+    expect(prefs.placementExamples).to.deep.equal(["wire.pdf -> 02-AcmeCo/Banking"]);
+    expect(getLastSentEmail(sender)?.html).to.include("final check");
+  });
+
+  it("DT00ubd3 merges placement_rules changes and resends the phase email", async function() {
+    const proposalId = `phase-placement-change-${Date.now()}`;
+    const proposalDoc = makePhaseDoc("placement_rules");
+    proposalDoc.phaseData!.placementRules = {
+      edgeCaseRules: [],
+      examples: [],
+    };
+    await seedPhaseProposal(proposalId, proposalDoc);
+    setFakeStructuredCompletions([{
+      is_change: true,
+      updated: {
+        edgeCaseRules: ["Put tax files under 01-Documents/Taxes."],
+        examples: null,
+      },
+    }]);
+
+    await organizeProposalTestHooks.handleOrganizePhaseReply(
+        makeTestEmail("Put tax files under 01-Documents/Taxes."),
+        sender,
+        uid,
+        proposalId,
+        proposalDoc,
+        "Put tax files under 01-Documents/Taxes.",
+        false,
+    );
+
+    const stored = (await db.collection("OrganizeProposals").doc(proposalId).get()).data();
+    if (stored) stored.phaseData = await getOrganizePhaseData(proposalId);
+    expect(stored?.phase).to.equal("placement_rules");
+    expect(stored?.phaseData.placementRules.edgeCaseRules)
+        .to.deep.equal(["Put tax files under 01-Documents/Taxes."]);
+    expect(getLastSentEmail(sender)?.html).to.include("Put tax files under 01-Documents/Taxes.");
+    expect(getLastSentEmail(sender)?.html).to.not.include("final check");
+  });
+
+  it("DT00ubd4 accepts filename-flavored placement_rules replies", async function() {
+    const proposalId = `phase-placement-filename-rule-${Date.now()}`;
+    const proposalDoc = makePhaseDoc("placement_rules");
+    proposalDoc.phaseData!.placementRules = {
+      edgeCaseRules: [],
+      examples: [],
+    };
+    await seedPhaseProposal(proposalId, proposalDoc);
+    setFakeStructuredCompletions([{
+      is_change: true,
+      updated: {
+        edgeCaseRules: ["Files in BTC.Online should be renamed NN.ext - example 01.mp4"],
+        examples: null,
+      },
+    }]);
+
+    await organizeProposalTestHooks.handleOrganizePhaseReply(
+        makeTestEmail("Files in BTC.Online should be renamed NN.ext - example 01.mp4"),
+        sender,
+        uid,
+        proposalId,
+        proposalDoc,
+        "Files in BTC.Online should be renamed NN.ext - example 01.mp4",
+        false,
+    );
+
+    const stored = (await db.collection("OrganizeProposals").doc(proposalId).get()).data();
+    if (stored) stored.phaseData = await getOrganizePhaseData(proposalId);
+    expect(stored?.phaseData.placementRules.edgeCaseRules)
+        .to.deep.equal(["Files in BTC.Online should be renamed NN.ext - example 01.mp4"]);
+    expect(getLastSentEmail(sender)?.html)
+        .to.include("Files in BTC.Online should be renamed NN.ext - example 01.mp4");
+  });
+
+  it("DT00ubd5 classifies off-topic placement_rules replies as not changes", async function() {
+    let capturedRequest: OpenAI.ChatCompletionCreateParams | null = null;
+    setOpenAIClientForTest({
+      chat: {
+        completions: {
+          create: async (request: OpenAI.ChatCompletionCreateParams) => {
+            capturedRequest = request;
+            return {
+              choices: [{
+                message: {
+                  content: JSON.stringify({
+                    is_change: false,
+                    updated: {
+                      edgeCaseRules: null,
+                      examples: null,
+                    },
+                  }),
+                },
+                finish_reason: "stop",
+              }],
+              usage: {total_tokens: 1},
+            };
+          },
+        },
+      },
+    } as unknown as OpenAI);
+
+    const result = await classifyPlacementRulesChange(
+        {edgeCaseRules: ["Keep invoices in Finance."], examples: []},
+        "what's my subscription status?",
+        uid,
+    );
+
+    expect(result).to.deep.equal({
+      is_change: false,
+      updated: {
+        edgeCaseRules: null,
+        examples: null,
+      },
+    });
+    expect(capturedRequest?.messages[0]?.content).to.include(
+        "filename formatting, or any other organize-drive instruction",
+    );
+    expect(capturedRequest?.messages[0]?.content).to.include(
+        "subscription questions",
+    );
   });
 
   it("DT00ube routes cost_estimate revisions through directory_analysis", async function() {
@@ -4144,6 +4615,7 @@ describe("organize sequential execution proposal builder", function() {
           type: "text",
           text:
             "## Filename Convention\nYYYY.MM.DD - Description.ext\n\n" +
+            "## Placement Rules\n(none)\n\n" +
             "## File\n" +
             "ID: file-1\n" +
             "Name: receipt.png\n" +
@@ -4179,6 +4651,7 @@ describe("organize sequential execution proposal builder", function() {
       role: "user",
       content:
         "## Filename Convention\nYYYY.MM.DD - Description.ext\n\n" +
+        "## Placement Rules\n(none)\n\n" +
         "## File\n" +
         "ID: file-2\n" +
         "Name: receipt.pdf\n" +
@@ -4188,6 +4661,65 @@ describe("organize sequential execution proposal builder", function() {
         "Size: 200 bytes\n\n" +
         "## File Contents\n(none)\n",
     });
+  });
+
+  it("proposeFileName renders supplied placement rules before file metadata", async function() {
+    let capturedRequest: OpenAI.ChatCompletionCreateParams | null = null;
+    setOpenAIClientForTest({
+      chat: {
+        completions: {
+          create: async (request: OpenAI.ChatCompletionCreateParams) => {
+            capturedRequest = request;
+            return {
+              choices: [{
+                message: {
+                  content: JSON.stringify({
+                    file_id: "file-1",
+                    current_name: "video.mp4",
+                    current_path: "BTC.Online",
+                    new_name: "01.mp4",
+                    reason: "Matches the folder-specific filename rule.",
+                  }),
+                },
+                finish_reason: "stop",
+              }],
+              usage: {total_tokens: 1},
+            };
+          },
+        },
+      },
+    } as unknown as OpenAI);
+
+    await proposeFileName(
+        {
+          id: "file-1",
+          name: "video.mp4",
+          mimeType: "video/mp4",
+          parentId: "btc",
+          parentPath: "BTC.Online",
+          createdTime: "2026-04-10T00:00:00.000Z",
+          size: 100,
+          webViewLink: "",
+          isFolder: false,
+        },
+        "YYYY.MM.DD - Description.ext",
+        "Course video",
+        "uid-test",
+        [],
+        {
+          edgeCaseRules: ["Files in BTC.Online should be renamed NN.ext - example 01.mp4"],
+          examples: ["video.mp4 -> 01.mp4"],
+        },
+    );
+
+    const userMessage = capturedRequest?.messages[1];
+    expect(userMessage).to.deep.include({role: "user"});
+    expect(String(userMessage?.content)).to.include("## Placement Rules\nEdge-case rules:");
+    expect(String(userMessage?.content)).to.include(
+        "Edge-case rules:\n- Files in BTC.Online should be renamed NN.ext - example 01.mp4",
+    );
+    expect(String(userMessage?.content)).to.include("Examples:\n- video.mp4 -> 01.mp4");
+    expect(String(userMessage?.content)).to.match(/## Placement Rules[\s\S]+## File/);
   });
 
   it("DT00ubf keeps placement text-only in proposePlacement", async function() {
@@ -4244,6 +4776,7 @@ describe("organize sequential execution proposal builder", function() {
     expect(capturedRequests[0]?.messages[1]).to.deep.equal({
       role: "user",
       content:
+        "## Placement Rules\n(none)\n\n" +
         "## Approved Directory Tree\n- 01-Docs: Documents\n\n" +
         "## File\n" +
         "ID: file-1\n" +
@@ -4256,18 +4789,140 @@ describe("organize sequential execution proposal builder", function() {
     });
   });
 
-  it("proposePlacement system prompt contains the tighter new_directory rule and Example 5", function() {
+  it("proposePlacement renders supplied placement rules before the directory tree", async function() {
+    let capturedRequest: OpenAI.ChatCompletionCreateParams | null = null;
+    setOpenAIClientForTest({
+      chat: {
+        completions: {
+          create: async (request: OpenAI.ChatCompletionCreateParams) => {
+            capturedRequest = request;
+            return {
+              choices: [{
+                message: {
+                  content: JSON.stringify({
+                    file_id: "file-1",
+                    current_name: "wire.pdf",
+                    current_path: "My Drive",
+                    target_directory: "02-AcmeCo",
+                    action: "move",
+                    needs_new_directory: false,
+                    new_directory: null,
+                    reason: "Matches placement rules.",
+                  }),
+                },
+                finish_reason: "stop",
+              }],
+              usage: {total_tokens: 1},
+            };
+          },
+        },
+      },
+    } as unknown as OpenAI);
+
+    await proposePlacement(
+        {
+          id: "file-1",
+          name: "wire.pdf",
+          mimeType: "application/pdf",
+          parentId: "root",
+          parentPath: "My Drive",
+          createdTime: "2026-04-10T00:00:00.000Z",
+          size: 100,
+          webViewLink: "",
+          isFolder: false,
+        },
+        [{folder_path: "02-AcmeCo", description: "AcmeCo files"}],
+        "Wire instructions",
+        "uid-test",
+        {
+          edgeCaseRules: ["Put banking files under AcmeCo."],
+          examples: ["wire.pdf -> 02-AcmeCo"],
+        },
+    );
+
+    const userMessage = capturedRequest?.messages[1];
+    expect(userMessage).to.deep.include({role: "user"});
+    expect(String(userMessage?.content)).to.include("## Placement Rules\nEdge-case rules:");
+    expect(String(userMessage?.content)).to.include("Edge-case rules:\n- Put banking files under AcmeCo.");
+    expect(String(userMessage?.content)).to.include("Examples:\n- wire.pdf -> 02-AcmeCo");
+    expect(String(userMessage?.content)).to.not.include("Granularity:");
+    expect(String(userMessage?.content)).to.not.include("Named entities:");
+    expect(String(userMessage?.content)).to.match(/## Placement Rules[\s\S]+## Approved Directory Tree/);
+  });
+
+  it("analyzeDirectoryStructure includes known named entities in the user message", async function() {
+    let capturedRequest: {messages: Array<{role: string; content: string}>} | null = null;
+    setOpenAIClientForTest({
+      chat: {
+        completions: {
+          create: async (params: {messages: Array<{role: string; content: string}>}) => {
+            capturedRequest = params;
+            return {
+              choices: [{
+                message: {
+                  content: JSON.stringify({
+                    has_existing_convention: false,
+                    convention_description: "NN-Category roots",
+                    proposed_structure: [
+                      {folder_path: "01-Work/AcmeCo", description: "AcmeCo work", source: "proposed"},
+                      {folder_path: "01-Work/Queenie", description: "Queenie work", source: "proposed"},
+                    ],
+                    folder_ignores: [],
+                    summary: "No folders.",
+                  }),
+                },
+                finish_reason: "stop",
+              }],
+              usage: {total_tokens: 1},
+            };
+          },
+        },
+      },
+    } as unknown as OpenAI);
+
+    const result = await analyzeDirectoryStructure(
+        "My Drive/\n  Work/ (0 files)\n    AcmeCo/ (1 files)",
+        "NN-Category",
+        "organize my drive",
+        "uid-test",
+        "NN-Category roots",
+        [],
+        "mixed",
+        ["AcmeCo", "FooHoldings"],
+        ["Queenie"],
+    );
+
+    const userMessage = capturedRequest?.messages[1];
+    expect(userMessage).to.deep.include({role: "user"});
+    expect(String(userMessage?.content)).to.include("## Granularity\nmixed\n\n");
+    expect(String(userMessage?.content)).to.include("## Known Named Entities\n- AcmeCo\n- FooHoldings\n\n");
+    expect(String(userMessage?.content)).to.include("## Removed Entities\n- Queenie\n\n");
+    expect(result.proposed_structure.map((folder) => folder.folder_path)).to.deep.equal(["01-Work/AcmeCo"]);
+  });
+
+  it("proposePlacement system prompt contains structural placement rules without examples", function() {
     expect(proposePlacementPrompt.prompt).to.include(
-        "Only create a new_directory when (a) the file's contents or filename clearly identifies a specific named company, organization, or institution",
+        "Follow the Placement Rules block from the user message verbatim where applicable",
     );
     expect(proposePlacementPrompt.prompt).to.include(
-        "no existing entry in the Approved Directory Tree already represents that entity by case-insensitive name match",
+        "target_directory must exactly match an Approved Directory Tree entry",
     );
     expect(proposePlacementPrompt.prompt).to.include(
-        "Example 5 (do NOT create a folder for a single one-off document)",
+        "Reuse existing approved folders before creating new directories",
     );
-    expect(proposePlacementPrompt.prompt).to.include("Name: shipping-receipt.pdf");
-    expect(proposePlacementPrompt.prompt).to.include("needs_new_directory: false");
+    expect(proposePlacementPrompt.prompt).to.not.include("Few-shot examples");
+    expect(proposePlacementPrompt.prompt).to.not.include("matter-scoped");
+    expect(proposePlacementPrompt.prompt).to.not.include("Entity");
+    expect(proposePlacementPrompt.prompt).to.not.include("category root");
+  });
+
+  it("proposeFileName system prompt mentions user-supplied filename rules", function() {
+    expect(proposeFileNamePrompt.prompt).to.include(
+        "user-supplied rules and examples covering filename decisions",
+    );
+    expect(proposeFileNamePrompt.prompt).to.include(
+        "Honor them verbatim where they apply",
+    );
   });
 
   it("refineDirectoryTree renders accurate file counts from supplied fileActions", async function() {
@@ -5478,6 +6133,10 @@ describe("organize sequential execution proposal builder", function() {
         }],
       },
       filenameConvention: {convention: "YYYY.MM.DD - Description.ext"},
+      placementRules: {
+        edgeCaseRules: ["Files in BTC.Online should be renamed NN.ext - example 01.mp4"],
+        examples: ["video.mp4 -> 01.mp4"],
+      },
       execution: {chunkSize: 6, totalChunks: 1, completedChunks: 0},
     };
     const chunkFiles: DriveFileEntry[] = [
@@ -5517,6 +6176,8 @@ describe("organize sequential execution proposal builder", function() {
       description: "Documents",
     }]), {contentType: "application/json"});
 
+    const fileNameRequestTexts: string[] = [];
+    const placementRequestTexts: string[] = [];
     setOpenAIClientForTest({
       chat: {
         completions: {
@@ -5537,6 +6198,11 @@ describe("organize sequential execution proposal builder", function() {
             const fileId = fileIdMatch?.[1]?.trim() || "unknown-file";
             const fileName = fileNameMatch?.[1]?.trim() || "unknown.pdf";
             const currentPath = currentPathMatch?.[1]?.trim() || "My Drive";
+            if (promptText === proposeFileNamePrompt.prompt) {
+              fileNameRequestTexts.push(requestText);
+            } else {
+              placementRequestTexts.push(requestText);
+            }
 
             const content: unknown = promptText === proposeFileNamePrompt.prompt ?
               {
@@ -5594,6 +6260,14 @@ describe("organize sequential execution proposal builder", function() {
 
     expect(planningChunk.stats.planned).to.equal(6);
     expect(planningChunk.stats.failed).to.equal(0);
+    expect(fileNameRequestTexts).to.have.length(6);
+    expect(placementRequestTexts).to.have.length(6);
+    expect(fileNameRequestTexts.every((text) =>
+      text.includes("## Placement Rules\nEdge-case rules:\n- Files in BTC.Online should be renamed NN.ext - example 01.mp4"),
+    )).to.equal(true);
+    expect(placementRequestTexts.every((text) =>
+      text.includes("## Placement Rules\nEdge-case rules:\n- Files in BTC.Online should be renamed NN.ext - example 01.mp4"),
+    )).to.equal(true);
     expect(planningChunk.file_actions.map((action) => action.file_id).sort()).to.deep.equal(
         chunkFiles.map((file) => file.id).sort(),
     );

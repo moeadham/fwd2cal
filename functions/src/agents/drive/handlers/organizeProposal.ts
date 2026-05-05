@@ -17,6 +17,8 @@ import {
   OrganizeEmbeddedData,
   OrganizeProcessingResult,
   OrganizeProposalDoc,
+  PlacementSetupData,
+  PlacementRulesData,
 } from "../types";
 import {buildOrganizeEmbeddedData, renderFolderTree} from "../templates/folderTree";
 import {
@@ -30,6 +32,8 @@ import {
   sendOrganizeCostEstimateEmail,
   sendOrganizeEmailResponse,
   sendOrganizeFolderPreferencesEmail,
+  sendOrganizePlacementSetupEmail,
+  sendOrganizePlacementRulesEmail,
   sendOrganizePlanReviewEmail,
   sendOrganizePlanReviewScopeTooBroadEmail,
   sendOrganizePhase1aEmail,
@@ -66,8 +70,11 @@ import {
   analyzeDirectoryStructure,
   classifyConventionChange,
   classifyFolderConventionChange,
+  classifyPlacementSetupChange,
+  classifyPlacementRulesChange,
   DEFAULT_FOLDER_CONVENTION,
   evaluateDirectoryPlacement,
+  extractNamedEntities,
   finalizeDirectoryMap,
   generateFilenameExamples,
   mergeRevisedProposal,
@@ -118,6 +125,90 @@ function normalizeFolderPath(folderPath: string): string {
       .map((segment) => segment.trim())
       .filter(Boolean)
       .join("/");
+}
+
+function uniqueStrings(values: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    const trimmed = value.trim();
+    const key = trimmed.toLowerCase();
+    if (!trimmed || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    result.push(trimmed);
+  }
+  return result;
+}
+
+const PLACEMENT_GRANULARITIES = new Set<PlacementSetupData["granularity"]>([
+  "by_entity",
+  "by_document_type",
+  "by_date",
+  "mixed",
+]);
+
+function normalizePlacementSetup(value: unknown): PlacementSetupData {
+  const candidate = value as Partial<PlacementSetupData> | undefined;
+  const granularity = typeof candidate?.granularity === "string" &&
+    PLACEMENT_GRANULARITIES.has(candidate.granularity as PlacementSetupData["granularity"]) ?
+    candidate.granularity as PlacementSetupData["granularity"] :
+    "by_entity";
+  return {
+    granularity,
+    namedEntities: uniqueStrings(Array.isArray(candidate?.namedEntities) ? candidate.namedEntities : []),
+    removedEntities: uniqueStrings(Array.isArray(candidate?.removedEntities) ? candidate.removedEntities : []),
+  };
+}
+
+function hasCaseInsensitive(values: string[], candidate: string): boolean {
+  const key = candidate.trim().toLowerCase();
+  return values.some((value) => value.trim().toLowerCase() === key);
+}
+
+function mergePlacementSetup(
+    current: PlacementSetupData,
+    updated: {
+      granularity?: string | null;
+      namedEntities?: string[] | null;
+    },
+): PlacementSetupData {
+  const granularity = typeof updated.granularity === "string" &&
+    PLACEMENT_GRANULARITIES.has(updated.granularity as PlacementSetupData["granularity"]) ?
+    updated.granularity as PlacementSetupData["granularity"] :
+    current.granularity;
+  const previousEntities = uniqueStrings(current.namedEntities);
+  const nextEntities = Array.isArray(updated.namedEntities) ?
+    uniqueStrings(updated.namedEntities) :
+    previousEntities;
+  const justRemoved = previousEntities.filter((entity) => !hasCaseInsensitive(nextEntities, entity));
+  const currentRemoved = uniqueStrings(current.removedEntities);
+  const reAdded = nextEntities.filter((entity) => hasCaseInsensitive(currentRemoved, entity));
+  const removedWithNew = uniqueStrings([...currentRemoved, ...justRemoved]);
+  const nextRemoved = removedWithNew.filter((entity) => !hasCaseInsensitive(reAdded, entity));
+  return {
+    granularity,
+    namedEntities: nextEntities,
+    removedEntities: nextRemoved,
+  };
+}
+
+function mergePlacementRules(
+    current: PlacementRulesData,
+    updated: {
+      edgeCaseRules?: string[] | null;
+      examples?: string[] | null;
+    },
+): PlacementRulesData {
+  return {
+    edgeCaseRules: Array.isArray(updated.edgeCaseRules) ?
+      uniqueStrings(updated.edgeCaseRules) :
+      uniqueStrings(current.edgeCaseRules),
+    examples: Array.isArray(updated.examples) ?
+      uniqueStrings(updated.examples) :
+      uniqueStrings(current.examples),
+  };
 }
 
 export function normalizeIgnoredFolderPaths(folderPaths: string[]): string[] {
@@ -317,15 +408,16 @@ async function handleFolderPreferencesReply(
       shouldSaveConvention = true;
     }
   }
-  const analysis = await analyzeDirectoryStructure(
-      treeSummary,
-      resolvedConvention,
-      email.text || email.html || "",
+  let namedEntities: string[] = [];
+  try {
+    const extracted = await extractNamedEntities(treeSummary, uid);
+    namedEntities = uniqueStrings(Array.isArray(extracted.namedEntities) ? extracted.namedEntities : []);
+  } catch (error) {
+    logger.warn("Drive organize: extractNamedEntities failed; continuing without entity anchors", {
+      proposalId,
       uid,
-      resolvedConventionDescription,
-  );
-  if (!resolvedConventionDescription) {
-    resolvedConventionDescription = analysis.convention_description || "";
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
   if (shouldSaveConvention) {
     await saveDriveUserPreferences(uid, {
@@ -333,49 +425,144 @@ async function handleFolderPreferencesReply(
       folderConventionDescription: resolvedConventionDescription,
     });
   }
-  const proposedStructure = normalizeFolderConventionSeparators(
-      analysis.proposed_structure,
-      resolvedConvention,
-  ).map((folder) => ({
-    folder_path: folder.folder_path,
-    description: folder.description,
-  }));
-  const finalizedLayout = await finalizeProposedDirectoryTree({
-    proposedStructure,
-    treeSummary,
-    folderConvention: resolvedConvention,
-    uid,
-  });
+  const placementSetup: PlacementSetupData = {
+    granularity: "by_entity",
+    namedEntities,
+    removedEntities: [],
+  };
   const nextPhaseData = {
     ...proposalDoc.phaseData,
     folderPreferences: {
       ...folderPreferences,
       confirmedConvention: resolvedConvention,
     },
+    placementSetup,
     directoryLayout: {
+      currentTreeSummary: treeSummary,
       userPrompt: email.text || email.html || "",
       folderConvention: resolvedConvention,
       conventionDescription: resolvedConventionDescription,
-      proposedStructure: finalizedLayout.finalStructure,
-      directoryMoves: finalizedLayout.directoryMoves,
-      addedDirectories: finalizedLayout.addedDirectories,
-      summary: finalizedLayout.summary,
     },
   };
 
   await updateOrganizeProposalStatus(proposalId, "pending", {
-    phase: "directory_analysis",
+    phase: "placement_setup",
     phaseData: nextPhaseData,
   });
-  await sendOrganizePhase1aEmail(
-      sender,
-      email,
-      proposalId,
-      resolvedConventionDescription,
-      finalizedLayout.summary,
-      finalizedLayout.finalStructure,
-  );
+  await sendOrganizePlacementSetupEmail(sender, email, proposalId, placementSetup);
   return emptyResult();
+}
+
+/** Handles replies during placement setup before directory analysis. */
+async function handlePlacementSetupReply(
+    email: TransformedEmail,
+    sender: string,
+    uid: string,
+    proposalId: string,
+    proposalDoc: OrganizeProposalDoc,
+    replyBody: string,
+    isApproval: boolean,
+): Promise<OrganizeProcessingResult> {
+  const layout = proposalDoc.phaseData?.directoryLayout;
+  const folderPreferences = proposalDoc.phaseData?.folderPreferences;
+  if (!layout || !folderPreferences) {
+    return emptyResult("Placement setup state missing");
+  }
+  const currentSetup = normalizePlacementSetup(proposalDoc.phaseData?.placementSetup);
+
+  if (!isApproval) {
+    const change = await classifyPlacementSetupChange(currentSetup, replyBody, uid);
+    if (!change.is_change) {
+      await sendOrganizePlacementSetupEmail(sender, email, proposalId, currentSetup);
+      return emptyResult("Placement setup change unclear");
+    }
+    const nextSetup = mergePlacementSetup(currentSetup, change.updated);
+    await updateOrganizeProposalStatus(proposalId, "pending", {
+      phase: "placement_setup",
+      phaseData: {
+        ...proposalDoc.phaseData,
+        placementSetup: nextSetup,
+      },
+    });
+    await sendOrganizePlacementSetupEmail(sender, email, proposalId, nextSetup);
+    return emptyResult();
+  }
+
+  try {
+    const treeSummary = await loadTreeSummary(proposalId);
+    const folderConvention = layout.folderConvention || folderPreferences.confirmedConvention ||
+      folderPreferences.suggestedConvention || DEFAULT_FOLDER_CONVENTION;
+    let conventionDescription = layout.conventionDescription || folderPreferences.conventionDescription || "";
+    await saveDriveUserPreferences(uid, {
+      placementGranularity: currentSetup.granularity,
+      placementNamedEntities: currentSetup.namedEntities,
+    });
+    const analysis = await analyzeDirectoryStructure(
+        treeSummary,
+        folderConvention,
+        layout.userPrompt || email.text || email.html || "",
+        uid,
+        conventionDescription,
+        [],
+        currentSetup.granularity,
+        currentSetup.namedEntities,
+        currentSetup.removedEntities,
+    );
+    if (!conventionDescription) {
+      conventionDescription = analysis.convention_description || "";
+    }
+    const proposedStructure = normalizeFolderConventionSeparators(
+        analysis.proposed_structure,
+        folderConvention,
+    ).map((folder) => ({
+      folder_path: folder.folder_path,
+      description: folder.description,
+    }));
+    const finalizedLayout = await finalizeProposedDirectoryTree({
+      proposedStructure,
+      treeSummary,
+      folderConvention,
+      uid,
+    });
+    const nextPhaseData = {
+      ...proposalDoc.phaseData,
+      placementSetup: currentSetup,
+      directoryLayout: {
+        ...layout,
+        currentTreeSummary: treeSummary,
+        folderConvention,
+        conventionDescription,
+        proposedStructure: finalizedLayout.finalStructure,
+        directoryMoves: finalizedLayout.directoryMoves,
+        addedDirectories: finalizedLayout.addedDirectories,
+        summary: finalizedLayout.summary,
+      },
+    };
+
+    await updateOrganizeProposalStatus(proposalId, "pending", {
+      phase: "directory_analysis",
+      phaseData: nextPhaseData,
+    });
+    await sendOrganizePhase1aEmail(
+        sender,
+        email,
+        proposalId,
+        conventionDescription,
+        finalizedLayout.summary,
+        finalizedLayout.finalStructure,
+    );
+    return emptyResult();
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    logger.error("Drive organize: Failed to finalize placement setup approval", {
+      proposalId,
+      uid,
+      error: errMsg,
+    });
+    const html = applyTemplate(driveMailTemplates.organizeError.html, {});
+    await sendOrganizeEmailResponse(sender, email, html);
+    return emptyResult("Placement setup approval failed");
+  }
 }
 
 /** Handles a user reply that requests changes to a pending organize proposal. */
@@ -577,6 +764,7 @@ async function handleDirectoryAnalysisReply(
       `## Current Proposed Structure (revise this)\n${currentProposedTree}\n\n` +
       `## User Revision Request\n${replyBody}`;
   const existingIgnoredFolders = normalizeIgnoredFolderPaths(proposalDoc.ignoredFolders || []);
+  const placementSetup = normalizePlacementSetup(proposalDoc.phaseData?.placementSetup);
   const result = await analyzeDirectoryStructure(
       treeSummary,
       layout.folderConvention || proposalDoc.phaseData?.folderPreferences?.confirmedConvention || "",
@@ -584,6 +772,9 @@ async function handleDirectoryAnalysisReply(
       uid,
       layout.conventionDescription || "",
       existingIgnoredFolders,
+      placementSetup.granularity,
+      placementSetup.namedEntities,
+      placementSetup.removedEntities,
   );
   const folderConvention =
     layout.folderConvention ||
@@ -738,6 +929,64 @@ async function handleFilenameConventionReply(
 
   if (isApproval) {
     await saveDriveUserPreferences(uid, {filenameConvention: convention});
+    const placementRules = proposalDoc.phaseData?.placementRules ||
+      {edgeCaseRules: [], examples: []};
+    await updateOrganizeProposalStatus(proposalId, "pending", {
+      phase: "placement_rules",
+      phaseData: {
+        ...proposalDoc.phaseData,
+        filenameConvention: {convention},
+        placementRules,
+      },
+    });
+    await sendOrganizePlacementRulesEmail(sender, email, proposalId, placementRules);
+    return emptyResult();
+  }
+
+  const change = await classifyConventionChange(convention, replyBody, uid);
+  if (!change.is_change) {
+    const examples = await generateFilenameExamples(convention, uid);
+    await sendOrganizePhase2Email(sender, email, proposalId, convention, examples);
+    return emptyResult("Filename convention change unclear");
+  }
+
+  const nextPhaseData = {
+    ...proposalDoc.phaseData,
+    filenameConvention: {
+      convention: change.new_convention,
+    },
+  };
+  await updateOrganizeProposalStatus(proposalId, "pending", {
+    phase: "filename_convention",
+    phaseData: nextPhaseData,
+  });
+  const examples = await generateFilenameExamples(change.new_convention, uid);
+  await sendOrganizePhase2Email(sender, email, proposalId, change.new_convention, examples);
+  return emptyResult();
+}
+
+/** Handles replies during Phase 2b placement rules selection. */
+async function handlePlacementRulesReply(
+    email: TransformedEmail,
+    sender: string,
+    uid: string,
+    proposalId: string,
+    proposalDoc: OrganizeProposalDoc,
+    replyBody: string,
+    isApproval: boolean,
+): Promise<OrganizeProcessingResult> {
+  const currentRules = proposalDoc.phaseData?.placementRules ||
+    {edgeCaseRules: [], examples: []};
+
+  if (isApproval) {
+    const resolvedRules = mergePlacementRules(currentRules, {});
+    await saveDriveUserPreferences(uid, {
+      placementEdgeCaseRules: resolvedRules.edgeCaseRules,
+      placementExamples: resolvedRules.examples,
+    });
+    const convention =
+      proposalDoc.phaseData?.filenameConvention?.convention ||
+      DEFAULT_FILENAME_CONVENTION;
     const state = await getOrganizeIntermediateState(proposalId);
     const fileEntries = (Array.isArray(state.fileEntries) ? state.fileEntries : []) as DriveFileEntry[];
     const cost = calculateOrganizeCostEstimate(fileEntries);
@@ -750,7 +999,7 @@ async function handleFilenameConventionReply(
       cost,
       phaseData: {
         ...proposalDoc.phaseData,
-        filenameConvention: {convention},
+        placementRules: resolvedRules,
         costEstimate: {
           totalFiles: cost.totalFiles,
           textFiles: cost.textFiles,
@@ -773,25 +1022,20 @@ async function handleFilenameConventionReply(
     };
   }
 
-  const change = await classifyConventionChange(convention, replyBody, uid);
+  const change = await classifyPlacementRulesChange(currentRules, replyBody, uid);
   if (!change.is_change) {
-    const examples = await generateFilenameExamples(convention, uid);
-    await sendOrganizePhase2Email(sender, email, proposalId, convention, examples);
-    return emptyResult("Filename convention change unclear");
+    await sendOrganizePlacementRulesEmail(sender, email, proposalId, currentRules);
+    return emptyResult("Placement rules change unclear");
   }
-
-  const nextPhaseData = {
-    ...proposalDoc.phaseData,
-    filenameConvention: {
-      convention: change.new_convention,
-    },
-  };
+  const nextRules = mergePlacementRules(currentRules, change.updated);
   await updateOrganizeProposalStatus(proposalId, "pending", {
-    phase: "filename_convention",
-    phaseData: nextPhaseData,
+    phase: "placement_rules",
+    phaseData: {
+      ...proposalDoc.phaseData,
+      placementRules: nextRules,
+    },
   });
-  const examples = await generateFilenameExamples(change.new_convention, uid);
-  await sendOrganizePhase2Email(sender, email, proposalId, change.new_convention, examples);
+  await sendOrganizePlacementRulesEmail(sender, email, proposalId, nextRules);
   return emptyResult();
 }
 
@@ -1151,6 +1395,8 @@ async function handleOrganizePhaseReply(
   switch (proposalDoc.phase) {
     case "folder_preferences":
       return handleFolderPreferencesReply(email, sender, uid, proposalId, proposalDoc, replyBody, isApproval);
+    case "placement_setup":
+      return handlePlacementSetupReply(email, sender, uid, proposalId, proposalDoc, replyBody, isApproval);
     case "directory_analysis":
       return handleDirectoryAnalysisReply(email, sender, uid, proposalId, proposalDoc, replyBody, isApproval);
     case "directory_placement":
@@ -1159,6 +1405,8 @@ async function handleOrganizePhaseReply(
       return handleDirectoryAdditionsReply(email, sender, uid, proposalId, proposalDoc, replyBody, isApproval);
     case "filename_convention":
       return handleFilenameConventionReply(email, sender, uid, proposalId, proposalDoc, replyBody, isApproval);
+    case "placement_rules":
+      return handlePlacementRulesReply(email, sender, uid, proposalId, proposalDoc, replyBody, isApproval);
     case "cost_estimate":
       return handleCostEstimateReply(
           email, sender, uid, proposalId, proposalDoc, replyBody, isApproval, fromActionTask,
@@ -1175,10 +1423,12 @@ async function handleOrganizePhaseReply(
 export const organizeProposalTestHooks = {
   handleOrganizePhaseReply,
   handleFolderPreferencesReply,
+  handlePlacementSetupReply,
   handleDirectoryAnalysisReply,
   handleDirectoryPlacementReply,
   handleDirectoryAdditionsReply,
   handleFilenameConventionReply,
+  handlePlacementRulesReply,
   handleCostEstimateReply,
   handlePlanReviewReply,
   setScopePlanRevisionForTest(fn: typeof scopePlanRevisionImpl | null): void {

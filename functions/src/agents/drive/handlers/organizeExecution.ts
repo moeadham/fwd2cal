@@ -7,6 +7,7 @@ import {
   finalizeOrganizeProposal,
   getOrganizeIntermediateState,
   getOrganizeProposal,
+  getDriveUserPreferences,
   updateOrganizeProposalStatus,
 } from "../../../util/firestoreHandler";
 import {sendEvent} from "../../../util/analytics";
@@ -29,6 +30,7 @@ import {
   OrganizeProcessingResult,
   OrganizeProposalDoc,
   OrganizeSnapshotAction,
+  PlacementRulesData,
   PlanningChunkTaskData,
 } from "../types";
 import {buildOrganizeEmbeddedData, renderFolderTree} from "../templates/folderTree";
@@ -87,12 +89,14 @@ type FileNameProposer = (
   contentSummary: string,
   uid: string,
   imageUrls?: string[],
+  placementRules?: PlacementRulesData | null,
 ) => Promise<ProposeFileNameResult>;
 type FilePlacementProposer = (
   file: DriveFileEntry,
   directoryTree: DriveOrganizeProposal["proposed_folders"],
   contentSummary: string,
   uid: string,
+  placementRules?: PlacementRulesData | null,
 ) => Promise<ProposePlacementResult>;
 type OrganizeFileActionType = DriveOrganizeProposal["file_actions"][number]["action"];
 type DerivedFileActionProposal = {
@@ -109,6 +113,33 @@ type DerivedFileActionProposal = {
 type PlanningWorkerResult =
   | {kind: "proposed"; file: DriveFileEntry; proposed: DerivedFileActionProposal}
   | {kind: "error"; file: DriveFileEntry; error: unknown};
+
+function stringsFromPreference(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+}
+
+async function resolvePlacementRules(
+    uid: string,
+    proposalDoc: OrganizeProposalDoc,
+): Promise<PlacementRulesData | null> {
+  if (proposalDoc.phaseData?.placementRules) {
+    return proposalDoc.phaseData.placementRules;
+  }
+  const preferences = await getDriveUserPreferences(uid);
+  const hasPlacementPreference =
+    Array.isArray(preferences.placementEdgeCaseRules) ||
+    Array.isArray(preferences.placementExamples);
+  if (!hasPlacementPreference) {
+    return null;
+  }
+  return {
+    edgeCaseRules: stringsFromPreference(preferences.placementEdgeCaseRules),
+    examples: stringsFromPreference(preferences.placementExamples),
+  };
+}
 
 function combineActionReasons(nameReason: string, placementReason: string): string {
   if (nameReason && placementReason && nameReason !== placementReason) {
@@ -929,6 +960,7 @@ export async function processPlanningChunk(
   const stats = {planned: 0, failed: 0, skipped: 0};
   const oauth2Client = await getOauthClient(uid, AGENT_NAME);
   const planConcurrency = ORGANIZE_DRIVE_PLAN_CONCURRENCY.value();
+  const placementRules = await resolvePlacementRules(uid, proposalDoc);
   const orderedChunkFiles = interleaveByParentPath(chunkFiles);
   const results = await mapWithConcurrency(orderedChunkFiles, planConcurrency, async (file) => {
     logger.info(`Drive organize planning chunk ${chunkIndex + 1}/${totalChunks}: processing "${file.name}"`, {
@@ -945,8 +977,8 @@ export async function processPlanningChunk(
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
         const {contentSummary, imageUrls} = await summarizeExecutionFile(oauth2Client, file);
-        const nameResult = await proposeFileName(file, convention, contentSummary, uid, imageUrls);
-        const placementResult = await defaultProposePlacement(file, runningTree, contentSummary, uid);
+        const nameResult = await proposeFileName(file, convention, contentSummary, uid, imageUrls, placementRules);
+        const placementResult = await defaultProposePlacement(file, runningTree, contentSummary, uid, placementRules);
         const proposed = synthesizeFileActionProposal(file, nameResult, placementResult);
         return {kind: "proposed", file, proposed} satisfies PlanningWorkerResult;
       } catch (error) {

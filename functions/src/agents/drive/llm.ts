@@ -15,6 +15,8 @@ import {
   FileInfo,
   GenerateFilenameExamplesSchema,
   GenerateFilenameExamplesResult,
+  PlacementSetupData,
+  PlacementRulesData,
 } from "./types";
 import {ChatMessage, TextContent, ImageURLContent} from "../../util/types";
 import {
@@ -41,6 +43,18 @@ import {
   ClassifyFolderConventionChangeSchema,
   ClassifyFolderConventionChangeResult,
 } from "./prompts/classifyFolderConventionChange/v1";
+import {
+  ClassifyPlacementSetupChangeSchema,
+  ClassifyPlacementSetupChangeResult,
+} from "./prompts/classifyPlacementSetupChange/v1";
+import {
+  ClassifyPlacementRulesChangeSchema,
+  ClassifyPlacementRulesChangeResult,
+} from "./prompts/classifyPlacementRulesChange/v1";
+import {
+  ExtractNamedEntitiesSchema,
+  ExtractNamedEntitiesResult,
+} from "./prompts/extractNamedEntities/v1";
 import {
   ProposeFileNameSchema,
   ProposeFileNameResult,
@@ -679,8 +693,17 @@ async function analyzeDirectoryStructure(
     uid: string | null = null,
     conventionDescription = "",
     existingIgnoredFolders: string[] = [],
+    granularity = "by_entity",
+    namedEntities: string[] = [],
+    removedEntities: string[] = [],
 ): Promise<AnalyzeDirectoryStructureResult> {
   const {prompts, versions} = getPrompts();
+  const namedEntitiesBlock = namedEntities.length ?
+    namedEntities.map((entity) => `- ${entity}`).join("\n") :
+    "(none)";
+  const removedEntitiesBlock = removedEntities.length ?
+    removedEntities.map((entity) => `- ${entity}`).join("\n") :
+    "(none)";
   const ignoredFolders = existingIgnoredFolders.length > 0 ?
     `## Previously Ignored Folders\n` +
     `These folder paths were marked as ignored in an earlier revision. Unless the user's current ` +
@@ -692,11 +715,15 @@ async function analyzeDirectoryStructure(
   const userText = `## Current Drive Tree\n${treeSummary}\n\n` +
     `## Confirmed Folder Naming Convention\n${folderConvention || "(none)"}\n\n` +
     `## Confirmed Convention Description\n${conventionDescription || "(none)"}\n\n` +
+    `## Granularity\n${granularity || "by_entity"}\n\n` +
+    `## Known Named Entities\n${namedEntitiesBlock}\n\n` +
+    `## Removed Entities\n${removedEntitiesBlock}\n\n` +
     ignoredFolders +
     `## User Instructions\n${userPrompt || "(none)"}\n`;
   logger.info("analyzeDirectoryStructure LLM input", {
     folderConvention: folderConvention || "(empty)",
     conventionDescription: conventionDescription || "(empty)",
+    granularity: granularity || "by_entity",
     userPromptPreview: userPrompt.slice(0, 200),
     treeSummaryLength: treeSummary.length,
   });
@@ -704,7 +731,7 @@ async function analyzeDirectoryStructure(
     {role: "system", content: prompts.analyzeDirectoryStructure.prompt},
     {role: "user", content: userText},
   ];
-  return await defaultCompletion<AnalyzeDirectoryStructureResult>(
+  const result = await defaultCompletion<AnalyzeDirectoryStructureResult>(
       messages,
       prompts.analyzeDirectoryStructure.model,
       prompts.analyzeDirectoryStructure.temperature ?? DEFAULT_TEMP,
@@ -712,6 +739,27 @@ async function analyzeDirectoryStructure(
       uid,
       {promptVersion: versions.PROMPT_ANALYZE_DIRECTORY_STRUCTURE_VERSION},
   ) as AnalyzeDirectoryStructureResult;
+  if (removedEntities.length > 0) {
+    const removed = new Set(removedEntities.map((entity) => entity.trim().toLowerCase()).filter(Boolean));
+    const kept = result.proposed_structure.filter((folder) => {
+      const hasRemovedSegment = folder.folder_path
+          .split("/")
+          .map((segment) => segment.trim().toLowerCase())
+          .some((segment) => removed.has(segment));
+      if (hasRemovedSegment) {
+        logger.warn("Drive organize: dropping proposed folder for removed entity", {
+          folderPath: folder.folder_path,
+          removedEntities,
+        });
+      }
+      return !hasRemovedSegment;
+    });
+    return {
+      ...result,
+      proposed_structure: kept,
+    };
+  }
+  return result;
 }
 
 /** Evaluate whether existing directories should move into the proposed structure. */
@@ -821,6 +869,81 @@ async function classifyFolderConventionChange(
   ) as ClassifyFolderConventionChangeResult;
 }
 
+function renderPlacementSetupBlock(setup: PlacementSetupData): string {
+  const namedEntities = setup.namedEntities.length ?
+    setup.namedEntities.map((entity) => `- ${entity}`).join("\n") :
+    "(none)";
+  return `Granularity: ${setup.granularity || "by_entity"}\n\n` +
+    `Named entities:\n${namedEntities}\n`;
+}
+
+/** Classify whether a reply updates placement setup. */
+async function classifyPlacementSetupChange(
+    currentSetup: PlacementSetupData,
+    userReply: string,
+    uid: string | null = null,
+): Promise<ClassifyPlacementSetupChangeResult> {
+  const {prompts, versions} = getPrompts();
+  const userText = `## Current Placement Setup\n${renderPlacementSetupBlock(currentSetup)}\n\n` +
+    `## User Reply\n${userReply}\n`;
+  const messages: ChatMessage[] = [
+    {role: "system", content: prompts.classifyPlacementSetupChange.prompt},
+    {role: "user", content: userText},
+  ];
+  return await defaultCompletion<ClassifyPlacementSetupChangeResult>(
+      messages,
+      prompts.classifyPlacementSetupChange.model,
+      prompts.classifyPlacementSetupChange.temperature ?? DEFAULT_TEMP,
+      ClassifyPlacementSetupChangeSchema,
+      uid,
+      {promptVersion: versions.PROMPT_CLASSIFY_PLACEMENT_SETUP_CHANGE_VERSION},
+  ) as ClassifyPlacementSetupChangeResult;
+}
+
+/** Classify whether a reply updates placement rules. */
+async function classifyPlacementRulesChange(
+    currentRules: PlacementRulesData,
+    userReply: string,
+    uid: string | null = null,
+): Promise<ClassifyPlacementRulesChangeResult> {
+  const {prompts, versions} = getPrompts();
+  const userText = `## Current Placement Rules\n${renderPlacementRulesBlock(currentRules)}\n\n` +
+    `## User Reply\n${userReply}\n`;
+  const messages: ChatMessage[] = [
+    {role: "system", content: prompts.classifyPlacementRulesChange.prompt},
+    {role: "user", content: userText},
+  ];
+  return await defaultCompletion<ClassifyPlacementRulesChangeResult>(
+      messages,
+      prompts.classifyPlacementRulesChange.model,
+      prompts.classifyPlacementRulesChange.temperature ?? DEFAULT_TEMP,
+      ClassifyPlacementRulesChangeSchema,
+      uid,
+      {promptVersion: versions.PROMPT_CLASSIFY_PLACEMENT_RULES_CHANGE_VERSION},
+  ) as ClassifyPlacementRulesChangeResult;
+}
+
+/** Extract named entities from a folder tree. */
+async function extractNamedEntities(
+    treeText: string,
+    uid: string | null = null,
+): Promise<ExtractNamedEntitiesResult> {
+  const {prompts, versions} = getPrompts();
+  const userText = `## Folder Tree\n${treeText || "(empty tree)"}\n`;
+  const messages: ChatMessage[] = [
+    {role: "system", content: prompts.extractNamedEntities.prompt},
+    {role: "user", content: userText},
+  ];
+  return await defaultCompletion<ExtractNamedEntitiesResult>(
+      messages,
+      prompts.extractNamedEntities.model,
+      prompts.extractNamedEntities.temperature ?? DEFAULT_TEMP,
+      ExtractNamedEntitiesSchema,
+      uid,
+      {promptVersion: versions.PROMPT_EXTRACT_NAMED_ENTITIES_VERSION},
+  ) as ExtractNamedEntitiesResult;
+}
+
 function renderFileMetadataBlock(fileInfo: DriveFileEntry): string {
   return `## File\n` +
     `ID: ${fileInfo.id}\n` +
@@ -831,6 +954,23 @@ function renderFileMetadataBlock(fileInfo: DriveFileEntry): string {
     `Size: ${fileInfo.size} bytes\n`;
 }
 
+function renderPlacementRulesBlock(placementRules: PlacementRulesData | null): string {
+  if (!placementRules) {
+    return "(none)\n";
+  }
+  const edgeCaseRules = placementRules.edgeCaseRules.length ?
+    placementRules.edgeCaseRules.map((rule) => `- ${rule}`).join("\n") :
+    "(none)";
+  const examples = placementRules.examples.length ?
+    placementRules.examples.map((example) => `- ${example}`).join("\n") :
+    "(none)";
+  if (!placementRules.edgeCaseRules.length && !placementRules.examples.length) {
+    return "(none)\n";
+  }
+  return `Edge-case rules:\n${edgeCaseRules}\n\n` +
+    `Examples:\n${examples}\n`;
+}
+
 /** Propose the filename for one file using content and optional images. */
 async function proposeFileName(
     fileInfo: DriveFileEntry,
@@ -838,9 +978,11 @@ async function proposeFileName(
     contentSummary: string,
     uid: string | null = null,
     imageUrls: string[] = [],
+    placementRules: PlacementRulesData | null = null,
 ): Promise<ProposeFileNameResult> {
   const {prompts, versions} = getPrompts();
   const userText = `## Filename Convention\n${convention}\n\n` +
+    `## Placement Rules\n${renderPlacementRulesBlock(placementRules)}\n` +
     renderFileMetadataBlock(fileInfo) +
     `\n` +
     `## File Contents\n${contentSummary || "(none)"}\n`;
@@ -876,12 +1018,14 @@ async function proposePlacement(
     directoryTree: DriveOrganizeProposal["proposed_folders"],
     contentSummary: string,
     uid: string | null = null,
+    placementRules: PlacementRulesData | null = null,
 ): Promise<ProposePlacementResult> {
   const {prompts, versions} = getPrompts();
   const tree = expandApprovedTreeWithAncestors(directoryTree)
       .map((folder) => `- ${folder.folder_path}: ${folder.description}`)
       .join("\n");
-  const userText = `## Approved Directory Tree\n${tree || "(none)"}\n\n` +
+  const userText = `## Placement Rules\n${renderPlacementRulesBlock(placementRules)}\n` +
+    `## Approved Directory Tree\n${tree || "(none)"}\n\n` +
     renderFileMetadataBlock(fileInfo) +
     `\n` +
     `## File Contents\n${contentSummary || "(none)"}\n`;
@@ -2046,6 +2190,9 @@ export {
   finalizeDirectoryMap,
   classifyConventionChange,
   classifyFolderConventionChange,
+  classifyPlacementSetupChange,
+  classifyPlacementRulesChange,
+  extractNamedEntities,
   proposeFileName,
   proposePlacement,
   generateFilenameExamples,

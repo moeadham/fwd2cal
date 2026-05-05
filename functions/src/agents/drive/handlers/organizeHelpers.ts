@@ -17,6 +17,8 @@ import {
   OrganizeCostBreakdown,
   OrganizeEmbeddedData,
   OrganizeProcessingResult,
+  PlacementSetupData,
+  PlacementRulesData,
 } from "../types";
 import {driveMailTemplates, driveOrganizeActionUrl} from "../mailTemplates";
 import {updateOrganizeProposalStatus} from "../../../util/firestoreHandler";
@@ -654,6 +656,62 @@ export async function sendOrganizePhase2Email(
   const html = applyTemplate(driveMailTemplates.organizePhase2Proposal.html, {
     FILENAME_CONVENTION: escapeHtml(convention),
     FILENAME_EXAMPLES: examples,
+    EMBEDDED_DATA: phaseEmbeddedHtml(proposalId),
+  });
+  await sendOrganizeEmailResponse(sender, email, html);
+}
+
+const GRANULARITY_DESCRIPTIONS: Array<{value: PlacementSetupData["granularity"]; description: string}> = [
+  {value: "by_entity", description: "each company, client, project, or organization gets its own folder"},
+  {value: "by_document_type", description: "group by document type (Receipts, Contracts, Invoices, Statements)"},
+  {value: "by_date", description: "group by year or period (e.g. 2024/, 2025-Q1/)"},
+  {value: "mixed", description: "entity folders for ongoing work, document-type folders for one-offs"},
+];
+
+function renderGranularityOptions(current: PlacementSetupData["granularity"]): string {
+  return GRANULARITY_DESCRIPTIONS
+      .map(({value, description}) => {
+        const marker = value === current ? " <i>(current)</i>" : "";
+        const label = value === current ? `<b>${value}</b>` : value;
+        return `- ${label}${marker} &mdash; ${escapeHtml(description)}`;
+      })
+      .join("<br>");
+}
+
+/** Sends the placement-setup phase email. */
+export async function sendOrganizePlacementSetupEmail(
+    sender: string,
+    email: TransformedEmail,
+    proposalId: string,
+    defaults: PlacementSetupData,
+): Promise<void> {
+  const namedEntities = defaults.namedEntities.length ?
+    defaults.namedEntities.map((entity) => `- ${escapeHtml(entity)}`).join("<br>") :
+    "(none)";
+  const html = applyTemplate(driveMailTemplates.organizePlacementSetup.html, {
+    GRANULARITY_OPTIONS: renderGranularityOptions(defaults.granularity),
+    NAMED_ENTITIES: namedEntities,
+    EMBEDDED_DATA: phaseEmbeddedHtml(proposalId),
+  });
+  await sendOrganizeEmailResponse(sender, email, html);
+}
+
+/** Sends the placement-rules phase email. */
+export async function sendOrganizePlacementRulesEmail(
+    sender: string,
+    email: TransformedEmail,
+    proposalId: string,
+    defaults: PlacementRulesData,
+): Promise<void> {
+  const edgeCaseRules = defaults.edgeCaseRules.length ?
+    defaults.edgeCaseRules.map((rule) => `- ${escapeHtml(rule)}`).join("<br>") :
+    "Reply with any rules — for placement, filenames, or other organize-drive decisions.";
+  const examples = defaults.examples.length ?
+    defaults.examples.map((example) => `- ${escapeHtml(example)}`).join("<br>") :
+    "Reply with 2-3 file-to-folder examples if you want to guide placement.";
+  const html = applyTemplate(driveMailTemplates.organizePlacementRules.html, {
+    EDGE_CASE_RULES_PLACEHOLDER: edgeCaseRules,
+    EXAMPLES_PLACEHOLDER: examples,
     EMBEDDED_DATA: phaseEmbeddedHtml(proposalId),
   });
   await sendOrganizeEmailResponse(sender, email, html);

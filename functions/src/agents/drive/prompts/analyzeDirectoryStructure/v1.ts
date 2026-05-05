@@ -26,6 +26,9 @@ You will receive:
 2. A confirmed folder naming convention (already approved by the user)
 3. A confirmed convention description when one is available
 4. User instructions (may include revision requests)
+5. A confirmed granularity preference
+6. A list of named entities the user has folders for
+7. A list of removed entities — names the user explicitly excluded
 
 All root-level folders MUST follow the confirmed naming convention. Do not re-detect or override it. If both a convention token and description are provided, honor both literally.
 
@@ -34,6 +37,9 @@ Rules:
 - Echo the confirmed convention description verbatim in convention_description. Only derive a fresh description if no input description was provided.
 - The separator character in the convention between digit prefix and category name must appear verbatim in every proposed root folder name. If the token is NN|Category, every proposed root folder starts with two digits followed by a pipe.
 - When the convention includes a numeric prefix token such as NN-Category, assign root prefixes contiguously from 01 in proposed_structure order. Do not preserve existing prefix numbers from the current tree; the system will renumber deterministically as a safety net.
+- Shape the proposed structure to match the granularity preference. For by_entity, prefer per-entity folders under category roots. For by_document_type, prefer per-type folders. For by_date, prefer per-period folders. For mixed, blend per-entity and per-type as warranted.
+- When a named entity has folders in the current tree, ensure the proposed structure preserves a dedicated folder for that entity. Do not collapse named entities into generic categories.
+- No segment of any folder path in proposed_structure may match (case-insensitive) a name in the removed-entities list. Files under such folders in the current tree should land in the closest non-entity broader category root. The removed-entities list takes precedence over the named-entities list when a name appears in both.
 - Prefer stable, broad root categories over one-off folders.
 - Include subfolders if applicable.
 - Do not nest a sub-folder whose name expresses the same status, era, or scope as its parent (e.g., an "Old", "Legacy", or "Inactive" sub-folder under an Archive root). Collapse it into the parent and keep the sub-folder's children directly under the parent.

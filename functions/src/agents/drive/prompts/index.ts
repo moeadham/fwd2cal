@@ -56,6 +56,21 @@ import {
   VERSION_PARAM as CLASSIFY_FOLDER_CONVENTION_CHANGE_VERSION_PARAM,
 } from "./classifyFolderConventionChange";
 import {
+  versions as classifyPlacementSetupChangeVersions,
+  VERSION_KEY as CLASSIFY_PLACEMENT_SETUP_CHANGE_VERSION_KEY,
+  VERSION_PARAM as CLASSIFY_PLACEMENT_SETUP_CHANGE_VERSION_PARAM,
+} from "./classifyPlacementSetupChange";
+import {
+  versions as classifyPlacementRulesChangeVersions,
+  VERSION_KEY as CLASSIFY_PLACEMENT_RULES_CHANGE_VERSION_KEY,
+  VERSION_PARAM as CLASSIFY_PLACEMENT_RULES_CHANGE_VERSION_PARAM,
+} from "./classifyPlacementRulesChange";
+import {
+  versions as extractNamedEntitiesVersions,
+  VERSION_KEY as EXTRACT_NAMED_ENTITIES_VERSION_KEY,
+  VERSION_PARAM as EXTRACT_NAMED_ENTITIES_VERSION_PARAM,
+} from "./extractNamedEntities";
+import {
   versions as proposeFileNameVersions,
   VERSION_KEY as PROPOSE_FILE_NAME_VERSION_KEY,
   VERSION_PARAM as PROPOSE_FILE_NAME_VERSION_PARAM,
@@ -127,6 +142,18 @@ function getPrompts(): { prompts: DrivePrompts; versions: Record<string, string>
       CLASSIFY_FOLDER_CONVENTION_CHANGE_VERSION_PARAM,
       classifyFolderConventionChangeVersions,
   );
+  const classifyPlacementSetupChange = resolvePrompt(
+      CLASSIFY_PLACEMENT_SETUP_CHANGE_VERSION_PARAM,
+      classifyPlacementSetupChangeVersions,
+  );
+  const classifyPlacementRulesChange = resolvePrompt(
+      CLASSIFY_PLACEMENT_RULES_CHANGE_VERSION_PARAM,
+      classifyPlacementRulesChangeVersions,
+  );
+  const extractNamedEntities = resolvePrompt(
+      EXTRACT_NAMED_ENTITIES_VERSION_PARAM,
+      extractNamedEntitiesVersions,
+  );
   const proposeFileName = resolvePrompt(
       PROPOSE_FILE_NAME_VERSION_PARAM,
       proposeFileNameVersions,
@@ -162,6 +189,9 @@ function getPrompts(): { prompts: DrivePrompts; versions: Record<string, string>
     finalizeDirectoryMap: finalizeDirectoryMap.prompt,
     classifyConventionChange: classifyConventionChange.prompt,
     classifyFolderConventionChange: classifyFolderConventionChange.prompt,
+    classifyPlacementSetupChange: classifyPlacementSetupChange.prompt,
+    classifyPlacementRulesChange: classifyPlacementRulesChange.prompt,
+    extractNamedEntities: extractNamedEntities.prompt,
     generateFilenameExamples: generateFilenameExamples.prompt,
     revisePlanFileActions: revisePlanFileActions.prompt,
     scopePlanRevision: scopePlanRevision.prompt,
@@ -181,6 +211,9 @@ function getPrompts(): { prompts: DrivePrompts; versions: Record<string, string>
     [FINALIZE_DIRECTORY_MAP_VERSION_KEY]: finalizeDirectoryMap.version,
     [CLASSIFY_CONVENTION_CHANGE_VERSION_KEY]: classifyConventionChange.version,
     [CLASSIFY_FOLDER_CONVENTION_CHANGE_VERSION_KEY]: classifyFolderConventionChange.version,
+    [CLASSIFY_PLACEMENT_SETUP_CHANGE_VERSION_KEY]: classifyPlacementSetupChange.version,
+    [CLASSIFY_PLACEMENT_RULES_CHANGE_VERSION_KEY]: classifyPlacementRulesChange.version,
+    [EXTRACT_NAMED_ENTITIES_VERSION_KEY]: extractNamedEntities.version,
     [GENERATE_FILENAME_EXAMPLES_VERSION_KEY]: generateFilenameExamples.version,
     [REVISE_PLAN_FILE_ACTIONS_VERSION_KEY]: revisePlanFileActions.version,
     [SCOPE_PLAN_REVISION_VERSION_KEY]: scopePlanRevision.version,

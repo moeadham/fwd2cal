@@ -237,6 +237,36 @@ Reply with changes, or reply &quot;approve&quot; to start generating file propos
 %EMBEDDED_DATA%
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
   },
+  organizePlacementSetup: {
+    html: `Before I propose the folder structure, confirm how specific it should be.
+<br><br>
+<b>Granularity:</b>
+<br>
+%GRANULARITY_OPTIONS%
+<br><br>
+<b>Named entities:</b>
+<br>
+%NAMED_ENTITIES%
+<br><br>
+Reply with changes (e.g. &quot;use by_document_type&quot;, &quot;remove FooHoldings&quot;), or reply &quot;approve&quot; to generate the proposed structure.
+%EMBEDDED_DATA%
+<br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
+  },
+  organizePlacementRules: {
+    html: `Any special rules or examples to guide where files should go and how they should be named?
+<br><br>
+<b>Edge-case rules:</b>
+<br>
+%EDGE_CASE_RULES_PLACEHOLDER%
+<br><br>
+<b>Examples:</b>
+<br>
+%EXAMPLES_PLACEHOLDER%
+<br><br>
+Reply with rules/examples, or reply &quot;approve&quot; to skip and see the final cost estimate.
+%EMBEDDED_DATA%
+<br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
+  },
   organizeCostEstimate: {
     html: `Here's the final check before organizing your Google Drive:
 <br><br>
