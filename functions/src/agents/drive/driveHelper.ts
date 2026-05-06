@@ -477,7 +477,8 @@ async function listAllDriveFiles(
   do {
     const response = await drive.files.list({
       q: "trashed = false and 'me' in owners" +
-        " and name != '.sorted.by.fwd2drive.com'",
+        " and name != '.sorted.by.fwd2drive.com'" +
+        " and not name contains 'fwd2drive-proposal'",
       fields: "nextPageToken, files(id, name, mimeType, parents, createdTime, size, webViewLink)",
       pageSize: 1000,
       pageToken: pageToken,

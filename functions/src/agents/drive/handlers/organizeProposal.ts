@@ -74,7 +74,6 @@ import {
   classifyPlacementRulesChange,
   DEFAULT_FOLDER_CONVENTION,
   evaluateDirectoryPlacement,
-  extractNamedEntities,
   finalizeDirectoryMap,
   generateFilenameExamples,
   mergeRevisedProposal,
@@ -408,17 +407,7 @@ async function handleFolderPreferencesReply(
       shouldSaveConvention = true;
     }
   }
-  let namedEntities: string[] = [];
-  try {
-    const extracted = await extractNamedEntities(treeSummary, uid);
-    namedEntities = uniqueStrings(Array.isArray(extracted.namedEntities) ? extracted.namedEntities : []);
-  } catch (error) {
-    logger.warn("Drive organize: extractNamedEntities failed; continuing without entity anchors", {
-      proposalId,
-      uid,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
+  const namedEntities: string[] = [];
   if (shouldSaveConvention) {
     await saveDriveUserPreferences(uid, {
       folderConvention: resolvedConvention,
@@ -469,6 +458,7 @@ async function handlePlacementSetupReply(
     return emptyResult("Placement setup state missing");
   }
   const currentSetup = normalizePlacementSetup(proposalDoc.phaseData?.placementSetup);
+  let effectiveSetup = currentSetup;
 
   if (!isApproval) {
     const change = await classifyPlacementSetupChange(currentSetup, replyBody, uid);
@@ -476,16 +466,7 @@ async function handlePlacementSetupReply(
       await sendOrganizePlacementSetupEmail(sender, email, proposalId, currentSetup);
       return emptyResult("Placement setup change unclear");
     }
-    const nextSetup = mergePlacementSetup(currentSetup, change.updated);
-    await updateOrganizeProposalStatus(proposalId, "pending", {
-      phase: "placement_setup",
-      phaseData: {
-        ...proposalDoc.phaseData,
-        placementSetup: nextSetup,
-      },
-    });
-    await sendOrganizePlacementSetupEmail(sender, email, proposalId, nextSetup);
-    return emptyResult();
+    effectiveSetup = mergePlacementSetup(currentSetup, change.updated);
   }
 
   try {
@@ -494,8 +475,8 @@ async function handlePlacementSetupReply(
       folderPreferences.suggestedConvention || DEFAULT_FOLDER_CONVENTION;
     let conventionDescription = layout.conventionDescription || folderPreferences.conventionDescription || "";
     await saveDriveUserPreferences(uid, {
-      placementGranularity: currentSetup.granularity,
-      placementNamedEntities: currentSetup.namedEntities,
+      placementGranularity: effectiveSetup.granularity,
+      placementNamedEntities: effectiveSetup.namedEntities,
     });
     const analysis = await analyzeDirectoryStructure(
         treeSummary,
@@ -504,9 +485,9 @@ async function handlePlacementSetupReply(
         uid,
         conventionDescription,
         [],
-        currentSetup.granularity,
-        currentSetup.namedEntities,
-        currentSetup.removedEntities,
+        effectiveSetup.granularity,
+        effectiveSetup.namedEntities,
+        effectiveSetup.removedEntities,
     );
     if (!conventionDescription) {
       conventionDescription = analysis.convention_description || "";
@@ -526,7 +507,7 @@ async function handlePlacementSetupReply(
     });
     const nextPhaseData = {
       ...proposalDoc.phaseData,
-      placementSetup: currentSetup,
+      placementSetup: effectiveSetup,
       directoryLayout: {
         ...layout,
         currentTreeSummary: treeSummary,

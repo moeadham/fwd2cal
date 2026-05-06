@@ -86,6 +86,7 @@ import {
   pruneOrphanNewDirectories,
   reconcilePlanningChunkResults,
   saveSavedPlan,
+  startChunkedPlanning,
   writeFileActionsCsv,
 } from "../src/agents/drive/handlers/organizeExecution";
 import {
@@ -2609,7 +2610,6 @@ describe("organize phased proposal flow", function() {
     const proposalId = `phase-0-${Date.now()}`;
     const proposalDoc = makePhaseDoc("folder_preferences");
     await seedPhaseProposal(proposalId, proposalDoc);
-    setFakeStructuredCompletions([{namedEntities: ["AcmeCo"]}]);
 
     await organizeProposalTestHooks.handleOrganizePhaseReply(
         makeTestEmail("approve"),
@@ -2633,7 +2633,7 @@ describe("organize phased proposal flow", function() {
         .to.equal("Two-digit zero-padded prefix, a dash, then the category name (e.g. 01-Documents).");
     expect(stored?.phaseData.placementSetup).to.deep.equal({
       granularity: "by_entity",
-      namedEntities: ["AcmeCo"],
+      namedEntities: [],
       removedEntities: [],
     });
     expect(stored?.phaseData.directoryLayout.proposedStructure).to.equal(undefined);
@@ -2687,31 +2687,20 @@ describe("organize phased proposal flow", function() {
         .to.equal("Two-digit zero-padded prefix, a pipe, then the category name (e.g. 01|Finance).");
   });
 
-  it("folder_preferences approval extracts current-tree named entities for placement_setup", async function() {
+  it("folder_preferences approval initializes empty named entities for placement_setup", async function() {
     const proposalId = `phase-0-entities-${Date.now()}`;
     const proposalDoc = makePhaseDoc("folder_preferences");
     proposalDoc.phaseData!.directoryLayout!.currentTreeSummary =
       "My Drive/\n  Work/ (0 files)\n    AcmeCo/ (3 files)\n";
     await seedPhaseProposal(proposalId, proposalDoc);
 
-    const responses = [{namedEntities: ["AcmeCo"]}];
     const capturedMessages: Array<{role: string; content: string}> = [];
     setOpenAIClientForTest({
       chat: {
         completions: {
           create: async (params: {messages: Array<{role: string; content: string}>}) => {
             capturedMessages.push(...params.messages);
-            const result = responses.shift();
-            if (!result) {
-              throw new Error("No fake LLM completion queued");
-            }
-            return {
-              choices: [{
-                message: {content: JSON.stringify(result)},
-                finish_reason: "stop",
-              }],
-              usage: {total_tokens: 1},
-            };
+            throw new Error("No LLM completion expected");
           },
         },
       },
@@ -2729,13 +2718,11 @@ describe("organize phased proposal flow", function() {
 
     const stored = (await db.collection("OrganizeProposals").doc(proposalId).get()).data();
     if (stored) stored.phaseData = await getOrganizePhaseData(proposalId);
-    const userMessages = capturedMessages.filter((message) => message.role === "user");
-    expect(userMessages[0].content).to.include("## Folder Tree\nMy Drive/\n  Work/ (0 files)\n    AcmeCo/ (3 files)");
-    expect(userMessages).to.have.length(1);
+    expect(capturedMessages).to.have.length(0);
     expect(stored?.phase).to.equal("placement_setup");
     expect(stored?.phaseData.placementSetup).to.deep.equal({
       granularity: "by_entity",
-      namedEntities: ["AcmeCo"],
+      namedEntities: [],
       removedEntities: [],
     });
   });
@@ -2752,7 +2739,7 @@ describe("organize phased proposal flow", function() {
       "My Drive/\n  Work/ (0 files)\n    AcmeCo/ (3 files)\n";
     await seedPhaseProposal(proposalId, proposalDoc);
 
-    const responses = [
+    const responses: unknown[] = [
       {
         has_existing_convention: false,
         convention_description: "NN-Category root folders",
@@ -2823,45 +2810,95 @@ describe("organize phased proposal flow", function() {
     expect(getLastSentEmail(sender)?.html).to.include("Reply with changes, or reply &quot;approve&quot; to continue.");
   });
 
-  it("placement_setup non-approval merges granularity and resends setup email", async function() {
+  it("placement_setup non-approval merges granularity and advances to directory_analysis", async function() {
     const proposalId = `phase-placement-setup-change-${Date.now()}`;
     const proposalDoc = makePhaseDoc("placement_setup");
     proposalDoc.phaseData!.placementSetup = {
       granularity: "by_entity",
-      namedEntities: ["AcmeCo"],
+      namedEntities: [],
       removedEntities: [],
     };
     await seedPhaseProposal(proposalId, proposalDoc);
-    setFakeStructuredCompletions([{
-      is_change: true,
-      updated: {
-        granularity: "by_document_type",
-        namedEntities: null,
+    const responses = [
+      {
+        is_change: true,
+        updated: {
+          granularity: "mixed",
+          namedEntities: null as string[] | null,
+        },
       },
-    }]);
+      {
+        has_existing_convention: false,
+        convention_description: "NN-Category root folders",
+        proposed_structure: [{
+          folder_path: "01-Work",
+          description: "Work files",
+          source: "proposed",
+        }],
+        folder_ignores: [] as string[],
+        summary: "Group work files.",
+      },
+      {
+        directory_moves: [] as Array<{current_path: string; proposed_path: string; reason: string}>,
+        no_changes_needed: true,
+        summary: "No directory moves required.",
+      },
+      {
+        final_directories: [{folder_path: "01-Work", description: "Work files"}],
+        added_directories: [] as string[],
+        summary: "Group work files.",
+      },
+    ];
+    const capturedMessages: Array<{role: string; content: string}> = [];
+    setOpenAIClientForTest({
+      chat: {
+        completions: {
+          create: async (params: {messages: Array<{role: string; content: string}>}) => {
+            capturedMessages.push(...params.messages);
+            const result = responses.shift();
+            if (!result) {
+              throw new Error("No fake LLM completion queued");
+            }
+            return {
+              choices: [{
+                message: {content: JSON.stringify(result)},
+                finish_reason: "stop",
+              }],
+              usage: {total_tokens: 1},
+            };
+          },
+        },
+      },
+    } as unknown as OpenAI);
 
     await organizeProposalTestHooks.handleOrganizePhaseReply(
-        makeTestEmail("use by_document_type"),
+        makeTestEmail("use mixed"),
         sender,
         uid,
         proposalId,
         proposalDoc,
-        "use by_document_type",
+        "use mixed",
         false,
     );
 
     const stored = (await db.collection("OrganizeProposals").doc(proposalId).get()).data();
     if (stored) stored.phaseData = await getOrganizePhaseData(proposalId);
-    expect(stored?.phase).to.equal("placement_setup");
+    const prefs = await getDriveUserPreferences(uid);
+    const userMessages = capturedMessages.filter((message) => message.role === "user");
+    expect(stored?.phase).to.equal("directory_analysis");
     expect(stored?.phaseData.placementSetup).to.deep.equal({
-      granularity: "by_document_type",
-      namedEntities: ["AcmeCo"],
+      granularity: "mixed",
+      namedEntities: [],
       removedEntities: [],
     });
-    expect(getLastSentEmail(sender)?.html).to.include("<b>by_document_type</b>");
+    expect(userMessages[1].content).to.include("## Granularity\nmixed\n\n");
+    expect(prefs.placementGranularity).to.equal("mixed");
+    expect(prefs.placementNamedEntities).to.deep.equal([]);
+    expect(getLastSentEmail(sender)?.html).to.not.include("Before I propose the folder structure");
+    expect(getLastSentEmail(sender)?.html).to.include("Reply with changes, or reply &quot;approve&quot; to continue.");
   });
 
-  it("placement_setup non-approval merges named entity removals", async function() {
+  it("placement_setup non-approval merges named entity removals and advances", async function() {
     const proposalId = `phase-placement-setup-entity-${Date.now()}`;
     const proposalDoc = makePhaseDoc("placement_setup");
     proposalDoc.phaseData!.placementSetup = {
@@ -2876,6 +2913,24 @@ describe("organize phased proposal flow", function() {
         granularity: null,
         namedEntities: ["AcmeCo"],
       },
+    }, {
+      has_existing_convention: false,
+      convention_description: "NN-Category root folders",
+      proposed_structure: [{
+        folder_path: "01-Work/AcmeCo",
+        description: "AcmeCo work files",
+        source: "proposed",
+      }],
+      folder_ignores: [] as string[],
+      summary: "Preserve AcmeCo under Work.",
+    }, {
+      directory_moves: [] as Array<{current_path: string; proposed_path: string; reason: string}>,
+      no_changes_needed: true,
+      summary: "No directory moves required.",
+    }, {
+      final_directories: [{folder_path: "01-Work/AcmeCo", description: "AcmeCo work files"}],
+      added_directories: [] as string[],
+      summary: "Preserve AcmeCo under Work.",
     }]);
 
     await organizeProposalTestHooks.handleOrganizePhaseReply(
@@ -2890,18 +2945,16 @@ describe("organize phased proposal flow", function() {
 
     const stored = (await db.collection("OrganizeProposals").doc(proposalId).get()).data();
     if (stored) stored.phaseData = await getOrganizePhaseData(proposalId);
-    expect(stored?.phase).to.equal("placement_setup");
+    expect(stored?.phase).to.equal("directory_analysis");
     expect(stored?.phaseData.placementSetup).to.deep.equal({
       granularity: "by_entity",
       namedEntities: ["AcmeCo"],
       removedEntities: ["FooHoldings"],
     });
-    const setupHtml = (getLastSentEmail(sender)?.html || "").split("Reply with changes")[0];
-    expect(setupHtml).to.include("AcmeCo");
-    expect(setupHtml).to.not.include("FooHoldings");
+    expect(getLastSentEmail(sender)?.html).to.not.include("Before I propose the folder structure");
   });
 
-  it("placement_setup non-approval clears removedEntities when an entity is re-added", async function() {
+  it("placement_setup non-approval clears removedEntities when an entity is re-added and advances", async function() {
     const proposalId = `phase-placement-setup-readd-${Date.now()}`;
     const proposalDoc = makePhaseDoc("placement_setup");
     proposalDoc.phaseData!.placementSetup = {
@@ -2916,6 +2969,24 @@ describe("organize phased proposal flow", function() {
         granularity: null,
         namedEntities: ["AcmeCo", "Queenie"],
       },
+    }, {
+      has_existing_convention: false,
+      convention_description: "NN-Category root folders",
+      proposed_structure: [{
+        folder_path: "01-Work/AcmeCo",
+        description: "AcmeCo work files",
+        source: "proposed",
+      }],
+      folder_ignores: [] as string[],
+      summary: "Preserve AcmeCo under Work.",
+    }, {
+      directory_moves: [] as Array<{current_path: string; proposed_path: string; reason: string}>,
+      no_changes_needed: true,
+      summary: "No directory moves required.",
+    }, {
+      final_directories: [{folder_path: "01-Work/AcmeCo", description: "AcmeCo work files"}],
+      added_directories: [] as string[],
+      summary: "Preserve AcmeCo under Work.",
     }]);
 
     await organizeProposalTestHooks.handleOrganizePhaseReply(
@@ -2930,6 +3001,7 @@ describe("organize phased proposal flow", function() {
 
     const stored = (await db.collection("OrganizeProposals").doc(proposalId).get()).data();
     if (stored) stored.phaseData = await getOrganizePhaseData(proposalId);
+    expect(stored?.phase).to.equal("directory_analysis");
     expect(stored?.phaseData.placementSetup).to.deep.equal({
       granularity: "by_entity",
       namedEntities: ["AcmeCo", "Queenie"],
@@ -2937,7 +3009,7 @@ describe("organize phased proposal flow", function() {
     });
   });
 
-  it("placement_setup non-approval can remove an entity and update granularity together", async function() {
+  it("placement_setup non-approval can remove an entity, update granularity, and advance", async function() {
     const proposalId = `phase-placement-setup-mixed-${Date.now()}`;
     const proposalDoc = makePhaseDoc("placement_setup");
     proposalDoc.phaseData!.placementSetup = {
@@ -2952,6 +3024,24 @@ describe("organize phased proposal flow", function() {
         granularity: "by_document_type",
         namedEntities: ["AcmeCo"],
       },
+    }, {
+      has_existing_convention: false,
+      convention_description: "NN-Category root folders",
+      proposed_structure: [{
+        folder_path: "01-Work/AcmeCo",
+        description: "AcmeCo work files",
+        source: "proposed",
+      }],
+      folder_ignores: [] as string[],
+      summary: "Preserve AcmeCo under Work.",
+    }, {
+      directory_moves: [] as Array<{current_path: string; proposed_path: string; reason: string}>,
+      no_changes_needed: true,
+      summary: "No directory moves required.",
+    }, {
+      final_directories: [{folder_path: "01-Work/AcmeCo", description: "AcmeCo work files"}],
+      added_directories: [] as string[],
+      summary: "Preserve AcmeCo under Work.",
     }]);
 
     await organizeProposalTestHooks.handleOrganizePhaseReply(
@@ -2966,11 +3056,50 @@ describe("organize phased proposal flow", function() {
 
     const stored = (await db.collection("OrganizeProposals").doc(proposalId).get()).data();
     if (stored) stored.phaseData = await getOrganizePhaseData(proposalId);
+    expect(stored?.phase).to.equal("directory_analysis");
     expect(stored?.phaseData.placementSetup).to.deep.equal({
       granularity: "by_document_type",
       namedEntities: ["AcmeCo"],
       removedEntities: ["Queenie"],
     });
+  });
+
+  it("placement_setup unclear non-approval resends setup email", async function() {
+    const proposalId = `phase-placement-setup-unclear-${Date.now()}`;
+    const proposalDoc = makePhaseDoc("placement_setup");
+    proposalDoc.phaseData!.placementSetup = {
+      granularity: "by_entity",
+      namedEntities: [],
+      removedEntities: [],
+    };
+    await seedPhaseProposal(proposalId, proposalDoc);
+    setFakeStructuredCompletions([{
+      is_change: false,
+      updated: {
+        granularity: null,
+        namedEntities: null,
+      },
+    }]);
+
+    await organizeProposalTestHooks.handleOrganizePhaseReply(
+        makeTestEmail("not sure"),
+        sender,
+        uid,
+        proposalId,
+        proposalDoc,
+        "not sure",
+        false,
+    );
+
+    const stored = (await db.collection("OrganizeProposals").doc(proposalId).get()).data();
+    if (stored) stored.phaseData = await getOrganizePhaseData(proposalId);
+    expect(stored?.phase).to.equal("placement_setup");
+    expect(stored?.phaseData.placementSetup).to.deep.equal({
+      granularity: "by_entity",
+      namedEntities: [],
+      removedEntities: [],
+    });
+    expect(getLastSentEmail(sender)?.html).to.include("Before I propose the folder structure");
   });
 
   it("DT00uba routes directory_analysis approval directly to filename_convention", async function() {
@@ -4333,6 +4462,124 @@ describe("organize sequential execution proposal builder", function() {
       reason: "Test action",
     };
   }
+
+  it("DT00ubt caps organize planning input to the configured max file actions", async function() {
+    const previousCap = process.env.ORGANIZE_DRIVE_MAX_FILE_ACTIONS;
+    const previousChunkSize = process.env.ORGANIZE_DRIVE_CHUNK_SIZE;
+    process.env.ORGANIZE_DRIVE_MAX_FILE_ACTIONS = "200";
+    process.env.ORGANIZE_DRIVE_CHUNK_SIZE = "25";
+    const testId = "planning-file-action-cap";
+    const uid = `${testId}-uid`;
+    const sender = `${testId}@example.com`;
+    const proposalId = `${testId}-${Date.now()}`;
+    const storagePath = `organize-proposals/${proposalId}.json`;
+    const chunkSize = 25;
+    const proposalDoc: OrganizeProposalDoc = {
+      uid,
+      senderEmail: sender,
+      emailId: `${testId}-email-id`,
+      status: "pending",
+      phase: "plan_review",
+      createdAt: "2026-04-16T00:00:00.000Z",
+      expiresAt: "2099-04-16T00:00:00.000Z",
+      storagePath,
+      phaseData: {
+        directoryLayout: {
+          currentTreeSummary: "My Drive/\n  Incoming/ (250 files)\n",
+          userPrompt: "organize my drive",
+          approvedStructure: [{
+            folder_path: "Archive",
+            description: "Archived materials",
+          }],
+        },
+        filenameConvention: {convention: "YYYY.MM.DD - Description.ext"},
+        execution: {chunkSize, totalChunks: 0, completedChunks: 0},
+      },
+      cost: {
+        totalFiles: 250,
+        filesToMove: 250,
+        filesToRename: 0,
+        filesToKeep: 0,
+        textFiles: 250,
+        imageFiles: 0,
+        costPerTextFile: 0.01,
+        costPerImageFile: 0.03,
+        totalCost: 2.5,
+      },
+    };
+    const fileEntries: DriveFileEntry[] = Array.from({length: 250}, (_value, index) => ({
+      id: `file-${index}`,
+      name: `file-${index}.pdf`,
+      mimeType: "application/pdf",
+      parentId: "incoming",
+      parentPath: "Incoming",
+      createdTime: "2026-04-16T00:00:00.000Z",
+      size: 1024,
+      webViewLink: "",
+      isFolder: false,
+    }));
+    const enqueueCalls: Array<{data: unknown; opts?: {dispatchDeadlineSeconds?: number; id?: string}}> = [];
+    dispatchHandlerTestHooks.setGetFunctionsClientForTest(() => ({
+      taskQueue: (_path: string) => ({
+        enqueue: async (data: unknown, opts?: {dispatchDeadlineSeconds?: number; id?: string}) => {
+          enqueueCalls.push({data, opts});
+        },
+      }),
+    }));
+    const warnCalls: unknown[][] = [];
+    const originalWarn = firebaseLogger.warn;
+    (firebaseLogger as unknown as {warn: (...args: unknown[]) => void}).warn = (...args: unknown[]) => {
+      warnCalls.push(args);
+    };
+
+    try {
+      await db.collection("DriveUsers").doc(uid).set({
+        access_token: "test-access-token",
+        refresh_token: "test-refresh-token",
+      });
+      await db.collection("OrganizeProposals").doc(proposalId).set(proposalDoc);
+      await getStorage().bucket().file(storagePath).save(JSON.stringify({
+        fileEntries,
+        senderEmail: sender,
+        phaseData: proposalDoc.phaseData,
+      }), {contentType: "application/json"});
+
+      await startChunkedPlanning(makeTestEmail("approve"), sender, uid, proposalId, proposalDoc);
+    } finally {
+      (firebaseLogger as unknown as {warn: typeof originalWarn}).warn = originalWarn;
+      if (previousCap === undefined) {
+        delete process.env.ORGANIZE_DRIVE_MAX_FILE_ACTIONS;
+      } else {
+        process.env.ORGANIZE_DRIVE_MAX_FILE_ACTIONS = previousCap;
+      }
+      if (previousChunkSize === undefined) {
+        delete process.env.ORGANIZE_DRIVE_CHUNK_SIZE;
+      } else {
+        process.env.ORGANIZE_DRIVE_CHUNK_SIZE = previousChunkSize;
+      }
+    }
+
+    const stored = await getOrganizeProposal(proposalId) as unknown as OrganizeProposalDoc;
+    const [stateContents] = await getStorage().bucket().file(storagePath).download();
+    const savedState = JSON.parse(stateContents.toString()) as {fileEntries: DriveFileEntry[]};
+    const savedNonFolderFiles = savedState.fileEntries.filter((file) => !file.isFolder);
+
+    expect(savedNonFolderFiles).to.have.length(200);
+    expect(savedNonFolderFiles[0].id).to.equal("file-0");
+    expect(savedNonFolderFiles[199].id).to.equal("file-199");
+    expect(stored.status).to.equal("planning");
+    expect(stored.phaseData?.execution).to.deep.equal({
+      chunkSize,
+      totalChunks: Math.ceil(200 / chunkSize),
+      completedChunks: 0,
+    });
+    expect(stored.phaseData?.planReview?.totalFiles).to.equal(200);
+    expect(enqueueCalls).to.have.length(1);
+    expect(warnCalls).to.deep.equal([[
+      "Drive organize: truncating planning input to max file actions",
+      {proposalId, originalCount: 250, cap: 200},
+    ]]);
+  });
 
   it("DT00ubp keeps per-chunk tree refinement off by default", async function() {
     const previousFlag = process.env.ORGANIZE_DRIVE_REFINE_TREE_PER_CHUNK;

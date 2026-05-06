@@ -8,6 +8,7 @@ import {
   getOrganizeIntermediateState,
   getOrganizeProposal,
   getDriveUserPreferences,
+  saveOrganizeIntermediateState,
   updateOrganizeProposalStatus,
 } from "../../../util/firestoreHandler";
 import {sendEvent} from "../../../util/analytics";
@@ -16,6 +17,7 @@ import {
   AGENT_NAME,
   MAX_DRIVE_UPLOAD_BYTES,
   ORGANIZE_DRIVE_CHUNK_SIZE,
+  ORGANIZE_DRIVE_MAX_FILE_ACTIONS,
   ORGANIZE_DRIVE_PLAN_CONCURRENCY,
   ORGANIZE_DRIVE_REFINE_TREE_PER_CHUNK,
 } from "../config";
@@ -853,10 +855,27 @@ export async function startChunkedPlanning(
     proposalDoc: OrganizeProposalDoc,
 ): Promise<OrganizeProcessingResult> {
   const state = await getOrganizeIntermediateState(proposalId) as unknown as OrganizeIntermediateState;
-  const nonFolderFiles = filterIgnoredPlanningFiles(
+  let nonFolderFiles = filterIgnoredPlanningFiles(
       (state.fileEntries || []).filter((file) => !file.isFolder),
       proposalDoc.ignoredFolders,
   );
+  const maxFileActions = ORGANIZE_DRIVE_MAX_FILE_ACTIONS.value();
+  if (maxFileActions > 0 && nonFolderFiles.length > maxFileActions) {
+    logger.warn("Drive organize: truncating planning input to max file actions", {
+      proposalId,
+      originalCount: nonFolderFiles.length,
+      cap: maxFileActions,
+    });
+    nonFolderFiles = nonFolderFiles.slice(0, maxFileActions);
+    const newFileEntries = [
+      ...(state.fileEntries || []).filter((file) => file.isFolder),
+      ...nonFolderFiles,
+    ];
+    await saveOrganizeIntermediateState(proposalId, {
+      ...state,
+      fileEntries: newFileEntries,
+    });
+  }
   const approvedStructure =
     proposalDoc.phaseData?.directoryLayout?.approvedStructure ||
     proposalDoc.phaseData?.directoryLayout?.proposedStructure ||

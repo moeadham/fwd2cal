@@ -52,10 +52,6 @@ import {
   ClassifyPlacementRulesChangeResult,
 } from "./prompts/classifyPlacementRulesChange/v1";
 import {
-  ExtractNamedEntitiesSchema,
-  ExtractNamedEntitiesResult,
-} from "./prompts/extractNamedEntities/v1";
-import {
   ProposeFileNameSchema,
   ProposeFileNameResult,
 } from "./prompts/proposeFileName/v1";
@@ -921,27 +917,6 @@ async function classifyPlacementRulesChange(
       uid,
       {promptVersion: versions.PROMPT_CLASSIFY_PLACEMENT_RULES_CHANGE_VERSION},
   ) as ClassifyPlacementRulesChangeResult;
-}
-
-/** Extract named entities from a folder tree. */
-async function extractNamedEntities(
-    treeText: string,
-    uid: string | null = null,
-): Promise<ExtractNamedEntitiesResult> {
-  const {prompts, versions} = getPrompts();
-  const userText = `## Folder Tree\n${treeText || "(empty tree)"}\n`;
-  const messages: ChatMessage[] = [
-    {role: "system", content: prompts.extractNamedEntities.prompt},
-    {role: "user", content: userText},
-  ];
-  return await defaultCompletion<ExtractNamedEntitiesResult>(
-      messages,
-      prompts.extractNamedEntities.model,
-      prompts.extractNamedEntities.temperature ?? DEFAULT_TEMP,
-      ExtractNamedEntitiesSchema,
-      uid,
-      {promptVersion: versions.PROMPT_EXTRACT_NAMED_ENTITIES_VERSION},
-  ) as ExtractNamedEntitiesResult;
 }
 
 function renderFileMetadataBlock(fileInfo: DriveFileEntry): string {
@@ -2192,7 +2167,6 @@ export {
   classifyFolderConventionChange,
   classifyPlacementSetupChange,
   classifyPlacementRulesChange,
-  extractNamedEntities,
   proposeFileName,
   proposePlacement,
   generateFilenameExamples,

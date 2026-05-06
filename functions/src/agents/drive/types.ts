@@ -386,7 +386,6 @@ export interface DrivePrompts {
   classifyFolderConventionChange: DrivePromptConfig;
   classifyPlacementSetupChange: DrivePromptConfig;
   classifyPlacementRulesChange: DrivePromptConfig;
-  extractNamedEntities: DrivePromptConfig;
   generateFilenameExamples: DrivePromptConfig;
   revisePlanFileActions: DrivePromptConfig;
   scopePlanRevision: DrivePromptConfig;
