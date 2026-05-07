@@ -20,10 +20,34 @@ const prompt: DrivePromptConfig = {
   prompt: `Determine whether the user is changing organize-drive rules — these may concern file placement, filename formatting, or any other organize-drive instruction.
 
 Current placement rules include:
-- edgeCaseRules: freeform rules guiding placement, filename, or any other organize-drive decision.
+- edgeCaseRules: rules guiding placement, filename, or any other organize-drive decision.
+  A rule pairs a SCOPE with an ACTION.
+
+  Scopes name what set of files the rule applies to. Common forms:
+    - by folder or subtree           (e.g. "for files under <folder>/...")
+    - by file type / extension       (e.g. "all PDFs", "all images")
+    - by date or year                (e.g. "anything from 2023")
+    - by named entity                (e.g. "anything mentioning <CompanyName>")
+    - by filename pattern            (e.g. "files starting with 'invoice_'")
+
+  Actions name what to do with that scope. Common forms:
+    - preserve original placement
+    - route to a specific folder
+    - normalize filename in a specific way
+    - ignore / leave alone
+    - reorganize aggressively
+
+  A reply that names a scope and an action is a rule.
+
+  A single reply may produce MULTIPLE rules when it names multiple scopes.
+  Example: "keep <X> intact, reorganize the rest" → one rule preserving <X>,
+  one rule reorganizing the complement.
+
 - examples: concrete file-to-folder placement examples
 
-Return is_change true when the reply asks to add, remove, or alter any of those organize-drive preferences. Return false when the reply is approval, vague discussion, or a request unrelated to organize-drive (e.g. account changes, subscription questions).
+Return is_change true when the reply names a scope and an action — i.e. asks to add, remove, or alter any organize-drive preference.
+
+Return is_change false only when the reply is approval, off-topic commentary that names no scope or action, or a request unrelated to organize-drive (e.g. account changes, subscription questions).
 
 When is_change is true:
 - Return only the fields actually changed by the user's reply inside updated.

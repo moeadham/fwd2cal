@@ -215,8 +215,6 @@ export type PlacementGranularity = "by_entity" | "by_document_type" | "by_date" 
 
 export interface PlacementSetupData {
   granularity: PlacementGranularity;
-  namedEntities: string[];
-  removedEntities: string[];
 }
 
 export interface PlacementRulesData {
@@ -265,7 +263,6 @@ export interface DriveUserPreferences {
   filenameConvention?: string;
   filenameConventionDescription?: string;
   placementGranularity?: string;
-  placementNamedEntities?: string[];
   placementEdgeCaseRules?: string[];
   placementExamples?: string[];
 }

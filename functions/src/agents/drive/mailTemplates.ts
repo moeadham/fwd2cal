@@ -244,11 +244,7 @@ Reply with changes, or reply &quot;approve&quot; to start generating file propos
 <br>
 %GRANULARITY_OPTIONS%
 <br><br>
-<b>Named entities:</b>
-<br>
-%NAMED_ENTITIES%
-<br><br>
-Reply with changes (e.g. &quot;use by_document_type&quot;, &quot;remove FooHoldings&quot;), or reply &quot;approve&quot; to generate the proposed structure.
+Reply with changes (e.g. &quot;use by_document_type&quot;), or reply &quot;approve&quot; to generate the proposed structure.
 %EMBEDDED_DATA%
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
   },

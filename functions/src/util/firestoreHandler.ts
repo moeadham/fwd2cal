@@ -383,37 +383,6 @@ async function getOrganizeIntermediateState(
   }
 }
 
-async function finalizeOrganizeProposal(
-    proposalId: string,
-    proposal: Record<string, unknown>,
-    cost: Record<string, unknown>,
-): Promise<void> {
-  try {
-    const docRef = getFirestore()
-        .collection("OrganizeProposals")
-        .doc(proposalId);
-    const doc = await docRef.get();
-    if (!doc.exists) {
-      throw new Error("Organize proposal not found");
-    }
-
-    const storagePath = doc.data()?.storagePath as string;
-    const bucket = getStorage().bucket();
-    await bucket.file(storagePath).save(JSON.stringify({proposal, cost}), {
-      contentType: "application/json",
-    });
-
-    await docRef.update({
-      status: "pending",
-      generationStartedAt: null,
-      lastError: null,
-    });
-  } catch (error) {
-    logger.error("Database error in finalizeOrganizeProposal:", error);
-    throw error;
-  }
-}
-
 async function getOrganizeProposal(
     proposalId: string,
 ): Promise<Record<string, unknown> | null> {
@@ -664,7 +633,6 @@ export {
   saveOrganizeIntermediateState,
   getOrganizeIntermediateState,
   getOrganizePhaseData,
-  finalizeOrganizeProposal,
   getOrganizeProposal,
   findGeneratingProposal,
   getResumableOrganizeProposals,

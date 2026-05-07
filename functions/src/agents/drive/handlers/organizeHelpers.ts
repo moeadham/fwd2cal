@@ -685,12 +685,8 @@ export async function sendOrganizePlacementSetupEmail(
     proposalId: string,
     defaults: PlacementSetupData,
 ): Promise<void> {
-  const namedEntities = defaults.namedEntities.length ?
-    defaults.namedEntities.map((entity) => `- ${escapeHtml(entity)}`).join("<br>") :
-    "(none)";
   const html = applyTemplate(driveMailTemplates.organizePlacementSetup.html, {
     GRANULARITY_OPTIONS: renderGranularityOptions(defaults.granularity),
-    NAMED_ENTITIES: namedEntities,
     EMBEDDED_DATA: phaseEmbeddedHtml(proposalId),
   });
   await sendOrganizeEmailResponse(sender, email, html);
@@ -769,36 +765,6 @@ export async function sendOrganizeCostEstimateEmail(
     IMAGE_COST: `$${(cost.imageFiles * cost.costPerImageFile).toFixed(2)}`,
     APPROVE_LINK: approveLink,
     EMBEDDED_DATA: phaseEmbeddedHtml(proposalId),
-  });
-  await sendOrganizeEmailResponse(sender, email, html);
-}
-/** Sends an organize proposal email with approval metadata. */
-export async function sendOrganizeProposalEmail(
-    sender: string,
-    email: TransformedEmail,
-    proposalId: string,
-    proposal: DriveOrganizeProposal,
-    cost: OrganizeCostBreakdown,
-    preservedRootPaths?: Set<string>,
-): Promise<void> {
-  const embeddedData: OrganizeEmbeddedData = {proposalId};
-  const embeddedHtml = buildOrganizeEmbeddedData(embeddedData);
-  const folderTreeHtml = renderFolderTree(proposal, preservedRootPaths);
-  const approveToken = signActionToken(proposalId, "approve");
-  const approveLink = `${driveOrganizeActionUrl()}?proposalId=${proposalId}&action=approve&token=${approveToken}`;
-  const html = applyTemplate(driveMailTemplates.organizeProposal.html, {
-    SUMMARY: formatSummaryHtml(proposal.summary),
-    TOTAL_FILES: String(cost.totalFiles),
-    FILES_TO_CHANGE: String(cost.totalFiles - cost.filesToKeep),
-    FILES_TO_KEEP: String(cost.filesToKeep),
-    FOLDER_TREE: folderTreeHtml,
-    TOTAL_COST: `$${cost.totalCost.toFixed(2)}`,
-    TEXT_FILES: String(cost.textFiles),
-    TEXT_COST: `$${(cost.textFiles * cost.costPerTextFile).toFixed(2)}`,
-    IMAGE_FILES: String(cost.imageFiles),
-    IMAGE_COST: `$${(cost.imageFiles * cost.costPerImageFile).toFixed(2)}`,
-    EMBEDDED_DATA: embeddedHtml,
-    APPROVE_LINK: approveLink,
   });
   await sendOrganizeEmailResponse(sender, email, html);
 }

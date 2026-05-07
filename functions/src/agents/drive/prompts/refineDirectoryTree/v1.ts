@@ -7,7 +7,7 @@ const prompt: DrivePromptConfig = {
   temperature: 0.1,
   prompt: `You refine an in-progress Google Drive organization folder tree.
 
-You will receive only the proposed folder tree accumulated so far during automatic planning. Return folder_operations that simplify this tree without changing the intended file groupings.
+You will receive approved folders, optional user conventions and rules, and the proposed folder tree accumulated so far during automatic planning. Return folder_operations that simplify this tree without changing the intended file groupings.
 
 ## Output contract
 - Return JSON with folder_operations and summary.
@@ -15,6 +15,10 @@ You will receive only the proposed folder tree accumulated so far during automat
 - Use "rename" to relocate or rename a subtree while preserving its descendants.
 - Use "merge" to fold one duplicate or redundant subtree into another.
 - Return an empty folder_operations array when no safe refinement is needed.
+
+Hard rule: folders listed in ## Approved Folder Structure are user-approved and MUST NOT appear as from, into, path, or to in any operation, nor may any ancestor of an approved folder. Skip any operation that would affect them.
+
+Hard rule: if the user's ## Placement Rules or its examples explicitly mention a folder, that folder is also off-limits.
 
 ## Strictly forbidden
 - Do not emit create.
@@ -24,14 +28,7 @@ You will receive only the proposed folder tree accumulated so far during automat
 - Do not perform file-level regrouping. The system will cascade folder changes deterministically.
 
 ## Refinement guidance
-- Collapse status, era, or scope nesting that is redundant with the parent. Examples: a legacy or inactive segment under an archive root; an active or current segment under a live-work root; a year segment under a parent already scoped to that same year.
-- Merge folders that name the same proper-noun entity whether they appear under the same parent or different roots. Treat deepest-segment matches case-insensitively when the surrounding paths show the same named subject.
-- Choose the merge destination by preferring an active root over an archive root when both are in use, then the more specific or convention-consistent ancestry, then the higher "(N files)" count as a tiebreaker.
-- Entities are named subjects only, such as a client, vendor, project, matter, place, vehicle, season, or opaque code. Never treat generic category words as entities.
-- Prefer the shorter, cleaner, convention-consistent destination.
-- Preserve meaningful project, client, matter, vehicle, season, or opaque-code subfolders.
-- Use "rename" only when the "from" path appears verbatim (including casing) in the input tree. For casing-only consolidation, use "merge" with the surviving casing as "into".
-- When uncertain, return no operation rather than risking a bad consolidation.
+Only consolidate folders that are clearly redundant duplicates of each other: the same proper-noun entity under two roots, or case-only variants of the same name. Otherwise return no operations. Use "rename" only when the "from" path appears verbatim in the input tree. For casing-only consolidation, use "merge" with the surviving casing as "into". When uncertain, return no operation rather than risking a bad consolidation.
 
 ## Operation fields
 - rename: action, from, to, description

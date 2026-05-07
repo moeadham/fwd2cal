@@ -439,6 +439,10 @@ async function refineDirectoryTree(
     runningTree: DriveOrganizeProposal["proposed_folders"],
     fileActions: DriveOrganizeProposal["file_actions"],
     uid: string | null = null,
+    approvedStructure?: DriveOrganizeProposal["proposed_folders"],
+    placementRules?: PlacementRulesData | null,
+    folderConvention?: string,
+    folderConventionDescription?: string,
 ): Promise<DriveOrganizeRevision> {
   const {prompts, versions} = getPrompts();
   const treeText = renderFolderTreePlainText({
@@ -446,9 +450,19 @@ async function refineDirectoryTree(
     file_actions: fileActions,
     summary: "",
   });
+  const approvedFolders = approvedStructure || [];
+  const approvedStructureText = approvedFolders.length ?
+    approvedFolders
+        .map((folder) => `- ${folder.folder_path}: ${folder.description}`)
+        .join("\n") :
+    "(none)";
+  const userText = `## Approved Folder Structure (do not modify)\n${approvedStructureText}\n` +
+    renderFolderConventionBlock(folderConvention, folderConventionDescription) +
+    `\n## Placement Rules\n${renderPlacementRulesBlock(placementRules ?? null)}\n` +
+    `## Current Proposed Tree\n${treeText}\n`;
   const messages: ChatMessage[] = [
     {role: "system", content: prompts.refineDirectoryTree.prompt},
-    {role: "user", content: treeText},
+    {role: "user", content: userText},
   ];
 
   const result = await defaultCompletion<DriveOrganizeRevision>(
@@ -459,6 +473,45 @@ async function refineDirectoryTree(
       uid,
       {promptVersion: versions.PROMPT_REFINE_DIRECTORY_TREE_VERSION},
   ) as DriveOrganizeRevision;
+
+  const protectedPaths = new Set<string>();
+  const approvedRegistry = buildFolderCanonicalRegistry(approvedFolders.map((folder) => folder.folder_path));
+  for (const folder of approvedFolders) {
+    const approvedPath = canonicalizeFolderPath(folder.folder_path, approvedRegistry);
+    if (!approvedPath || approvedPath === "My Drive") {
+      continue;
+    }
+    const segments = approvedPath.split("/");
+    for (let i = 1; i <= segments.length; i++) {
+      const ancestorPath = segments.slice(0, i).join("/");
+      if (ancestorPath && ancestorPath !== "My Drive") {
+        protectedPaths.add(ancestorPath);
+      }
+    }
+  }
+  let filteredOperations = result.folder_operations;
+  if (protectedPaths.size > 0) {
+    filteredOperations = result.folder_operations.filter((op) => {
+      for (const field of ["from", "into", "path", "to"] as const) {
+        const rawPath = op[field];
+        if (!rawPath) {
+          continue;
+        }
+        const canonicalPath = canonicalizeFolderPath(rawPath, approvedRegistry);
+        if (protectedPaths.has(canonicalPath)) {
+          logger.warn("Drive organize tree refinement: dropped protected op", {
+            action: op.action,
+            path: canonicalPath,
+            field,
+            reason: "approved-folder-protection",
+          });
+          return false;
+        }
+      }
+      return true;
+    });
+  }
+  result.folder_operations = filteredOperations;
 
   logger.info("Drive organize tree refinement result", {
     proposedFolders: runningTree.length,
@@ -690,16 +743,8 @@ async function analyzeDirectoryStructure(
     conventionDescription = "",
     existingIgnoredFolders: string[] = [],
     granularity = "by_entity",
-    namedEntities: string[] = [],
-    removedEntities: string[] = [],
 ): Promise<AnalyzeDirectoryStructureResult> {
   const {prompts, versions} = getPrompts();
-  const namedEntitiesBlock = namedEntities.length ?
-    namedEntities.map((entity) => `- ${entity}`).join("\n") :
-    "(none)";
-  const removedEntitiesBlock = removedEntities.length ?
-    removedEntities.map((entity) => `- ${entity}`).join("\n") :
-    "(none)";
   const ignoredFolders = existingIgnoredFolders.length > 0 ?
     `## Previously Ignored Folders\n` +
     `These folder paths were marked as ignored in an earlier revision. Unless the user's current ` +
@@ -712,8 +757,6 @@ async function analyzeDirectoryStructure(
     `## Confirmed Folder Naming Convention\n${folderConvention || "(none)"}\n\n` +
     `## Confirmed Convention Description\n${conventionDescription || "(none)"}\n\n` +
     `## Granularity\n${granularity || "by_entity"}\n\n` +
-    `## Known Named Entities\n${namedEntitiesBlock}\n\n` +
-    `## Removed Entities\n${removedEntitiesBlock}\n\n` +
     ignoredFolders +
     `## User Instructions\n${userPrompt || "(none)"}\n`;
   logger.info("analyzeDirectoryStructure LLM input", {
@@ -727,7 +770,7 @@ async function analyzeDirectoryStructure(
     {role: "system", content: prompts.analyzeDirectoryStructure.prompt},
     {role: "user", content: userText},
   ];
-  const result = await defaultCompletion<AnalyzeDirectoryStructureResult>(
+  return await defaultCompletion<AnalyzeDirectoryStructureResult>(
       messages,
       prompts.analyzeDirectoryStructure.model,
       prompts.analyzeDirectoryStructure.temperature ?? DEFAULT_TEMP,
@@ -735,27 +778,6 @@ async function analyzeDirectoryStructure(
       uid,
       {promptVersion: versions.PROMPT_ANALYZE_DIRECTORY_STRUCTURE_VERSION},
   ) as AnalyzeDirectoryStructureResult;
-  if (removedEntities.length > 0) {
-    const removed = new Set(removedEntities.map((entity) => entity.trim().toLowerCase()).filter(Boolean));
-    const kept = result.proposed_structure.filter((folder) => {
-      const hasRemovedSegment = folder.folder_path
-          .split("/")
-          .map((segment) => segment.trim().toLowerCase())
-          .some((segment) => removed.has(segment));
-      if (hasRemovedSegment) {
-        logger.warn("Drive organize: dropping proposed folder for removed entity", {
-          folderPath: folder.folder_path,
-          removedEntities,
-        });
-      }
-      return !hasRemovedSegment;
-    });
-    return {
-      ...result,
-      proposed_structure: kept,
-    };
-  }
-  return result;
 }
 
 /** Evaluate whether existing directories should move into the proposed structure. */
@@ -866,11 +888,7 @@ async function classifyFolderConventionChange(
 }
 
 function renderPlacementSetupBlock(setup: PlacementSetupData): string {
-  const namedEntities = setup.namedEntities.length ?
-    setup.namedEntities.map((entity) => `- ${entity}`).join("\n") :
-    "(none)";
-  return `Granularity: ${setup.granularity || "by_entity"}\n\n` +
-    `Named entities:\n${namedEntities}\n`;
+  return `Granularity: ${setup.granularity || "by_entity"}\n`;
 }
 
 /** Classify whether a reply updates placement setup. */

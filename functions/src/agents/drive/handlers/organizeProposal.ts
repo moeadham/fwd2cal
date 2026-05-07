@@ -9,25 +9,22 @@ import {getOauthClient} from "../../../auth/authHandler";
 import {getSenderFromRawEmail} from "../../../util/emailUtils";
 import {TransformedEmail} from "../../../util/types";
 import {AGENT_EMAIL_ADDRESS, AGENT_NAME} from "../config";
-import {applyTemplate, isDriveAuthError} from "../driveUtils";
-import {driveMailTemplates, driveOrganizeActionUrl} from "../mailTemplates";
+import {applyTemplate} from "../driveUtils";
+import {driveMailTemplates} from "../mailTemplates";
 import {
   DriveFileEntry,
   DriveOrganizeProposal,
-  OrganizeEmbeddedData,
   OrganizeProcessingResult,
   OrganizeProposalDoc,
   PlacementSetupData,
   PlacementRulesData,
 } from "../types";
-import {buildOrganizeEmbeddedData, renderFolderTree} from "../templates/folderTree";
 import {
   computeAffectedActions,
   calculateOrganizeCostEstimate,
   calculateOrganizeCostFromMimeTypesByFileId,
   emptyResult,
   extractReplyBody,
-  formatSummaryHtml,
   isApprovalText,
   sendOrganizeCostEstimateEmail,
   sendOrganizeEmailResponse,
@@ -38,12 +35,9 @@ import {
   sendOrganizePlanReviewScopeTooBroadEmail,
   sendOrganizePhase1aEmail,
   sendOrganizePhase2Email,
-  sendOrganizeProposalEmail,
-  signActionToken,
 } from "./organizeHelpers";
 import {
   applyPlanPatches,
-  executeOrganizeProposal,
   getPlanCsvStoragePath,
   getPlanStoragePath,
   loadSavedPlan,
@@ -52,12 +46,9 @@ import {
   startChunkedMove,
   startChunkedPlanning,
 } from "./organizeExecution";
-import {cleanupAllEmptyFolders, handleOrganizeUndo, undoOrganizeActions} from "./organizeUndo";
-import {verifyOrganizeResults} from "./organizeVerify";
-import {sendOrganizeAuthRequiredEmail} from "./organizeMain";
+import {handleOrganizeUndo} from "./organizeUndo";
 import {createOrUpdateProposalSheet} from "../driveHelper";
 import {
-  finalizeOrganizeProposal,
   getDriveUserPreferences,
   getOrganizeIntermediateState,
   getOrganizePhaseData,
@@ -156,40 +147,21 @@ function normalizePlacementSetup(value: unknown): PlacementSetupData {
     "by_entity";
   return {
     granularity,
-    namedEntities: uniqueStrings(Array.isArray(candidate?.namedEntities) ? candidate.namedEntities : []),
-    removedEntities: uniqueStrings(Array.isArray(candidate?.removedEntities) ? candidate.removedEntities : []),
   };
-}
-
-function hasCaseInsensitive(values: string[], candidate: string): boolean {
-  const key = candidate.trim().toLowerCase();
-  return values.some((value) => value.trim().toLowerCase() === key);
 }
 
 function mergePlacementSetup(
     current: PlacementSetupData,
     updated: {
       granularity?: string | null;
-      namedEntities?: string[] | null;
     },
 ): PlacementSetupData {
   const granularity = typeof updated.granularity === "string" &&
     PLACEMENT_GRANULARITIES.has(updated.granularity as PlacementSetupData["granularity"]) ?
     updated.granularity as PlacementSetupData["granularity"] :
     current.granularity;
-  const previousEntities = uniqueStrings(current.namedEntities);
-  const nextEntities = Array.isArray(updated.namedEntities) ?
-    uniqueStrings(updated.namedEntities) :
-    previousEntities;
-  const justRemoved = previousEntities.filter((entity) => !hasCaseInsensitive(nextEntities, entity));
-  const currentRemoved = uniqueStrings(current.removedEntities);
-  const reAdded = nextEntities.filter((entity) => hasCaseInsensitive(currentRemoved, entity));
-  const removedWithNew = uniqueStrings([...currentRemoved, ...justRemoved]);
-  const nextRemoved = removedWithNew.filter((entity) => !hasCaseInsensitive(reAdded, entity));
   return {
     granularity,
-    namedEntities: nextEntities,
-    removedEntities: nextRemoved,
   };
 }
 
@@ -407,7 +379,6 @@ async function handleFolderPreferencesReply(
       shouldSaveConvention = true;
     }
   }
-  const namedEntities: string[] = [];
   if (shouldSaveConvention) {
     await saveDriveUserPreferences(uid, {
       folderConvention: resolvedConvention,
@@ -416,8 +387,6 @@ async function handleFolderPreferencesReply(
   }
   const placementSetup: PlacementSetupData = {
     granularity: "by_entity",
-    namedEntities,
-    removedEntities: [],
   };
   const nextPhaseData = {
     ...proposalDoc.phaseData,
@@ -476,7 +445,6 @@ async function handlePlacementSetupReply(
     let conventionDescription = layout.conventionDescription || folderPreferences.conventionDescription || "";
     await saveDriveUserPreferences(uid, {
       placementGranularity: effectiveSetup.granularity,
-      placementNamedEntities: effectiveSetup.namedEntities,
     });
     const analysis = await analyzeDirectoryStructure(
         treeSummary,
@@ -486,8 +454,6 @@ async function handlePlacementSetupReply(
         conventionDescription,
         [],
         effectiveSetup.granularity,
-        effectiveSetup.namedEntities,
-        effectiveSetup.removedEntities,
     );
     if (!conventionDescription) {
       conventionDescription = analysis.convention_description || "";
@@ -569,8 +535,9 @@ export async function handleOrganizeRevision(
       getNonEmptyString(proposalDoc.phaseData?.filenameConvention?.convention) ||
       getNonEmptyString(preferences.filenameConvention) ||
       DEFAULT_FILENAME_CONVENTION;
+    const currentProposal = await loadSavedPlan(proposalId);
     const {proposal: revisedProposal, preservedRootPaths} = await reviseOrganization(
-        proposalDoc.proposal!,
+        currentProposal,
         userInstructions,
         uid,
         filenameConvention,
@@ -578,7 +545,7 @@ export async function handleOrganizeRevision(
         folderConventionDescription,
     );
     const mergedProposal = mergeRevisedProposal(
-        proposalDoc.proposal!,
+        currentProposal,
         revisedProposal,
     );
     renumberFoldersContiguously(mergedProposal, preservedRootPaths, folderConvention);
@@ -593,35 +560,55 @@ export async function handleOrganizeRevision(
         mimeTypesByFileId,
     );
 
-    await finalizeOrganizeProposal(
-        proposalId,
-        mergedProposal as unknown as Record<string, unknown>,
-        newCost as unknown as Record<string, unknown>,
-    );
-    await sendOrganizeProposalEmail(
+    await saveSavedPlan(proposalId, mergedProposal);
+    const csvBuffer = await savePlanCsv(proposalId, mergedProposal.file_actions);
+    const oauth2Client = await getOauthClient(uid, AGENT_NAME);
+    const existingSheetId = proposalDoc.phaseData?.planReview?.sheetFileId;
+    const sheet = await createOrReuseProposalSheet(oauth2Client, proposalId, csvBuffer, existingSheetId);
+    const nextVersion = (proposalDoc.phaseData?.planReview?.fileActionsVersion || 1) + 1;
+    await updateOrganizeProposalStatus(proposalId, "pending", {
+      phase: "plan_review",
+      phaseData: {
+        ...proposalDoc.phaseData,
+        planReview: {
+          totalFiles: mergedProposal.file_actions.length,
+          csvStoragePath: proposalDoc.phaseData?.planReview?.csvStoragePath || getPlanCsvStoragePath(proposalId),
+          planStoragePath: proposalDoc.phaseData?.planReview?.planStoragePath || getPlanStoragePath(proposalId),
+          fileActionsVersion: nextVersion,
+          planEmailSentAt: new Date().toISOString(),
+          sheetFileId: sheet.fileId,
+          sheetWebViewLink: sheet.webViewLink,
+        },
+      },
+    });
+    const revisedCounts = {
+      totalFiles: mergedProposal.file_actions.length,
+      filesToMove: mergedProposal.file_actions
+          .filter((a) => a.action === "move" || a.action === "move_and_rename").length,
+      filesToRename: mergedProposal.file_actions
+          .filter((a) => a.action === "rename" || a.action === "move_and_rename").length,
+      filesToKeep: mergedProposal.file_actions.filter((a) => a.action === "keep").length,
+    };
+    await sendOrganizePlanReviewEmail(
         sender,
         email,
         proposalId,
         mergedProposal,
-        newCost,
-        preservedRootPaths,
+        sheet.webViewLink,
+        revisedCounts,
+        mergedProposal.summary || "Updated the plan.",
     );
-
     sendEvent(uid, "driveOrganizeRevised", "drive", {
       proposalId,
       totalFiles: String(newCost.totalFiles),
       filesToChange: String(newCost.totalFiles - newCost.filesToKeep),
       totalCost: newCost.totalCost.toFixed(2),
     });
-
-    logger.info("Drive organize: Proposal revised", {
+    logger.info("Drive organize: Plan-review folder revision applied", {
       proposalId,
       uid,
       totalFiles: newCost.totalFiles,
-      filesToChange: newCost.totalFiles - newCost.filesToKeep,
-      totalCost: newCost.totalCost,
     });
-
     return {
       totalFiles: newCost.totalFiles,
       filesToMove: newCost.filesToMove,
@@ -755,8 +742,6 @@ async function handleDirectoryAnalysisReply(
       layout.conventionDescription || "",
       existingIgnoredFolders,
       placementSetup.granularity,
-      placementSetup.namedEntities,
-      placementSetup.removedEntities,
   );
   const folderConvention =
     layout.folderConvention ||
@@ -1555,161 +1540,11 @@ export async function handleOrganizeProposalReply(
     return phaseResult;
   }
 
-  if (!proposalDoc.proposal || !proposalDoc.cost) {
-    logger.error("Drive organize: Proposal payload missing", {proposalId});
-    const html = applyTemplate(driveMailTemplates.organizeError.html, {});
-    await sendOrganizeEmailResponse(sender, email, html);
-    return emptyResult("Proposal missing");
-  }
-
-  if (!isApproval && proposalDoc.status === "pending") {
-    return handleOrganizeRevision(
-        email,
-        sender,
-        uid,
-        proposalId,
-        proposalDoc,
-        replyBody,
-    );
-  }
-
-  // Mark as executing
-  await updateOrganizeProposalStatus(proposalId, "executing");
-
-  // Get OAuth client
-  let oauth2Client;
-  try {
-    oauth2Client = await getOauthClient(uid, AGENT_NAME);
-  } catch (error) {
-    const errMsg = error instanceof Error ? error.message : String(error);
-    logger.error("Drive organize approval: OAuth failed", {uid, error: errMsg});
-    await updateOrganizeProposalStatus(proposalId, "pending");
-    if (isDriveAuthError(errMsg)) {
-      return sendOrganizeAuthRequiredEmail(email, sender, proposalDoc.emailId);
-    }
-    const html = applyTemplate(driveMailTemplates.organizeError.html, {});
-    await sendOrganizeEmailResponse(sender, email, html);
-    return emptyResult("OAuth failed");
-  }
-
-  const execStartedHtml = applyTemplate(driveMailTemplates.organizeExecutionStarted.html, {});
-  await sendOrganizeEmailResponse(sender, email, execStartedHtml);
-  logger.info("Drive organize: Sent execution-started acknowledgment", {
-    sender,
+  logger.error("Drive organize: Reply received with no active phase", {
     proposalId,
+    phase: proposalDoc.phase,
   });
-
-  // Execute the proposal
-  const proposal = proposalDoc.proposal!;
-  const preferences = await getDriveUserPreferences(uid);
-  const executionFolderConvention =
-    getNonEmptyString(proposalDoc.phaseData?.directoryLayout?.folderConvention) ||
-    getNonEmptyString(preferences.folderConvention) ||
-    DEFAULT_FOLDER_CONVENTION;
-  const executionFolderConventionDescription =
-    getNonEmptyString(proposalDoc.phaseData?.directoryLayout?.conventionDescription) ||
-    getNonEmptyString(proposalDoc.phaseData?.folderPreferences?.conventionDescription) ||
-    getNonEmptyString(preferences.folderConventionDescription);
-  const executionFilenameConvention =
-    getNonEmptyString(proposalDoc.phaseData?.filenameConvention?.convention) ||
-    getNonEmptyString(preferences.filenameConvention) ||
-    DEFAULT_FILENAME_CONVENTION;
-  let execResult;
-  try {
-    execResult = await executeOrganizeProposal(
-        oauth2Client,
-        proposal,
-        uid,
-        executionFilenameConvention,
-        executionFolderConvention,
-        executionFolderConventionDescription,
-    );
-  } catch (error) {
-    const errMsg = error instanceof Error ? error.message : String(error);
-    logger.error("Drive organize approval: Execution failed", {
-      proposalId, error: errMsg,
-    });
-    await updateOrganizeProposalStatus(proposalId, "pending");
-    if (isDriveAuthError(errMsg)) {
-      return sendOrganizeAuthRequiredEmail(email, sender, proposalDoc.emailId);
-    }
-    const html = applyTemplate(driveMailTemplates.organizeError.html, {});
-    await sendOrganizeEmailResponse(sender, email, html);
-    return emptyResult("Execution failed");
-  }
-
-  // Integrity check — undo everything if mismatches found
-  const mismatches = await verifyOrganizeResults(
-      oauth2Client, proposal, execResult.folderMap, execResult.snapshot,
-  );
-
-  if (mismatches.length > 0) {
-    logger.warn("Drive organize approval: Integrity check failed, undoing", {
-      proposalId, mismatchCount: mismatches.length,
-      mismatches: mismatches.slice(0, 10),
-    });
-
-    await undoOrganizeActions(oauth2Client, execResult.snapshot);
-    await updateOrganizeProposalStatus(proposalId, "pending");
-
-    const html = `We ran into some issues while organizing your Drive and ` +
-      `have reverted all changes. Your files are back where they were.` +
-      `<br><br>Please try again by sending a new &quot;organize my drive&quot; email.` +
-      `<br><br>You can always ask for help: ${helpLink}<br>`;
-    await sendOrganizeEmailResponse(sender, email, html);
-
-    sendEvent(uid, "driveOrganizeFailed", "drive", {
-      proposalId,
-      mismatches: String(mismatches.length),
-    });
-
-    return emptyResult("Integrity check failed — changes reverted");
-  }
-
-  // All good — save snapshot and mark completed
-  await updateOrganizeProposalStatus(proposalId, "completed", {
-    snapshot: execResult.snapshot,
-    completedAt: now.toISOString(),
-  });
-
-  // Clean up empty folders left behind after reorganization
-  await cleanupAllEmptyFolders(oauth2Client);
-
-  // Send completion email
-  const folderTreeHtml = renderFolderTree(proposal);
-  const filesChanged = execResult.stats.moved + execResult.stats.renamed;
-  const embeddedData: OrganizeEmbeddedData = {proposalId};
-  const embeddedHtml = buildOrganizeEmbeddedData(embeddedData);
-
-  const undoToken = signActionToken(proposalId, "undo");
-  const undoLink = `${driveOrganizeActionUrl()}?proposalId=${proposalId}&action=undo&token=${undoToken}`;
-
-  const html = applyTemplate(driveMailTemplates.organizeComplete.html, {
-    SUMMARY: formatSummaryHtml(proposal.summary),
-    FILES_CHANGED: String(filesChanged),
-    FOLDER_TREE: folderTreeHtml,
-    EMBEDDED_DATA: embeddedHtml,
-    UNDO_LINK: undoLink,
-  });
+  const html = applyTemplate(driveMailTemplates.organizeError.html, {});
   await sendOrganizeEmailResponse(sender, email, html);
-
-  sendEvent(uid, "driveOrganizeCompleted", "drive", {
-    filesChanged: String(filesChanged),
-    failed: String(execResult.stats.failed),
-  });
-
-  logger.info("Drive organize approval: Complete", {
-    proposalId, uid,
-    moved: execResult.stats.moved,
-    renamed: execResult.stats.renamed,
-    failed: execResult.stats.failed,
-  });
-
-  return {
-    totalFiles: proposal.file_actions.length,
-    filesToMove: execResult.stats.moved,
-    filesToRename: execResult.stats.renamed,
-    totalCost: proposalDoc.cost.totalCost,
-    proposalSent: false,
-  };
+  return emptyResult("No active phase");
 }
