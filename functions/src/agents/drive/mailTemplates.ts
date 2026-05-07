@@ -237,17 +237,6 @@ Reply with changes, or reply &quot;approve&quot; to start generating file propos
 %EMBEDDED_DATA%
 <br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
   },
-  organizePlacementSetup: {
-    html: `Before I propose the folder structure, confirm how specific it should be.
-<br><br>
-<b>Granularity:</b>
-<br>
-%GRANULARITY_OPTIONS%
-<br><br>
-Reply with changes (e.g. &quot;use by_document_type&quot;), or reply &quot;approve&quot; to generate the proposed structure.
-%EMBEDDED_DATA%
-<br><br>You can always ask for help: <a href="mailto:%SUPPORT_EMAIL%">%SUPPORT_EMAIL%</a><br>`,
-  },
   organizePlacementRules: {
     html: `Any special rules or examples to guide where files should go and how they should be named?
 <br><br>

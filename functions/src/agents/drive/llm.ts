@@ -15,7 +15,6 @@ import {
   FileInfo,
   GenerateFilenameExamplesSchema,
   GenerateFilenameExamplesResult,
-  PlacementSetupData,
   PlacementRulesData,
 } from "./types";
 import {ChatMessage, TextContent, ImageURLContent} from "../../util/types";
@@ -43,10 +42,6 @@ import {
   ClassifyFolderConventionChangeSchema,
   ClassifyFolderConventionChangeResult,
 } from "./prompts/classifyFolderConventionChange/v1";
-import {
-  ClassifyPlacementSetupChangeSchema,
-  ClassifyPlacementSetupChangeResult,
-} from "./prompts/classifyPlacementSetupChange/v1";
 import {
   ClassifyPlacementRulesChangeSchema,
   ClassifyPlacementRulesChangeResult,
@@ -885,33 +880,6 @@ async function classifyFolderConventionChange(
       uid,
       {promptVersion: versions.PROMPT_CLASSIFY_FOLDER_CONVENTION_CHANGE_VERSION},
   ) as ClassifyFolderConventionChangeResult;
-}
-
-function renderPlacementSetupBlock(setup: PlacementSetupData): string {
-  return `Granularity: ${setup.granularity || "by_entity"}\n`;
-}
-
-/** Classify whether a reply updates placement setup. */
-async function classifyPlacementSetupChange(
-    currentSetup: PlacementSetupData,
-    userReply: string,
-    uid: string | null = null,
-): Promise<ClassifyPlacementSetupChangeResult> {
-  const {prompts, versions} = getPrompts();
-  const userText = `## Current Placement Setup\n${renderPlacementSetupBlock(currentSetup)}\n\n` +
-    `## User Reply\n${userReply}\n`;
-  const messages: ChatMessage[] = [
-    {role: "system", content: prompts.classifyPlacementSetupChange.prompt},
-    {role: "user", content: userText},
-  ];
-  return await defaultCompletion<ClassifyPlacementSetupChangeResult>(
-      messages,
-      prompts.classifyPlacementSetupChange.model,
-      prompts.classifyPlacementSetupChange.temperature ?? DEFAULT_TEMP,
-      ClassifyPlacementSetupChangeSchema,
-      uid,
-      {promptVersion: versions.PROMPT_CLASSIFY_PLACEMENT_SETUP_CHANGE_VERSION},
-  ) as ClassifyPlacementSetupChangeResult;
 }
 
 /** Classify whether a reply updates placement rules. */
@@ -2183,7 +2151,6 @@ export {
   finalizeDirectoryMap,
   classifyConventionChange,
   classifyFolderConventionChange,
-  classifyPlacementSetupChange,
   classifyPlacementRulesChange,
   proposeFileName,
   proposePlacement,

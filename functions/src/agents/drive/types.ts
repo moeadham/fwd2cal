@@ -167,7 +167,6 @@ export type DriveOrganizeProposal = z.infer<typeof DriveOrganizeProposalSchema>;
 
 export type OrganizePhase =
   "folder_preferences" |
-  "placement_setup" |
   "directory_analysis" |
   "directory_placement" |
   "directory_additions" |
@@ -381,7 +380,6 @@ export interface DrivePrompts {
   finalizeDirectoryMap: DrivePromptConfig;
   classifyConventionChange: DrivePromptConfig;
   classifyFolderConventionChange: DrivePromptConfig;
-  classifyPlacementSetupChange: DrivePromptConfig;
   classifyPlacementRulesChange: DrivePromptConfig;
   generateFilenameExamples: DrivePromptConfig;
   revisePlanFileActions: DrivePromptConfig;
@@ -416,7 +414,6 @@ export interface DriveMailTemplates {
   organizeExecutionStarted: DriveMailTemplate;
   organizeProposal: DriveMailTemplate;
   organizeFolderPreferences: DriveMailTemplate;
-  organizePlacementSetup: DriveMailTemplate;
   organizePhase1aProposal: DriveMailTemplate;
   organizePhase2Proposal: DriveMailTemplate;
   organizePlacementRules: DriveMailTemplate;

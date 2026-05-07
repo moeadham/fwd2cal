@@ -17,7 +17,6 @@ import {
   OrganizeCostBreakdown,
   OrganizeEmbeddedData,
   OrganizeProcessingResult,
-  PlacementSetupData,
   PlacementRulesData,
 } from "../types";
 import {driveMailTemplates, driveOrganizeActionUrl} from "../mailTemplates";
@@ -656,37 +655,6 @@ export async function sendOrganizePhase2Email(
   const html = applyTemplate(driveMailTemplates.organizePhase2Proposal.html, {
     FILENAME_CONVENTION: escapeHtml(convention),
     FILENAME_EXAMPLES: examples,
-    EMBEDDED_DATA: phaseEmbeddedHtml(proposalId),
-  });
-  await sendOrganizeEmailResponse(sender, email, html);
-}
-
-const GRANULARITY_DESCRIPTIONS: Array<{value: PlacementSetupData["granularity"]; description: string}> = [
-  {value: "by_entity", description: "each company, client, project, or organization gets its own folder"},
-  {value: "by_document_type", description: "group by document type (Receipts, Contracts, Invoices, Statements)"},
-  {value: "by_date", description: "group by year or period (e.g. 2024/, 2025-Q1/)"},
-  {value: "mixed", description: "entity folders for ongoing work, document-type folders for one-offs"},
-];
-
-function renderGranularityOptions(current: PlacementSetupData["granularity"]): string {
-  return GRANULARITY_DESCRIPTIONS
-      .map(({value, description}) => {
-        const marker = value === current ? " <i>(current)</i>" : "";
-        const label = value === current ? `<b>${value}</b>` : value;
-        return `- ${label}${marker} &mdash; ${escapeHtml(description)}`;
-      })
-      .join("<br>");
-}
-
-/** Sends the placement-setup phase email. */
-export async function sendOrganizePlacementSetupEmail(
-    sender: string,
-    email: TransformedEmail,
-    proposalId: string,
-    defaults: PlacementSetupData,
-): Promise<void> {
-  const html = applyTemplate(driveMailTemplates.organizePlacementSetup.html, {
-    GRANULARITY_OPTIONS: renderGranularityOptions(defaults.granularity),
     EMBEDDED_DATA: phaseEmbeddedHtml(proposalId),
   });
   await sendOrganizeEmailResponse(sender, email, html);

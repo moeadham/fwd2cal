@@ -29,7 +29,6 @@ import {
   sendOrganizeCostEstimateEmail,
   sendOrganizeEmailResponse,
   sendOrganizeFolderPreferencesEmail,
-  sendOrganizePlacementSetupEmail,
   sendOrganizePlacementRulesEmail,
   sendOrganizePlanReviewEmail,
   sendOrganizePlanReviewScopeTooBroadEmail,
@@ -61,7 +60,6 @@ import {
   analyzeDirectoryStructure,
   classifyConventionChange,
   classifyFolderConventionChange,
-  classifyPlacementSetupChange,
   classifyPlacementRulesChange,
   DEFAULT_FOLDER_CONVENTION,
   evaluateDirectoryPlacement,
@@ -145,21 +143,6 @@ function normalizePlacementSetup(value: unknown): PlacementSetupData {
     PLACEMENT_GRANULARITIES.has(candidate.granularity as PlacementSetupData["granularity"]) ?
     candidate.granularity as PlacementSetupData["granularity"] :
     "by_entity";
-  return {
-    granularity,
-  };
-}
-
-function mergePlacementSetup(
-    current: PlacementSetupData,
-    updated: {
-      granularity?: string | null;
-    },
-): PlacementSetupData {
-  const granularity = typeof updated.granularity === "string" &&
-    PLACEMENT_GRANULARITIES.has(updated.granularity as PlacementSetupData["granularity"]) ?
-    updated.granularity as PlacementSetupData["granularity"] :
-    current.granularity;
   return {
     granularity,
   };
@@ -386,74 +369,23 @@ async function handleFolderPreferencesReply(
     });
   }
   const placementSetup: PlacementSetupData = {
-    granularity: "by_entity",
+    granularity: "mixed",
   };
-  const nextPhaseData = {
-    ...proposalDoc.phaseData,
-    folderPreferences: {
-      ...folderPreferences,
-      confirmedConvention: resolvedConvention,
-    },
-    placementSetup,
-    directoryLayout: {
-      currentTreeSummary: treeSummary,
-      userPrompt: email.text || email.html || "",
-      folderConvention: resolvedConvention,
-      conventionDescription: resolvedConventionDescription,
-    },
-  };
-
-  await updateOrganizeProposalStatus(proposalId, "pending", {
-    phase: "placement_setup",
-    phaseData: nextPhaseData,
-  });
-  await sendOrganizePlacementSetupEmail(sender, email, proposalId, placementSetup);
-  return emptyResult();
-}
-
-/** Handles replies during placement setup before directory analysis. */
-async function handlePlacementSetupReply(
-    email: TransformedEmail,
-    sender: string,
-    uid: string,
-    proposalId: string,
-    proposalDoc: OrganizeProposalDoc,
-    replyBody: string,
-    isApproval: boolean,
-): Promise<OrganizeProcessingResult> {
-  const layout = proposalDoc.phaseData?.directoryLayout;
-  const folderPreferences = proposalDoc.phaseData?.folderPreferences;
-  if (!layout || !folderPreferences) {
-    return emptyResult("Placement setup state missing");
-  }
-  const currentSetup = normalizePlacementSetup(proposalDoc.phaseData?.placementSetup);
-  let effectiveSetup = currentSetup;
-
-  if (!isApproval) {
-    const change = await classifyPlacementSetupChange(currentSetup, replyBody, uid);
-    if (!change.is_change) {
-      await sendOrganizePlacementSetupEmail(sender, email, proposalId, currentSetup);
-      return emptyResult("Placement setup change unclear");
-    }
-    effectiveSetup = mergePlacementSetup(currentSetup, change.updated);
-  }
 
   try {
-    const treeSummary = await loadTreeSummary(proposalId);
-    const folderConvention = layout.folderConvention || folderPreferences.confirmedConvention ||
-      folderPreferences.suggestedConvention || DEFAULT_FOLDER_CONVENTION;
-    let conventionDescription = layout.conventionDescription || folderPreferences.conventionDescription || "";
+    const folderConvention = resolvedConvention || DEFAULT_FOLDER_CONVENTION;
+    let conventionDescription = resolvedConventionDescription;
     await saveDriveUserPreferences(uid, {
-      placementGranularity: effectiveSetup.granularity,
+      placementGranularity: placementSetup.granularity,
     });
     const analysis = await analyzeDirectoryStructure(
         treeSummary,
         folderConvention,
-        layout.userPrompt || email.text || email.html || "",
+        email.text || email.html || "",
         uid,
         conventionDescription,
         [],
-        effectiveSetup.granularity,
+        placementSetup.granularity,
     );
     if (!conventionDescription) {
       conventionDescription = analysis.convention_description || "";
@@ -473,10 +405,14 @@ async function handlePlacementSetupReply(
     });
     const nextPhaseData = {
       ...proposalDoc.phaseData,
-      placementSetup: effectiveSetup,
+      folderPreferences: {
+        ...folderPreferences,
+        confirmedConvention: resolvedConvention,
+      },
+      placementSetup,
       directoryLayout: {
-        ...layout,
         currentTreeSummary: treeSummary,
+        userPrompt: email.text || email.html || "",
         folderConvention,
         conventionDescription,
         proposedStructure: finalizedLayout.finalStructure,
@@ -501,14 +437,14 @@ async function handlePlacementSetupReply(
     return emptyResult();
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    logger.error("Drive organize: Failed to finalize placement setup approval", {
+    logger.error("Drive organize: Failed to finalize folder preferences approval", {
       proposalId,
       uid,
       error: errMsg,
     });
     const html = applyTemplate(driveMailTemplates.organizeError.html, {});
     await sendOrganizeEmailResponse(sender, email, html);
-    return emptyResult("Placement setup approval failed");
+    return emptyResult("Folder preferences approval failed");
   }
 }
 
@@ -1364,8 +1300,6 @@ async function handleOrganizePhaseReply(
   switch (proposalDoc.phase) {
     case "folder_preferences":
       return handleFolderPreferencesReply(email, sender, uid, proposalId, proposalDoc, replyBody, isApproval);
-    case "placement_setup":
-      return handlePlacementSetupReply(email, sender, uid, proposalId, proposalDoc, replyBody, isApproval);
     case "directory_analysis":
       return handleDirectoryAnalysisReply(email, sender, uid, proposalId, proposalDoc, replyBody, isApproval);
     case "directory_placement":
@@ -1392,7 +1326,6 @@ async function handleOrganizePhaseReply(
 export const organizeProposalTestHooks = {
   handleOrganizePhaseReply,
   handleFolderPreferencesReply,
-  handlePlacementSetupReply,
   handleDirectoryAnalysisReply,
   handleDirectoryPlacementReply,
   handleDirectoryAdditionsReply,
