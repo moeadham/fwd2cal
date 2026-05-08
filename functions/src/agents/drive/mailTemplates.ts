@@ -291,6 +291,7 @@ Review your <a href="%SHEET_URL%">Google Sheet proposal</a> before moving files.
 <br><br>
 This plan covers a sample of %SAMPLE_SIZE% out of %TOTAL_ELIGIBLE_FILES% total files.
 <br><br>
+%ACTION_DELTA%
 %AFFECTED_FILES%
 %PREVIEW_BLOCK%
 %SCAN_MORE_BUTTON%%SCAN_ALL_BUTTON%%MOVE_BUTTON%

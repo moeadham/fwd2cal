@@ -41,6 +41,12 @@ export interface AffectedAction {
   };
 }
 
+export interface FileActionDelta {
+  file_id: string;
+  current_path: string;
+  current_name: string;
+}
+
 /** Signs organize action URLs with the configured HMAC key. */
 export function signActionToken(proposalId: string, action: string): string {
   return createHmac("sha256", DRIVE_ACTION_SIGNING_KEY.value())
@@ -107,6 +113,26 @@ export function computeAffectedActions(
   });
 }
 
+/** Returns file actions added to or removed from a revised plan by file id. */
+export function computeFileActionDelta(
+    beforeActions: DriveOrganizeProposal["file_actions"],
+    afterActions: DriveOrganizeProposal["file_actions"],
+): {removed: FileActionDelta[]; added: FileActionDelta[]} {
+  const beforeByFileId = new Map(beforeActions.map((action) => [action.file_id, action]));
+  const afterByFileId = new Map(afterActions.map((action) => [action.file_id, action]));
+  const removed = beforeActions.flatMap((action) => afterByFileId.has(action.file_id) ? [] : [{
+    file_id: action.file_id,
+    current_path: action.current_path || "My Drive",
+    current_name: action.current_name,
+  }]);
+  const added = afterActions.flatMap((action) => beforeByFileId.has(action.file_id) ? [] : [{
+    file_id: action.file_id,
+    current_path: action.current_path || "My Drive",
+    current_name: action.current_name,
+  }]);
+  return {removed, added};
+}
+
 /** Renders the affected-files block for revision plan-review emails. */
 function renderAffectedFilesHtml(affectedActions?: AffectedAction[]): string {
   if (!affectedActions || affectedActions.length === 0) {
@@ -138,6 +164,44 @@ function renderAffectedFilesHtml(affectedActions?: AffectedAction[]): string {
     `</div>` +
     `<br>`;
 }
+
+/** Renders added/removed plan membership changes for revision plan-review emails. */
+function renderActionDeltaHtml(removed: FileActionDelta[], added: FileActionDelta[]): string {
+  if (removed.length === 0 && added.length === 0) {
+    return "";
+  }
+  const cap = DRIVE_REVISION_EMAIL_AFFECTED_CAP.value();
+  const blockStyle =
+    "font-family:monospace;background:#f7f7f7;padding:16px;border-radius:8px;" +
+    "font-size:13px;line-height:1.6;";
+  const renderSection = (label: string, actions: FileActionDelta[]): string => {
+    if (actions.length === 0) {
+      return "";
+    }
+    const countsByRoot = new Map<string, number>();
+    for (const action of actions) {
+      const root = action.current_path.split("/")[0]?.trim() || "My Drive";
+      countsByRoot.set(root, (countsByRoot.get(root) || 0) + 1);
+    }
+    const sortedGroups = [...countsByRoot.entries()].sort((left, right) =>
+      right[1] - left[1] || left[0].localeCompare(right[0]));
+    const visibleGroups = sortedGroups.slice(0, cap);
+    const rows = visibleGroups.map(([root, count]) => `${escapeHtml(root)} (${count})`);
+    const hiddenCount = sortedGroups.length - visibleGroups.length;
+    if (hiddenCount > 0) {
+      rows.push(`... and ${hiddenCount} more`);
+    }
+    return `<b>${label} (${actions.length}):</b>` +
+      `<br>` +
+      `<div style="${blockStyle}">` +
+      `${rows.join("<br>")}` +
+      `</div>` +
+      `<br>`;
+  };
+  return renderSection("Removed from this plan", removed) +
+    renderSection("Added to this plan", added);
+}
+
 /** Sends the plan-review email with a proposal sheet link and Move Files action link. */
 export async function sendOrganizePlanReviewEmail(
     sender: string,
@@ -149,6 +213,7 @@ export async function sendOrganizePlanReviewEmail(
     revisionNote = "",
     affectedActions?: AffectedAction[],
     sampling?: SamplingState,
+    delta?: {removed: FileActionDelta[]; added: FileActionDelta[]},
 ): Promise<void> {
   const moveToken = signActionToken(proposalId, "move");
   const moveLink = `${driveOrganizeActionUrl()}?proposalId=${proposalId}&action=move&token=${moveToken}`;
@@ -198,6 +263,7 @@ ${preview}
     FILES_TO_MOVE: String(counts.filesToMove),
     FILES_TO_RENAME: String(counts.filesToRename),
     FILES_TO_KEEP: String(counts.filesToKeep),
+    ACTION_DELTA: renderActionDeltaHtml(delta?.removed ?? [], delta?.added ?? []),
     AFFECTED_FILES: renderAffectedFilesHtml(affectedActions),
     PREVIEW_BLOCK: previewBlock,
     SCAN_MORE_BUTTON: scanMoreButton,

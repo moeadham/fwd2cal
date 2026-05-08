@@ -21,6 +21,7 @@ import {
 } from "../types";
 import {
   computeAffectedActions,
+  computeFileActionDelta,
   calculateOrganizeCostEstimate,
   calculateOrganizeCostFromMimeTypesByFileId,
   emptyResult,
@@ -1287,6 +1288,10 @@ async function handlePlanReviewReply(
       proposal.file_actions,
       revisedProposal.file_actions,
   );
+  const delta = computeFileActionDelta(
+      proposal.file_actions,
+      revisedProposal.file_actions,
+  );
   await sendOrganizePlanReviewEmail(
       sender,
       email,
@@ -1297,6 +1302,7 @@ async function handlePlanReviewReply(
       revision.summary || "Updated the plan.",
       affectedActions,
       proposalDoc.phaseData?.sampling,
+      delta,
   );
   return emptyResult(undefined, revisedProposal.file_actions.length);
 }

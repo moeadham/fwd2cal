@@ -2303,6 +2303,107 @@ describe("plan review affected actions", function() {
     expect(html).to.include(sheetUrl);
   });
 
+  it("DT00ua8a computes file action delta by file id", function() {
+    const delta = organizeHelpers.computeFileActionDelta([
+      {
+        file_id: "removed",
+        current_path: "Old Root/Nested",
+        current_name: "removed.pdf",
+        new_folder: "Archive",
+        new_name: "removed.pdf",
+        action: "move",
+        reason: "Before",
+      },
+      {
+        file_id: "kept",
+        current_path: "Inbox",
+        current_name: "kept.pdf",
+        new_folder: "Archive",
+        new_name: "kept.pdf",
+        action: "move",
+        reason: "Before",
+      },
+    ], [
+      {
+        file_id: "kept",
+        current_path: "Inbox",
+        current_name: "kept.pdf",
+        new_folder: "Archive",
+        new_name: "kept.pdf",
+        action: "move",
+        reason: "After",
+      },
+      {
+        file_id: "added",
+        current_path: "New Root",
+        current_name: "added.pdf",
+        new_folder: "Archive",
+        new_name: "added.pdf",
+        action: "move",
+        reason: "After",
+      },
+    ]);
+
+    expect(delta.removed).to.deep.equal([{
+      file_id: "removed",
+      current_path: "Old Root/Nested",
+      current_name: "removed.pdf",
+    }]);
+    expect(delta.added).to.deep.equal([{
+      file_id: "added",
+      current_path: "New Root",
+      current_name: "added.pdf",
+    }]);
+  });
+
+  it("DT00ua8b renders added file-action delta in plan-review emails", async function() {
+    const proposal = makeOrganizeProposal(["1"], {"1": "01-Docs"}, ["01-Docs"]);
+    await organizeHelpers.sendOrganizePlanReviewEmail(
+        "tester@example.com",
+        makeTestEmail("review"),
+        "proposal-added-delta",
+        proposal,
+        "https://docs.google.com/spreadsheets/d/proposal-sheet",
+        {totalFiles: 1, filesToMove: 1, filesToRename: 0, filesToKeep: 0},
+        "Added file",
+        undefined,
+        undefined,
+        {
+          removed: [],
+          added: [{
+            file_id: "new-file",
+            current_path: "Incoming/Receipts",
+            current_name: "receipt.pdf",
+          }],
+        },
+    );
+
+    const html = getLastSentEmail("tester@example.com")?.html || "";
+    expect(html).to.include("Added to this plan (1):");
+    expect(html).to.include("Incoming (1)");
+    expect(html).to.not.include("Removed from this plan");
+  });
+
+  it("DT00ua8c omits file-action delta when no file ids changed", async function() {
+    const proposal = makeOrganizeProposal(["1"], {"1": "01-Docs"}, ["01-Docs"]);
+    await organizeHelpers.sendOrganizePlanReviewEmail(
+        "tester@example.com",
+        makeTestEmail("review"),
+        "proposal-empty-delta",
+        proposal,
+        "https://docs.google.com/spreadsheets/d/proposal-sheet",
+        {totalFiles: 1, filesToMove: 1, filesToRename: 0, filesToKeep: 0},
+        "No delta",
+        undefined,
+        undefined,
+        {removed: [], added: []},
+    );
+
+    const html = getLastSentEmail("tester@example.com")?.html || "";
+    expect(html).to.not.include("Removed from this plan");
+    expect(html).to.not.include("Added to this plan");
+  });
+
   it("DT00ua9 creates a proposal sheet in My Drive root when no sheet exists", async function() {
     const createCalls: unknown[] = [];
     const originalDrive = google.drive;
@@ -3753,6 +3854,8 @@ describe("organize phased proposal flow", function() {
     expect(savedPlan.ignoredFolders).to.deep.equal(["01-Personal/Photos"]);
     expect(savedPlan.file_actions.find((action) => action.file_id === "photo-1")).to.equal(undefined);
     const html = getLastSentEmail(sender)?.html || "";
+    expect(html).to.include("Removed from this plan (1):");
+    expect(html).to.include("01-Personal (1)");
     expect(html).to.include("Affected files (1):");
     expect(html).to.not.include("01-Personal/Photos/beach.jpg");
     expect(html).to.include("Inbox/invoice.pdf");
