@@ -55,7 +55,11 @@ Rules:
 - Use extensions as lowercase strings without the leading dot.
 - Set prefers_folder_operation=true when the user asks to create, rename, merge, split, move, or delete folders.
 - Set unclear=true when the request cannot be tied to any observable folder, file, or extension from the supplied context.
-- summary should be concise and user-facing.`,
+- summary should be concise and user-facing.
+
+Examples:
+- User: "rename Receipts to Bills"
+  Output: {"folder_prefixes_in_scope":["AcmeCo/Receipts"],"folder_prefixes_to_ignore":[],"filename_patterns":["Receipts"],"extensions":[],"explicit_file_hints":[],"prefers_folder_operation":false,"unclear":false,"summary":"Revise Receipts items."}`,
 };
 
 export {

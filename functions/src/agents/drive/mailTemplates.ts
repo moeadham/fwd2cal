@@ -270,6 +270,8 @@ Examples:
 <br><br>
 <b>%TOTAL_FILES% files scanned</b> &nbsp;|&nbsp; <b>%TEXT_FILES% text/doc files</b> &nbsp;|&nbsp; <b>%IMAGE_FILES% image files</b>
 <br><br>
+Cost is estimated for the first sample of %SAMPLE_SIZE% files.
+<br><br>
 <b>Estimated cost:</b> %TOTAL_COST% (%TEXT_COST% text/doc processing | %IMAGE_COST% image processing)
 <br><br>
 <a href="%APPROVE_LINK%" style="display:inline-block; padding:10px 20px; margin:5px 0; background-color:#3498db; color:white; text-align:center; text-decoration:none; font-weight:bold; border-radius:5px; border:none; cursor:pointer;">Approve &amp; Organize</a>
@@ -287,15 +289,11 @@ Review your <a href="%SHEET_URL%">Google Sheet proposal</a> before moving files.
 <br><br>
 <b>%TOTAL_FILES% files planned</b> &nbsp;|&nbsp; <b>%FILES_TO_MOVE% moves</b> &nbsp;|&nbsp; <b>%FILES_TO_RENAME% renames</b> &nbsp;|&nbsp; <b>%FILES_TO_KEEP% unchanged</b>
 <br><br>
-<b>Planned folder structure:</b>
-<br>
-<div style="font-family:monospace;background:#f7f7f7;padding:16px;border-radius:8px;font-size:13px;line-height:1.6;">
-%FOLDER_TREE%
-</div>
-<br>
+This plan covers a sample of %SAMPLE_SIZE% out of %TOTAL_ELIGIBLE_FILES% total files.
+<br><br>
 %AFFECTED_FILES%
 %PREVIEW_BLOCK%
-<a href="%MOVE_LINK%" style="display:inline-block; padding:10px 20px; margin:5px 0; background-color:#3498db; color:white; text-align:center; text-decoration:none; font-weight:bold; border-radius:5px; border:none; cursor:pointer;">Move Files</a>
+%SCAN_MORE_BUTTON%%SCAN_ALL_BUTTON%%MOVE_BUTTON%
 <br><br>
 <span style="color:#999;font-size:13px;">Need changes? Reply with the exact file change, or tell us to ignore a folder and leave it as-is.</span>
 %REVISION_NOTE%

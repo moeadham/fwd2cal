@@ -2263,7 +2263,11 @@ describe("plan review affected actions", function() {
         "No affected block",
     );
 
-    expect(getLastSentEmail("tester@example.com")?.html).to.not.include("Affected files (");
+    const previewHtml = getLastSentEmail("tester@example.com")?.html || "";
+    expect(previewHtml).to.not.include("Affected files (");
+    expect(previewHtml).to.not.include("Planned folder structure:");
+    expect(previewHtml).to.include("Preview:");
+    expect(previewHtml).to.include("Inbox/file-1.pdf");
 
     clearMockData();
 
@@ -2294,6 +2298,8 @@ describe("plan review affected actions", function() {
 
     const html = getLastSentEmail("tester@example.com")?.html || "";
     expect(html).to.include("Affected files (1):");
+    expect(html).to.not.include("Planned folder structure:");
+    expect(html).to.not.include("Preview:");
     expect(html).to.include(sheetUrl);
   });
 
@@ -2509,7 +2515,11 @@ describe("organize phased proposal flow", function() {
 
   afterEach(function() {
     setOpenAIClientForTest(null);
+    organizeProposalTestHooks.setScopePlanRevisionForTest(null);
+    organizeProposalTestHooks.setRevisePlanFileActionsForTest(null);
+    organizeProposalTestHooks.setHandleOrganizeRevisionForTest(null);
     organizeProposalTestHooks.setCreateOrUpdateProposalSheetForTest(null);
+    dispatchHandlerTestHooks.setGetFunctionsClientForTest(null);
     clearMockData();
   });
 
@@ -2581,6 +2591,18 @@ describe("organize phased proposal flow", function() {
           convention: "YYYY.MM.DD - Description.ext",
         },
       },
+    };
+  }
+
+  function makePlanReviewAction(fileId: string, newFolder: string): DriveOrganizeProposal["file_actions"][number] {
+    return {
+      file_id: fileId,
+      current_name: `${fileId}.pdf`,
+      current_path: "Incoming",
+      new_name: `${fileId}.pdf`,
+      new_folder: newFolder,
+      action: "move",
+      reason: "Test action",
     };
   }
 
@@ -3586,7 +3608,7 @@ describe("organize phased proposal flow", function() {
       new_folder: "02-Work",
       new_name: "2026.04.22 - invoice.pdf",
       action: "move_and_rename",
-      reason: "Rename invoice",
+      reason: "Work document\nRename invoice",
     });
   });
 
@@ -4080,7 +4102,7 @@ describe("organize sequential execution proposal builder", function() {
     ]);
   }
 
-  function makeAction(fileId: string, newFolder: string): DriveOrganizeProposal["file_actions"][number] {
+  function makePlanReviewAction(fileId: string, newFolder: string): DriveOrganizeProposal["file_actions"][number] {
     return {
       file_id: fileId,
       current_name: `${fileId}.pdf`,
@@ -4092,12 +4114,10 @@ describe("organize sequential execution proposal builder", function() {
     };
   }
 
-  it("DT00ubt caps organize planning input to the configured max file actions", async function() {
-    const previousCap = process.env.ORGANIZE_DRIVE_MAX_FILE_ACTIONS;
+  it("DT00ubt samples the initial organize planning input", async function() {
     const previousChunkSize = process.env.ORGANIZE_DRIVE_CHUNK_SIZE;
-    process.env.ORGANIZE_DRIVE_MAX_FILE_ACTIONS = "200";
     process.env.ORGANIZE_DRIVE_CHUNK_SIZE = "25";
-    const testId = "planning-file-action-cap";
+    const testId = "planning-file-action-sample";
     const uid = `${testId}-uid`;
     const sender = `${testId}@example.com`;
     const proposalId = `${testId}-${Date.now()}`;
@@ -4176,11 +4196,6 @@ describe("organize sequential execution proposal builder", function() {
       await startChunkedPlanning(makeTestEmail("approve"), sender, uid, proposalId, proposalDoc);
     } finally {
       (firebaseLogger as unknown as {warn: typeof originalWarn}).warn = originalWarn;
-      if (previousCap === undefined) {
-        delete process.env.ORGANIZE_DRIVE_MAX_FILE_ACTIONS;
-      } else {
-        process.env.ORGANIZE_DRIVE_MAX_FILE_ACTIONS = previousCap;
-      }
       if (previousChunkSize === undefined) {
         delete process.env.ORGANIZE_DRIVE_CHUNK_SIZE;
       } else {
@@ -4190,24 +4205,27 @@ describe("organize sequential execution proposal builder", function() {
 
     const stored = await getOrganizeProposal(proposalId) as unknown as OrganizeProposalDoc;
     const [stateContents] = await getStorage().bucket().file(storagePath).download();
-    const savedState = JSON.parse(stateContents.toString()) as {fileEntries: DriveFileEntry[]};
+    const savedState = JSON.parse(stateContents.toString()) as {
+      fileEntries: DriveFileEntry[];
+      allFileEntries: DriveFileEntry[];
+    };
     const savedNonFolderFiles = savedState.fileEntries.filter((file) => !file.isFolder);
 
-    expect(savedNonFolderFiles).to.have.length(200);
-    expect(savedNonFolderFiles[0].id).to.equal("file-0");
-    expect(savedNonFolderFiles[199].id).to.equal("file-199");
+    expect(savedState.allFileEntries).to.have.length(250);
+    expect(savedNonFolderFiles).to.have.length(250);
     expect(stored.status).to.equal("planning");
     expect(stored.phaseData?.execution).to.deep.equal({
       chunkSize,
-      totalChunks: Math.ceil(200 / chunkSize),
+      totalChunks: Math.ceil(25 / chunkSize),
       completedChunks: 0,
     });
-    expect(stored.phaseData?.planReview?.totalFiles).to.equal(200);
+    expect(stored.phaseData?.planReview?.totalFiles).to.equal(25);
+    expect(stored.phaseData?.sampling?.iteration).to.equal(1);
+    expect(stored.phaseData?.sampling?.sampleSize).to.equal(25);
+    expect(stored.phaseData?.sampling?.totalEligibleFiles).to.equal(250);
+    expect(stored.phaseData?.sampling?.sampledFileIds).to.have.length(25);
     expect(enqueueCalls).to.have.length(1);
-    expect(warnCalls).to.deep.equal([[
-      "Drive organize: truncating planning input to max file actions",
-      {proposalId, originalCount: 250, cap: 200},
-    ]]);
+    expect(warnCalls).to.deep.equal([]);
   });
 
   it("DT00ubp keeps per-chunk tree refinement off by default", async function() {
@@ -4242,6 +4260,7 @@ describe("organize sequential execution proposal builder", function() {
         proposalId,
         emailId: "refine-flag-off-email-id",
         uid,
+        iteration: 1,
         chunkIndex: 0,
       });
     } finally {
@@ -4289,6 +4308,7 @@ describe("organize sequential execution proposal builder", function() {
         proposalId,
         emailId: "refine-zero-new-dir-email-id",
         uid,
+        iteration: 1,
         chunkIndex: 0,
       });
     } finally {
@@ -4322,8 +4342,8 @@ describe("organize sequential execution proposal builder", function() {
       totalChunks: 3,
       file,
       priorChunks: [
-        {chunkIndex: 0, file_actions: [makeAction("prior-0", "Archive/Old/X")]},
-        {chunkIndex: 1, file_actions: [makeAction("prior-1", "Archive/Old/X")]},
+        {chunkIndex: 0, file_actions: [makePlanReviewAction("prior-0", "Archive/Old/X")]},
+        {chunkIndex: 1, file_actions: [makePlanReviewAction("prior-1", "Archive/Old/X")]},
       ],
     });
     organizeExecutionTestHooks.setRefineDirectoryTreeForTest(async () => ({
@@ -4350,6 +4370,7 @@ describe("organize sequential execution proposal builder", function() {
         proposalId,
         emailId: "refine-rename-cascade-email-id",
         uid,
+        iteration: 1,
         chunkIndex: 2,
       });
     } finally {
@@ -4418,6 +4439,7 @@ describe("organize sequential execution proposal builder", function() {
         proposalId,
         emailId: "refine-forbidden-op-email-id",
         uid,
+        iteration: 1,
         chunkIndex: 0,
       });
     } finally {
@@ -5685,6 +5707,7 @@ describe("organize sequential execution proposal builder", function() {
       proposalId,
       emailId: "cancelled-planning-email-id",
       uid,
+      iteration: 1,
       chunkIndex: 0,
     });
 
@@ -5753,6 +5776,7 @@ describe("organize sequential execution proposal builder", function() {
       proposalId,
       emailId: "completed-planning-email-id",
       uid,
+      iteration: 1,
       chunkIndex: 1,
     });
 
@@ -5786,14 +5810,55 @@ describe("organize sequential execution proposal builder", function() {
       proposalId: "proposal id/with bad chars",
       emailId: "email-id",
       uid: "uid",
+      iteration: 1,
       chunkIndex: 3,
     });
 
     expect(enqueueCalls).to.have.length(1);
     expect(enqueueCalls[0].opts).to.deep.equal({
       dispatchDeadlineSeconds: 60 * 30,
-      id: "proposal-id-with-bad-chars-email-id-plan-3",
+      id: "proposal-id-with-bad-chars-email-id-plan-i1-3",
     });
+  });
+
+  it("DT00ubt includes planning iteration in chunk task IDs", async function() {
+    const enqueueCalls: Array<{data: unknown; opts?: {dispatchDeadlineSeconds?: number; id?: string}}> = [];
+    dispatchHandlerTestHooks.setGetFunctionsClientForTest(() => ({
+      taskQueue: (_path: string) => ({
+        enqueue: async (data: unknown, opts?: {dispatchDeadlineSeconds?: number; id?: string}) => {
+          enqueueCalls.push({data, opts});
+        },
+      }),
+    }));
+
+    await dispatchPlanningChunkTask({
+      proposalId: "proposal-id",
+      emailId: "email-id",
+      uid: "uid",
+      iteration: 2,
+      chunkIndex: 4,
+    });
+    await dispatchPlanningChunkTask({
+      proposalId: "proposal-id",
+      emailId: "email-id",
+      uid: "uid",
+      iteration: 2,
+      chunkIndex: 4,
+    });
+    await dispatchPlanningChunkTask({
+      proposalId: "proposal-id",
+      emailId: "email-id",
+      uid: "uid",
+      iteration: 3,
+      chunkIndex: 4,
+    });
+
+    const taskIds = enqueueCalls.map((call) => call.opts?.id);
+    expect(taskIds).to.deep.equal([
+      "proposal-id-email-id-plan-i2-4",
+      "proposal-id-email-id-plan-i2-4",
+      "proposal-id-email-id-plan-i3-4",
+    ]);
   });
 
   it("DT00ubo re-throws non-dedupe enqueue errors", async function() {
@@ -5813,6 +5878,7 @@ describe("organize sequential execution proposal builder", function() {
         proposalId: "proposal-id",
         emailId: "email-id",
         uid: "uid",
+        iteration: 1,
         chunkIndex: 1,
       });
     } catch (error) {
@@ -5924,6 +5990,7 @@ describe("organize sequential execution proposal builder", function() {
       proposalId,
       emailId: "admin-organize-cancelled-mid-chunk",
       uid,
+      iteration: 1,
       chunkIndex: 0,
     });
 
@@ -6068,6 +6135,7 @@ describe("organize sequential execution proposal builder", function() {
         proposalId,
         emailId: "execution-interleave-parent-paths-email-id",
         uid,
+        iteration: 1,
         chunkIndex: 0,
       });
     } finally {
@@ -6204,6 +6272,7 @@ describe("organize sequential execution proposal builder", function() {
       proposalId,
       emailId: "execution-ignore-planning-email-id",
       uid,
+      iteration: 1,
       chunkIndex: 0,
     });
 
@@ -6326,6 +6395,7 @@ describe("organize sequential execution proposal builder", function() {
         proposalId,
         emailId: `${options.testId}-email-id`,
         uid,
+        iteration: 1,
         chunkIndex: 0,
       });
       const planned = await loadSavedPlan(proposalId);

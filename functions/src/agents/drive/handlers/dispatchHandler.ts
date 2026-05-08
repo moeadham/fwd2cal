@@ -8,7 +8,10 @@ import {handleDriveEmail} from "./driveHandler";
 import {processUpload} from "./uploadHandler";
 import {handleOrganizeDrive} from "./organizeMain";
 import {handleOrganizeProposalReply} from "./organizeProposal";
-import {processMoveChunk, processPlanningChunk, startChunkedMove} from "./organizeExecution";
+import {processMoveChunk, processPlanningChunk, restartChunkedPlanning, startChunkedMove} from "./organizeExecution";
+import {findIgnoredRoot, normalizeIgnoredFolderPaths} from "./organizeProposal";
+import {nextSampleSize, sampleFilesAdditive} from "../util/sampling";
+import type {DriveFileEntry, SamplingState} from "../types";
 import {signActionToken} from "./organizeHelpers";
 import {isAdminEmailId, resolveOutboundRecipient} from "../driveUtils";
 import {driveSignupUrl} from "../mailTemplates";
@@ -27,6 +30,7 @@ import {
   getUserFromUID,
   DRIVE_USERS_COLLECTION,
   getOrganizeProposal,
+  getOrganizeIntermediateState,
   updateOrganizeProposalStatus,
 } from "../../../util/firestoreHandler";
 import {
@@ -302,16 +306,18 @@ export async function dispatchPlanningChunkTask(
     sanitizeProposalIdForTaskId(data.proposalId),
     sanitizeProposalIdForTaskId(data.emailId),
     "plan",
+    `i${data.iteration}`,
     String(data.chunkIndex),
   ].join("-").slice(0, 500);
   await enqueueChunkTask(
       "locations/us-central1/functions/v2drivePlanningChunkTask",
       data,
       planningTaskId,
-      {proposalId: data.proposalId, chunkIndex: data.chunkIndex, phase: "planning"},
+      {proposalId: data.proposalId, iteration: data.iteration, chunkIndex: data.chunkIndex, phase: "planning"},
   );
   logger.info("Drive planning chunk: Dispatched task", {
     proposalId: data.proposalId,
+    iteration: data.iteration,
     chunkIndex: data.chunkIndex,
   });
 }
@@ -421,7 +427,8 @@ export async function handleOrganizeAction(
   const proposalId = req.query.proposalId as string;
   const action = req.query.action as OrganizeActionTaskData["action"];
 
-  if (!proposalId || !action || !["approve", "undo", "move"].includes(action)) {
+  if (!proposalId || !action ||
+    !["approve", "undo", "move", "scan_more", "scan_all"].includes(action)) {
     res.status(400).send(renderActionPage("error", "Invalid request."));
     return;
   }
@@ -469,6 +476,12 @@ export async function handleOrganizeAction(
         `This proposal has already been ${proposalDoc.status}.`));
     return;
   }
+  if ((action === "scan_more" || action === "scan_all") &&
+    (proposalDoc.status !== "pending" || proposalDoc.phase !== "plan_review")) {
+    res.send(renderActionPage("error",
+        `This proposal has already been ${proposalDoc.status}.`));
+    return;
+  }
   if (action !== "undo" && new Date(proposalDoc.expiresAt) < new Date()) {
     res.send(renderActionPage("error",
         "This proposal has expired. Send a new organize request to start over."));
@@ -478,6 +491,9 @@ export async function handleOrganizeAction(
   // Mark as executing to prevent double-clicks
   if (action === "approve" || action === "move") {
     await updateOrganizeProposalStatus(proposalId, "executing");
+  }
+  if (action === "scan_more" || action === "scan_all") {
+    await updateOrganizeProposalStatus(proposalId, "planning");
   }
 
   // Dispatch background task and return immediately
@@ -493,7 +509,8 @@ export async function handleOrganizeAction(
       error: err instanceof Error ? err.message : String(err),
     });
     // Revert status on dispatch failure
-    if (action === "approve" || action === "move") {
+    if (action === "approve" || action === "move" ||
+      action === "scan_more" || action === "scan_all") {
       await updateOrganizeProposalStatus(proposalId, "pending");
     }
     res.status(500).send(renderActionPage("error",
@@ -505,7 +522,9 @@ export async function handleOrganizeAction(
     "We're restoring your Drive to its previous state. You'll receive a confirmation email when it's done." :
     action === "move" ?
       "We're moving your files now. You'll receive a confirmation email when it's done." :
-      "We're preparing your Drive organization plan now. You'll receive a review email when it's ready.";
+      action === "scan_more" || action === "scan_all" ?
+        "We're scanning more of your files. You'll receive an updated review email when it's ready." :
+        "We're preparing your Drive organization plan now. You'll receive a review email when it's ready.";
   res.send(renderActionPage("processing", message));
 }
 
@@ -604,6 +623,55 @@ export async function handleOrganizeActionTask(
     const recipient = resolveOutboundRecipient(proposalDoc);
     await startChunkedMove(transformedEmail, recipient, proposalDoc.uid, proposalId, proposalDoc);
     logger.info("Drive organize action task: Complete", {proposalId, action});
+    return;
+  }
+  if (action === "scan_more" || action === "scan_all") {
+    const rawProposal = await getOrganizeProposal(proposalId);
+    if (!rawProposal) {
+      throw new Error("Organize proposal not found");
+    }
+    const proposalDoc = rawProposal as unknown as OrganizeProposalDoc;
+    const currentSampling = proposalDoc.phaseData?.sampling;
+    if (!currentSampling) {
+      logger.warn("Drive organize action task: scan action with no current sampling state", {
+        proposalId, action,
+      });
+      await updateOrganizeProposalStatus(proposalId, "pending");
+      return;
+    }
+    const state = await getOrganizeIntermediateState(proposalId) as unknown as
+      {fileEntries?: DriveFileEntry[]; allFileEntries?: DriveFileEntry[]};
+    const allFileEntries = state.allFileEntries || state.fileEntries || [];
+    const ignoredFolders = normalizeIgnoredFolderPaths(proposalDoc.ignoredFolders || []);
+    const eligible = allFileEntries.filter((file) =>
+      !file.isFolder && findIgnoredRoot(file.parentPath || "", ignoredFolders) === null);
+    const targetSize = action === "scan_all" ?
+      eligible.length :
+      Math.min(nextSampleSize(currentSampling.sampleSize) ?? eligible.length, eligible.length);
+    if (targetSize <= currentSampling.sampleSize) {
+      logger.info("Drive organize action task: scan action ignored, sample already covers target", {
+        proposalId, action, currentSize: currentSampling.sampleSize, targetSize,
+      });
+      await updateOrganizeProposalStatus(proposalId, "pending");
+      return;
+    }
+    const sampled = sampleFilesAdditive(
+        eligible,
+        targetSize,
+        new Set(currentSampling.sampledFileIds),
+        proposalId,
+    );
+    const nextSampling: SamplingState = {
+      sampleSize: sampled.length,
+      iteration: currentSampling.iteration + 1,
+      sampledFileIds: sampled.map((file) => file.id),
+      totalEligibleFiles: eligible.length,
+    };
+    await restartChunkedPlanning(proposalId, proposalDoc, nextSampling);
+    logger.info("Drive organize action task: Complete", {
+      proposalId, action,
+      iteration: nextSampling.iteration, sampleSize: nextSampling.sampleSize,
+    });
     return;
   }
   transformedEmail.text = action;

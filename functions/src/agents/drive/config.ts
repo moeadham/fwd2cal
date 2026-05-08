@@ -78,12 +78,6 @@ export const ORGANIZE_DRIVE_CHUNK_SIZE = defineInt(
     },
 );
 
-export const ORGANIZE_DRIVE_MAX_FILE_ACTIONS = defineInt(
-    "ORGANIZE_DRIVE_MAX_FILE_ACTIONS", {
-      default: 200,
-    },
-);
-
 export const ORGANIZE_DRIVE_PLAN_CONCURRENCY = defineInt(
     "ORGANIZE_DRIVE_PLAN_CONCURRENCY", {
       default: 8,

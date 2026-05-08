@@ -245,6 +245,13 @@ export interface PlanReviewData {
   sheetWebViewLink?: string;
 }
 
+export interface SamplingState {
+  sampleSize: number;
+  iteration: number;
+  sampledFileIds: string[];
+  totalEligibleFiles: number;
+}
+
 export interface OrganizePhaseData {
   folderPreferences?: FolderPreferencesData;
   placementSetup?: PlacementSetupData;
@@ -254,6 +261,7 @@ export interface OrganizePhaseData {
   costEstimate?: CostEstimateData;
   execution?: ExecutionData;
   planReview?: PlanReviewData;
+  sampling?: SamplingState;
 }
 
 export interface DriveUserPreferences {
@@ -479,7 +487,7 @@ export interface PostAuthTaskData {
 
 export interface OrganizeActionTaskData {
   proposalId: string;
-  action: "approve" | "undo" | "move";
+  action: "approve" | "undo" | "move" | "scan_more" | "scan_all";
   emailId: string;
 }
 
@@ -487,6 +495,7 @@ export interface PlanningChunkTaskData {
   proposalId: string;
   emailId: string;
   uid: string;
+  iteration: number;
   chunkIndex: number;
 }
 
@@ -500,5 +509,6 @@ export interface MoveChunkTaskData {
 export interface OrganizeIntermediateState {
   driveStructureSummary: string;
   fileEntries: DriveFileEntry[];
+  allFileEntries?: DriveFileEntry[];
   senderEmail: string;
 }

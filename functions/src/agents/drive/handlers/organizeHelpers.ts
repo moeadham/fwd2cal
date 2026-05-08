@@ -18,10 +18,12 @@ import {
   OrganizeEmbeddedData,
   OrganizeProcessingResult,
   PlacementRulesData,
+  SamplingState,
 } from "../types";
 import {driveMailTemplates, driveOrganizeActionUrl} from "../mailTemplates";
 import {updateOrganizeProposalStatus} from "../../../util/firestoreHandler";
 import {renderFolderTree, buildOrganizeEmbeddedData} from "../templates/folderTree";
+import {SAMPLE_SCHEDULE} from "../util/sampling";
 
 export interface AffectedAction {
   file_id: string;
@@ -146,21 +148,14 @@ export async function sendOrganizePlanReviewEmail(
     counts: {totalFiles: number; filesToMove: number; filesToRename: number; filesToKeep: number},
     revisionNote = "",
     affectedActions?: AffectedAction[],
+    sampling?: SamplingState,
 ): Promise<void> {
   const moveToken = signActionToken(proposalId, "move");
   const moveLink = `${driveOrganizeActionUrl()}?proposalId=${proposalId}&action=move&token=${moveToken}`;
-  const preservedFolderPaths = new Set(
-      (proposal.ignoredFolders || [])
-          .map((folderPath) => folderPath.split("/").map((segment) => segment.trim()).filter(Boolean).join("/"))
-          .filter(Boolean),
-  );
-  const preservedRootPaths = new Set(
-      (proposal.ignoredFolders || [])
-          .map((folderPath) => folderPath.split("/").map((segment) => segment.trim()).filter(Boolean))
-          .filter((segments) => segments.length === 1)
-          .map((segments) => segments[0])
-          .filter((root): root is string => Boolean(root && root !== "My Drive")),
-  );
+  const scanMoreToken = signActionToken(proposalId, "scan_more");
+  const scanMoreLink = `${driveOrganizeActionUrl()}?proposalId=${proposalId}&action=scan_more&token=${scanMoreToken}`;
+  const scanAllToken = signActionToken(proposalId, "scan_all");
+  const scanAllLink = `${driveOrganizeActionUrl()}?proposalId=${proposalId}&action=scan_all&token=${scanAllToken}`;
   const hasAffectedFiles = Boolean(affectedActions && affectedActions.length > 0);
   const previewBlock = hasAffectedFiles ?
     "" :
@@ -181,15 +176,33 @@ ${preview}
   const noteHtml = revisionNote ?
     `<br><br><span style="color:#666;font-size:13px;">${escapeHtml(revisionNote)}</span>` :
     "";
+  const sampleSize = sampling?.sampleSize ?? counts.totalFiles;
+  const totalEligibleFiles = sampling?.totalEligibleFiles ?? counts.totalFiles;
+  const sampleCoversAll = sampleSize >= totalEligibleFiles;
+  const buttonStyle = "display:inline-block; padding:10px 20px; margin:5px 8px 5px 0; " +
+    "background-color:#3498db; color:white; text-align:center; text-decoration:none; " +
+    "font-weight:bold; border-radius:5px; border:none; cursor:pointer;";
+  const scanMoreButton = sampleCoversAll ?
+    "" :
+    `<a href="${scanMoreLink}" style="${buttonStyle}">Scan more files</a>`;
+  const scanAllButton = sampleCoversAll ?
+    "" :
+    `<a href="${scanAllLink}" style="${buttonStyle}">Scan all files</a>`;
+  const moveButton = sampleCoversAll ?
+    `<a href="${moveLink}" style="${buttonStyle}">Move Files</a>` :
+    "";
   const html = applyTemplate(driveMailTemplates.organizePlanReview.html, {
     TOTAL_FILES: String(counts.totalFiles),
+    SAMPLE_SIZE: String(sampleSize),
+    TOTAL_ELIGIBLE_FILES: String(totalEligibleFiles),
     FILES_TO_MOVE: String(counts.filesToMove),
     FILES_TO_RENAME: String(counts.filesToRename),
     FILES_TO_KEEP: String(counts.filesToKeep),
-    FOLDER_TREE: renderFolderTree(proposal, preservedRootPaths, preservedFolderPaths),
     AFFECTED_FILES: renderAffectedFilesHtml(affectedActions),
     PREVIEW_BLOCK: previewBlock,
-    MOVE_LINK: moveLink,
+    SCAN_MORE_BUTTON: scanMoreButton,
+    SCAN_ALL_BUTTON: scanAllButton,
+    MOVE_BUTTON: moveButton,
     SHEET_URL: sheetUrl,
     REVISION_NOTE: noteHtml,
     EMBEDDED_DATA: phaseEmbeddedHtml(proposalId),
@@ -720,6 +733,7 @@ export async function sendOrganizeCostEstimateEmail(
       .join("<br>");
   const approveToken = signActionToken(proposalId, "approve");
   const approveLink = `${driveOrganizeActionUrl()}?proposalId=${proposalId}&action=approve&token=${approveToken}`;
+  const sampleSize = Math.min(SAMPLE_SCHEDULE[0], cost.totalFiles);
   const html = applyTemplate(driveMailTemplates.organizeCostEstimate.html, {
     FOLDER_TREE: renderDirectoryList(folders, preservedFolderPaths),
     FILENAME_CONVENTION: escapeHtml(filenameConvention),
@@ -731,6 +745,7 @@ export async function sendOrganizeCostEstimateEmail(
     TOTAL_COST: `$${cost.totalCost.toFixed(2)}`,
     TEXT_COST: `$${(cost.textFiles * cost.costPerTextFile).toFixed(2)}`,
     IMAGE_COST: `$${(cost.imageFiles * cost.costPerImageFile).toFixed(2)}`,
+    SAMPLE_SIZE: String(sampleSize),
     APPROVE_LINK: approveLink,
     EMBEDDED_DATA: phaseEmbeddedHtml(proposalId),
   });

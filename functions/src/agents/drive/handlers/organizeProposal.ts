@@ -1070,6 +1070,8 @@ async function handlePlanReviewReply(
         sheet.webViewLink,
         counts,
         "Use the Move Files button when you're ready.",
+        undefined,
+        proposalDoc.phaseData?.sampling,
     );
     return emptyResult("Awaiting Move Files button click", proposal.file_actions.length);
   }
@@ -1118,6 +1120,8 @@ async function handlePlanReviewReply(
         sheet.webViewLink,
         counts,
         scope.summary || "Please name the exact file and the new filename or approved folder path.",
+        undefined,
+        proposalDoc.phaseData?.sampling,
     );
     return emptyResult("Plan revision scope unclear", proposal.file_actions.length);
   }
@@ -1136,6 +1140,8 @@ async function handlePlanReviewReply(
         sheet.webViewLink,
         counts,
         scope.summary || "Please name the exact file and the new filename or approved folder path.",
+        undefined,
+        proposalDoc.phaseData?.sampling,
     );
     return emptyResult("Plan revision scope unclear", proposal.file_actions.length);
   }
@@ -1188,6 +1194,8 @@ async function handlePlanReviewReply(
         sheet.webViewLink,
         counts,
         revision.summary || "Please name the exact file and the new filename or approved folder path.",
+        undefined,
+        proposalDoc.phaseData?.sampling,
     );
     return emptyResult("Plan revision unclear", proposal.file_actions.length);
   }
@@ -1245,11 +1253,17 @@ async function handlePlanReviewReply(
   const existingSheetId = proposalDoc.phaseData?.planReview?.sheetFileId;
   const sheet = await createOrReuseProposalSheet(oauth2Client, proposalId, csvBuffer, existingSheetId);
   const nextVersion = (proposalDoc.phaseData?.planReview?.fileActionsVersion || 1) + 1;
+  const trimmedReply = replyBody.trim();
+  const currentRules = proposalDoc.phaseData?.placementRules || {edgeCaseRules: [], examples: []};
+  const nextPlacementRules = trimmedReply ?
+    mergePlacementRules(currentRules, {edgeCaseRules: [...currentRules.edgeCaseRules, trimmedReply]}) :
+    currentRules;
   await updateOrganizeProposalStatus(proposalId, "pending", {
     phase: "plan_review",
     ignoredFolders: sortedIgnoredFolders,
     phaseData: {
       ...proposalDoc.phaseData,
+      placementRules: nextPlacementRules,
       planReview: {
         totalFiles: revisedProposal.file_actions.length,
         csvStoragePath: proposalDoc.phaseData?.planReview?.csvStoragePath || getPlanCsvStoragePath(proposalId),
@@ -1282,6 +1296,7 @@ async function handlePlanReviewReply(
       revisedCounts,
       revision.summary || "Updated the plan.",
       affectedActions,
+      proposalDoc.phaseData?.sampling,
   );
   return emptyResult(undefined, revisedProposal.file_actions.length);
 }
