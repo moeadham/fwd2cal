@@ -1,8 +1,3 @@
-import admin from "firebase-admin";
-import {getFirestore} from "firebase-admin/firestore";
-
-admin.initializeApp();
-const db = getFirestore();
-db.settings({ignoreUndefinedProperties: true});
+import "../../instrumentation";
 
 export * from "./routes";

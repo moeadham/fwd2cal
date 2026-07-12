@@ -21,6 +21,9 @@
   },
   "main": "lib/index.js",
   "dependencies": {
+    "@agentpond/firebase": "^0.4.2",
+    "@arizeai/openinference-instrumentation-openai": "^4.1.5",
+    "@opentelemetry/sdk-node": "^0.220.0",
     "axios": "1.13.2",
     "firebase-admin": "^13.6.0",
     "firebase-functions": "^7.0.3",
