@@ -53,10 +53,38 @@ function resolveTimezone(tzid: string | undefined): string | undefined {
   return undefined;
 }
 
+/**
+ * Read the user's own "default event length" from their Google Calendar
+ * settings. This is what Google itself uses for events created without a
+ * duration, so it is a better fallback than a hardcoded constant.
+ * Falls back to DEFAULT_EVENT_LENGTH_MINUTES if the setting can't be read.
+ */
+async function getDefaultEventLength(
+    // eslint-disable-next-line camelcase
+    calendar: calendar_v3.Calendar,
+    uid: string,
+): Promise<number> {
+  const configuredDefault = parseInt(DEFAULT_EVENT_LENGTH_MINUTES.value());
+  try {
+    const setting = await calendar.settings.get({setting: "defaultEventLength"});
+    const minutes = parseInt(setting.data.value || "");
+    if (!isNaN(minutes) && minutes > 0) {
+      logger.debug(`Using calendar default event length: ${minutes} minutes`);
+      return minutes;
+    }
+    logger.warn(`Unusable defaultEventLength setting: ${setting.data.value}`);
+  } catch (error) {
+    logger.warn("Could not read defaultEventLength setting", error);
+    sendEvent(uid, "dataQualityIssue", {reason: "no_default_event_length"});
+  }
+  return configuredDefault;
+}
+
 function generateTimeObject(
     event: Event,
     primaryCalendar: GoogleCalendar | MappedCalendar,
     uid: string,
+    defaultEventLength: number,
 ): TimeObject {
   const timezone = primaryCalendar.timeZone;
   let eventTimeZone = event.timeZone || timezone;
@@ -78,7 +106,6 @@ function generateTimeObject(
       .tz(startTime, "DD MMMM YYYY HH:mm", eventTimeZone)
       .toDate();
   const endTime = `${date} ${end_time}`; // eslint-disable-line camelcase
-  const defaultEventLength = parseInt(DEFAULT_EVENT_LENGTH_MINUTES.value());
   let endDate: Date;
   // eslint-disable-next-line camelcase
   if (end_time) {
@@ -89,11 +116,11 @@ function generateTimeObject(
       }
     } catch (_error) {
       sendEvent(uid, "dataQualityIssue", {reason: "invalid_end_time"});
-      // Default to configured event length
+      // Fall back to the resolved default event length
       endDate = new Date(startDate.getTime() + defaultEventLength * 60000);
     }
   } else {
-    // Default to configured event length
+    // No end time was given or inferred - fall back to the default length
     endDate = new Date(startDate.getTime() + defaultEventLength * 60000);
   }
   const timeObject: TimeObject = {
@@ -115,7 +142,12 @@ async function addEvent(
     uid: string,
 ): Promise<GoogleCalendarEvent> {
   const calendar = google.calendar({version: "v3", auth: oauth2Client});
-  const calendarList = await calendar.calendarList.list();
+  // The LLM infers an end time for most events. When it couldn't, we fall back
+  // to the user's own calendar default, fetched alongside the calendar list.
+  const [calendarList, defaultEventLength] = await Promise.all([
+    calendar.calendarList.list(),
+    getDefaultEventLength(calendar, uid),
+  ]);
   const primaryCalendar = calendarList.data.items?.find(
       (cal) => cal.primary,
   ) as GoogleCalendar | undefined;
@@ -140,7 +172,12 @@ async function addEvent(
     }
   }
 
-  const times = generateTimeObject(event, targetCalendar, uid);
+  const times = generateTimeObject(
+      event,
+      targetCalendar,
+      uid,
+      defaultEventLength,
+  );
   let eventDescription = event.description;
   if (eventDescription === undefined || eventDescription === "undefined") {
     eventDescription = "";

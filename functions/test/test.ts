@@ -28,6 +28,7 @@ import {
   emailWithImageAttachment,
   familyEvent,
   workEventVisibl,
+  dinnerReservationEmail,
 } from "./bindings/resendBindings";
 
 // Using Resend for email service
@@ -414,6 +415,32 @@ describe(`fwd2cal (${EMAIL_SERVICE.toUpperCase()})`, function() {
     const incomingMessageId = testMessage.emailContent.headers["message-id"];
     expect(res.body.sentEmail.headers["In-Reply-To"]).to.equal(incomingMessageId);
     expect(res.body.sentEmail.headers["References"]).to.equal(`<original-message-10> ${incomingMessageId}`);
+  });
+
+  it("UT12.5 dinner reservation gets an inferred duration", async function() {
+    const testMessage = dinnerReservationEmail;
+    const res = await sendResendWebhook(testMessage);
+    expect(res).to.have.status(200);
+    console.log(res.body);
+    expect(res.body).to.be.an("object");
+    expect(res.body.data).to.not.have.property("error");
+
+    const event = res.body.data as {
+      kind: string;
+      start: { dateTime: string };
+      end: { dateTime: string };
+    };
+    expect(event.kind).to.equal("calendar#event");
+
+    // The email states a start time but no end time. The duration should be
+    // inferred from the fact that this is a dinner reservation, rather than
+    // falling through to the default event length.
+    const durationMinutes =
+      (new Date(event.end.dateTime).getTime() -
+        new Date(event.start.dateTime).getTime()) / 60000;
+    console.log(`Inferred duration: ${durationMinutes} minutes`);
+    expect(durationMinutes).to.be.greaterThan(60);
+    expect(durationMinutes).to.be.at.most(240);
   });
 
   it("UT13 family event should select Family Calendar", async function() {

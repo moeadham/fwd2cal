@@ -19,7 +19,7 @@ Task: Review the following email thread and extract ALL events mentioned. Return
       conference_call: true or false, if the event is a conference call or virtual
       date: DD MMMM YYYY - the date of the event
       start_time: HH:mm - the start time of the event in 24 hour format
-      end_time: HH:mm - the end time of the event in 24 hour format
+      end_time: HH:mm - the end time of the event in 24 hour format, stated if the text gives one, otherwise inferred from the kind of event
       attendees: a list of attendees
     }
   ]
@@ -34,6 +34,24 @@ If the email is transactional, such as a receipt or automatically generated, tha
 If the email is a thread,  the most recent email is most relevant, but keep other details from the thread in context.
 Relative dates are fine - like "next tuesday". Determine the date of the event based off of the relative difference from the date of the email.
 Set the "summary" and "description" to "Event" if there are not enough details in the text to complete either of these fields.
+
+Determining the end_time:
+If the text gives an end time or a duration - "2pm-4pm", "for an hour", "90 minutes" - use it exactly.
+If it does not, infer a realistic end_time from what kind of event this is, rather than leaving it blank. Most emails never state an end time, so this is the common case, and a considered guess is much more useful to the user than an arbitrary default.
+Typical durations when nothing else is stated:
+- Coffee, quick catch-up, phone call, 1:1, standup, check-in: 30 minutes
+- Errand, pickup or dropoff, haircut, retail or tech support appointment: 30 minutes
+- Doctor, dentist, therapy, vet, or similar professional appointment: 1 hour
+- Business meeting, project or design review, demo, interview, viewing, workout: 1 hour
+- Class, lecture, or lesson: 1 hour
+- Lunch, brunch, or a meal with colleagues: 1 hour
+- Dinner, or any restaurant reservation: 2 hours
+- Drinks, party, birthday, social gathering, concert, show, sporting event: 3 hours
+- Wedding, funeral, graduation, conference day, festival: 4 hours
+- Travel: use the stated arrival time if there is one, otherwise infer a plausible journey time for the route.
+Adjust these whenever the text gives you a reason to. The length of an agenda, the number of attendees, the distance involved, or an explicit "quick" or "all afternoon" all matter more than the list above.
+Round an inferred end_time to :00, :15, :30 or :45 - do not make a guess look precise.
+Only leave end_time undefined when the event has no start_time at all, or when it is genuinely all-day or open-ended, such as "the office is closed on Monday" or "the exhibit runs all week".
 
 To create an event, at minimum, you need to determine a date. If you can't determine a date for any event, respond with an error:
 {
@@ -107,7 +125,7 @@ events_json:
       conference_call: false,
       date: "3 April 2024",
       start_time: "10:20",
-      end_time: undefined,
+      end_time: "10:50",
       attendees: ["timmy@gmail.com"],
       selected_calendar_id: null
     }
@@ -200,7 +218,7 @@ potential opportunities to work together",
       conference_call: true,
       date: "26 March 2024",
       start_time: "15:00",
-      end_time: undefined,
+      end_time: "16:00",
       attendees: ["rsoom@toom.com", "jeff@investing.com", "Joe@investing.com"],
       selected_calendar_id: "jeff@investing.com"
     }
@@ -244,7 +262,7 @@ events_json:
       conference_call: false,
       date: "13 April 2024",
       start_time: "14:00",
-      end_time: undefined,
+      end_time: "14:30",
       attendees: ["jeff@john.com"],
       selected_calendar_id: null
     }
@@ -341,7 +359,7 @@ events_json:
       conference_call: false,
       date: "6 May 2025",
       start_time: "12:30",
-      end_time: undefined,
+      end_time: "13:30",
       attendees: ["alex@techco.com"],
       selected_calendar_id: "alex@techco.com"
     }
@@ -403,7 +421,7 @@ events_json:
       conference_call: true,
       date: "13 June 2024",
       start_time: "14:00",
-      end_time: undefined,
+      end_time: "15:00",
       attendees: ["mike@designco.com", "sarah@designco.com", "team@designco.com"],
       selected_calendar_id: "sarah@designco.com"
     }
