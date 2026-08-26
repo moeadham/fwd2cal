@@ -20,6 +20,7 @@ You can self host - it runs on firebase functions.
 - Send from multiple email addresses: send `add myworkemail@address.com` in the subject line to calendar@fwd2cal.com, and then you can add events to your google calendar from another email address
 - ICS attachment support: Forward emails with .ics calendar attachments to automatically add them to your calendar
 - Multi-event extraction: Extract and add multiple events from a single email
+- Sensible durations: Most emails only give a start time. Rather than defaulting every event to the same length, the event duration is inferred from what kind of event it is - a dinner reservation gets two hours, a coffee gets thirty minutes. If no duration can be inferred, your own Google Calendar "default event length" setting is used.
 - Email threading: Replies appear in the same email thread for better organization
 - Completely private: No logging, or storage of any emails. All that is stored are your email addresses.
 - That's it. The goal is to just do one thing correctly and stay out of the way of the user.

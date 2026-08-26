@@ -32,6 +32,9 @@ const SKILL_BODY_EXCERPT_LENGTH = defineString("SKILL_BODY_EXCERPT_LENGTH", {
   default: "500",
 });
 
+// Last-resort event length. The LLM infers a duration for most events, and
+// failing that we use the user's own Google Calendar "default event length"
+// setting - this only applies when neither is available.
 const DEFAULT_EVENT_LENGTH_MINUTES = defineString("DEFAULT_EVENT_LENGTH_MINUTES", {
   default: "30",
 });

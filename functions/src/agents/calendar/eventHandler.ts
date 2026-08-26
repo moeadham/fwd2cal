@@ -299,6 +299,30 @@ function validateEventTimes(event: Event): EventValidationResult {
   return {isValid: true};
 }
 
+/**
+ * Format an event's time range for the confirmation email. An event that starts
+ * and ends on the same day collapses to a single date with a start-end time;
+ * one that spans days spells out both ends.
+ */
+function formatEventDateRange(
+    event: GoogleCalendarEvent,
+    includeYear: boolean,
+): string {
+  const datePart = includeYear ? "dddd, MMMM Do, YYYY" : "dddd, MMMM Do";
+  const start = moment(event.start.dateTime).tz(event.start.timeZone);
+  if (!event.end?.dateTime) {
+    return start.format(`${datePart} [at] h:mm A z`);
+  }
+  const end = moment(event.end.dateTime)
+      .tz(event.end.timeZone || event.start.timeZone);
+  if (end.isSame(start, "day")) {
+    return `${start.format(`${datePart} [at] h:mm A`)} - ` +
+      `${end.format("h:mm A z")}`;
+  }
+  return `${start.format(`${datePart} [at] h:mm A z`)} - ` +
+    `${end.format(`${datePart} [at] h:mm A z`)}`;
+}
+
 async function addEventsAndSendResponse(
     oauth2Client: Auth.OAuth2Client,
     events: Event[],
@@ -388,9 +412,7 @@ async function addEventsAndSendResponse(
   let responseHtml = "";
 
   for (const eventObject of successfulEvents) {
-    const eventDate = moment(eventObject.start.dateTime)
-        .tz(eventObject.start.timeZone)
-        .format("dddd, MMMM Do [at] h:mm A z");
+    const eventDate = formatEventDateRange(eventObject, false);
 
     responseHtml += `<p><strong>${eventObject.summary}</strong><br>`;
     responseHtml += `Date: ${eventDate}<br>`;
@@ -466,9 +488,7 @@ async function addEventsAndSendResponse(
         ...EMAIL_RESPONSES.eventAddedAttendees,
         replace: {
           EVENT_LINK: eventObject.htmlLink,
-          EVENT_DATE: moment(eventObject.start.dateTime)
-              .tz(eventObject.start.timeZone)
-              .format("dddd, MMMM Do, YYYY [at] h:mm A z"),
+          EVENT_DATE: formatEventDateRange(eventObject, true),
           INVITE_LINK: eventObject.inviteOthersLink,
           EVENT_ATTENDEES: inviteesWithoutHost.join(", "),
           CALENDAR_NAME: calendarNameText,
@@ -479,9 +499,7 @@ async function addEventsAndSendResponse(
         ...EMAIL_RESPONSES.eventAdded,
         replace: {
           EVENT_LINK: eventObject.htmlLink,
-          EVENT_DATE: moment(eventObject.start.dateTime)
-              .tz(eventObject.start.timeZone)
-              .format("dddd, MMMM Do, YYYY [at] h:mm A z"),
+          EVENT_DATE: formatEventDateRange(eventObject, true),
           EVENT_ATTENDEES: eventObject.attendees ?
             eventObject.attendees.map((attendee) => attendee.email).join(", ") :
             "",

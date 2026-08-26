@@ -972,6 +972,56 @@ driveEmailMultipleAttachments.attachmentsList = [
   },
 ];
 
+// Test 16: Dinner reservation with no stated end time - the duration should be
+// inferred from the kind of event, not left to the default event length.
+const dinnerReservationEmail: ResendTestData = createResendTestData(
+  {
+    type: "email.received",
+    created_at: new Date().toISOString(),
+    data: {
+      email_id: "test-email-16",
+      message_id: `<test-16-${Date.now()}@mail.gmail.com>`,
+      from: TESTER_PRIMARY_GOOGLE_ACCT,
+      to: [MAIN_EMAIL_ADDRESS],
+      cc: [],
+      bcc: [],
+      subject: "Fwd: Your reservation at Alma is confirmed",
+      created_at: new Date().toISOString(),
+      attachments: [],
+    },
+  },
+  {
+    id: "test-email-16",
+    subject: "Fwd: Your reservation at Alma is confirmed",
+    from: TESTER_PRIMARY_GOOGLE_ACCT,
+    to: [MAIN_EMAIL_ADDRESS],
+    html: `<div dir="ltr"><br><div class="gmail_quote"><div dir="ltr" class="gmail_attr">---------- Forwarded message ---------<br>From: <strong class="gmail_sendername" dir="auto">Alma</strong> <span dir="auto">&lt;<a href="mailto:reservations@almarestaurant.com">reservations@almarestaurant.com</a>&gt;</span><br>Date: Mon, Jun 2, 2025 at 9:12 AM<br>Subject: Your reservation at Alma is confirmed<br>To: &lt;<a href="mailto:${TESTER_PRIMARY_GOOGLE_ACCT}">${TESTER_PRIMARY_GOOGLE_ACCT}</a>&gt;<br></div><br><p>Your table is confirmed.</p><p>Party of 4 &middot; Friday, June 6th at 7:30 PM</p><p>Alma, 1201 Queen St W</p><p>We hold tables for 15 minutes past the reservation time.</p></div></div>`,
+    text: `---------- Forwarded message ---------
+From: Alma <reservations@almarestaurant.com>
+Date: Mon, Jun 2, 2025 at 9:12 AM
+Subject: Your reservation at Alma is confirmed
+To: <${TESTER_PRIMARY_GOOGLE_ACCT}>
+
+Your table is confirmed.
+
+Party of 4 - Friday, June 6th at 7:30 PM
+
+Alma, 1201 Queen St W
+
+We hold tables for 15 minutes past the reservation time.`,
+    headers: {
+      "authentication-results": generateAuthHeader(TESTER_PRIMARY_GOOGLE_ACCT),
+      "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
+      "to": MAIN_EMAIL_ADDRESS,
+      "subject": "Fwd: Your reservation at Alma is confirmed",
+      "date": "Mon, 2 Jun 2025 09:12:00 +0000",
+      "message-id": `<test-16-${Date.now()}@mail.gmail.com>`,
+      "in-reply-to": "<original-message-16>",
+      "references": "<original-message-16>",
+    },
+  },
+);
+
 export {
   ResendTestData,
   AttachmentWithUrl,
@@ -989,6 +1039,7 @@ export {
   emailWithImageAttachment,
   familyEvent,
   workEventVisibl,
+  dinnerReservationEmail,
   driveEmailWithPDF,
   driveEmailNoAttachments,
   driveEmailMultipleAttachments,
