@@ -106,26 +106,39 @@ export interface AnalyticsEventParams {
 }
 
 // ============================================================================
-// RESEND API TYPES
+// OUTBOUND EMAIL TYPES
 // ============================================================================
 
-// Resend outbound attachment
-export interface ResendOutboundAttachment {
+export interface OutboundEmailAttachment {
   content: string | Buffer;
   filename: string;
   content_type?: string;
 }
 
-// Resend email options
-export interface ResendEmailOptions {
+export interface SendEmailOptions {
   to: string;
   from: string;
   subject: string;
   text?: string;
   html: string;
   headers?: Record<string, string>;
-  attachments?: ResendOutboundAttachment[];
+  attachments?: OutboundEmailAttachment[];
 }
+
+export interface CloudflareEmailResult {
+  delivered: string[];
+  queued: string[];
+  permanent_bounces: string[];
+  suppressed_recipients?: string[];
+  message_id?: string;
+}
+
+// ============================================================================
+// RESEND API TYPES
+// ============================================================================
+
+export type ResendOutboundAttachment = OutboundEmailAttachment;
+export type ResendEmailOptions = SendEmailOptions;
 
 // Resend API response
 export interface ResendAPIResponse {
@@ -200,16 +213,7 @@ export interface ResendError {
   message: string;
 }
 
-// Resend send message
-export interface ResendSendMessage {
-  from: string;
-  to: string;
-  subject: string;
-  text?: string;
-  html: string;
-  headers?: Record<string, string>;
-  attachments?: ResendOutboundAttachment[];
-}
+export type ResendSendMessage = SendEmailOptions;
 
 // Mock sent email storage
 export interface MockSentEmail {

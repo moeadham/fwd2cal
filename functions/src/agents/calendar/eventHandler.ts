@@ -8,7 +8,7 @@ import {
   getUserCalendars,
   formatCalendarForLLM,
 } from "./calendarHelper";
-import {sendEmailResend} from "../../util/resend";
+import {sendEmail} from "../../util/email";
 import {getApiUrl} from "../../auth/credentials";
 import {
   ENVIRONMENT_NAME,
@@ -516,7 +516,7 @@ ${responseHtml}
 <br><br>You can always ask for help: <a href="mailto:${supportEmail}">${supportEmail}</a><br>
     `;
 
-    await sendEmailResend({
+    await sendEmail({
       to: sender,
       from: AGENT_EMAIL_ADDRESS.value(),
       subject: `Re: ${email.subject}`,

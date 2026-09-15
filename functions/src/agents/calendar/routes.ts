@@ -12,7 +12,10 @@ import {
   oauthCronJob,
 } from "../../auth/authHandler";
 import {getAgentCredentials, getRedirectUriIndex} from "../../auth/credentials";
-import {ENVIRONMENT_NAME} from "../../util/config";
+import {
+  CLOUDFLARE_EMAIL_API_TOKEN,
+  ENVIRONMENT_NAME,
+} from "../../util/config";
 import {AGENT_NAME, AGENT_HOSTING_URL, AGENT_EMAIL_ADDRESS, RESEND_SIGNING_SECRET} from "./config";
 import {processInboundWebhook} from "../../resend/webhookUtils";
 import {TaskRequest} from "../../util/types";
@@ -31,6 +34,12 @@ const dispatchConfig: TaskQueueOptions = {
   },
   memory: "512MiB",
   timeoutSeconds: 1800,
+  secrets: [CLOUDFLARE_EMAIL_API_TOKEN],
+};
+
+const emailRequestConfig: HttpsOptions = {
+  ...onRequestConfig,
+  secrets: [CLOUDFLARE_EMAIL_API_TOKEN],
 };
 
 // ============================================================================
@@ -114,7 +123,7 @@ export const v2resendInboundDispatch = onTaskDispatched(
 );
 
 export const v2testResendInboundDispatch = onRequest(
-    onRequestConfig,
+    emailRequestConfig,
     async (req, res) => {
       try {
         res.status(200).json(await handleResendInboundDispatch(req.body));

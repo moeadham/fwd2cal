@@ -1,5 +1,5 @@
 import {logger} from "firebase-functions/v2";
-import {sendEmailResend} from "../../util/resend";
+import {sendEmail} from "../../util/email";
 import {getSupportEmail} from "../../util/config";
 import {AGENT_EMAIL_ADDRESS, AGENT_HOSTING_URL} from "./config";
 import {getEmailThreadHeaders, threadEmailHtml} from "../../util/emailUtils";
@@ -132,7 +132,7 @@ export async function sendEmailResponse(
   if (includeThread) {
     html = threadEmailHtml(originalEmail, html);
   }
-  await sendEmailResend({
+  await sendEmail({
     to: sender,
     from: AGENT_EMAIL_ADDRESS.value(),
     subject: subject,

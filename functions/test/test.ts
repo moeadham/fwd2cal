@@ -32,8 +32,7 @@ import {
   automatedReplyCalendarEmail,
 } from "./bindings/resendBindings";
 
-// Using Resend for email service
-const EMAIL_SERVICE = "resend";
+const EMAIL_SERVICE = "cloudflare";
 
 chai.use(chaiHttp);
 const expect = chai.expect;

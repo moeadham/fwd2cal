@@ -7,6 +7,7 @@ import {
   TestData,
 } from "./types";
 import {AttachmentInfo, TransformedEmail} from "./types";
+import {clearMockSentEmails} from "./emailMock";
 
 /**
  * Mock Resend client for testing
@@ -32,6 +33,7 @@ class MockResend implements ResendClient {
   clearTestData(): void {
     this.testData = {};
     this.sentEmails = {};
+    clearMockSentEmails();
   }
 
   // Get the last sent email to a specific recipient

@@ -28,7 +28,7 @@ import {
   getEmailThreadHeaders,
   threadEmailHtml,
 } from "../../util/emailUtils";
-import {sendEmailResend} from "../../util/resend";
+import {sendEmail} from "../../util/email";
 import {TransformedEmail} from "../../util/types";
 import {applyTemplate, isDriveAuthError, isFileOrganized} from "./driveUtils";
 import {
@@ -87,7 +87,7 @@ async function sendOrganizeEmailResponse(
     html: string,
 ): Promise<void> {
   const threadedHtml = threadEmailHtml(originalEmail, html);
-  await sendEmailResend({
+  await sendEmail({
     to: sender,
     from: AGENT_EMAIL_ADDRESS.value(),
     subject: originalEmail.subject || "Re: Organize your Drive",

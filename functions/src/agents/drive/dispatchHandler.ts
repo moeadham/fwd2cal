@@ -15,7 +15,8 @@ import {
   TransformedEmail,
   ResendClient,
 } from "../../util/types";
-import {getLastSentEmail, getMockResendClient, setMockData} from "../../util/resendMock";
+import {getLastSentEmail} from "../../util/emailMock";
+import {getMockResendClient, setMockData} from "../../util/resendMock";
 import {
   getUserFromEmail,
   getUserFromUID,

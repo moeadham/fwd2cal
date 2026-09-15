@@ -5,7 +5,7 @@
  * Export params directly - call .value() only inside function handlers
  */
 
-import {defineString} from "firebase-functions/params";
+import {defineSecret, defineString} from "firebase-functions/params";
 
 const ENVIRONMENT_NAME = defineString("ENVIRONMENT_NAME", {
   default: "production",
@@ -16,6 +16,15 @@ const POSTHOG_API_KEY = defineString("POSTHOG_API_KEY");
 const RESEND_API_KEY = defineString("RESEND_API_KEY");
 const RESEND_REGISTERED_USERS_SEGMENT_ID = defineString(
     "RESEND_REGISTERED_USERS_SEGMENT_ID",
+);
+const OUTBOUND_EMAIL_PROVIDER = defineString("OUTBOUND_EMAIL_PROVIDER", {
+  default: "cloudflare",
+});
+const CLOUDFLARE_ACCOUNT_ID = defineString("CLOUDFLARE_ACCOUNT_ID", {
+  default: "8482edf397d8429a1d65532f6e1e6ed7",
+});
+const CLOUDFLARE_EMAIL_API_TOKEN = defineSecret(
+    "CLOUDFLARE_EMAIL_API_TOKEN",
 );
 
 
@@ -75,6 +84,9 @@ export {
   POSTHOG_API_KEY,
   RESEND_API_KEY,
   RESEND_REGISTERED_USERS_SEGMENT_ID,
+  OUTBOUND_EMAIL_PROVIDER,
+  CLOUDFLARE_ACCOUNT_ID,
+  CLOUDFLARE_EMAIL_API_TOKEN,
   SKILL_CONFIDENCE_THRESHOLD,
   SKILL_BODY_EXCERPT_LENGTH,
   DEFAULT_EVENT_LENGTH_MINUTES,

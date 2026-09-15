@@ -29,11 +29,15 @@ You can self host - it runs on firebase functions.
 You will need:
 1. a firebase project
 2. an OpenRouter API key (for LLM access)
-3. a Resend account for sending and receiving emails
+3. a Cloudflare Email Service account for outbound transactional email
+4. a Resend account for inbound email and contact management
 
 When you deploy or run the emulator `firebase emulators:start`, Firebase will prompt you to set the required parameters:
 - `OPENROUTER_API_KEY` - Your OpenRouter API key
-- `RESEND_API_KEY` - Your Resend API key
+- `CLOUDFLARE_ACCOUNT_ID` - Your Cloudflare account ID
+- `CLOUDFLARE_EMAIL_API_TOKEN` - A secret with `Email Sending: Edit`
+- `OUTBOUND_EMAIL_PROVIDER` - `cloudflare` (default) or `resend`
+- `RESEND_API_KEY` - Your Resend API key for inbound email and contacts
 - `RESEND_SIGNING_SECRET` - Resend webhook signing secret
 - `POSTHOG_API_KEY` - (Optional) PostHog API key for analytics
 - `ENVIRONMENT_NAME` - (Optional) Defaults to "production"
@@ -42,6 +46,16 @@ Configure Resend to forward incoming emails to your Firebase Functions webhook:
 - In your Resend dashboard, set up email forwarding to: `https://{your project name}.web.app/v2/resendInboundCallback`
 - be sure to copy the RESEND_SIGNING_SECRET after you set your callback url
 - Make sure to configure your domain's DNS records in Resend to receive emails
+
+Onboard each outbound sender domain in Cloudflare Email Service. The app sends
+from `calendar@fwd2cal.com` and `drive@fwd2drive.com`, so both domains must show
+`Enabled` and `Configured` under Email Sending.
+
+Store the Cloudflare token in Firebase Secret Manager before deployment:
+
+```bash
+firebase functions:secrets:set CLOUDFLARE_EMAIL_API_TOKEN --project YOUR_PROJECT_ID
+```
 
 ## Local setup
 
@@ -56,6 +70,9 @@ OPENROUTER_API_KEY=sk-or-v1-YOUR_API_KEY
 # Resend
 RESEND_API_KEY=re_YOUR_API_KEY
 RESEND_SIGNING_SECRET=whsec_YOUR_SECRET
+
+# Cloudflare Email Service (store the API token with functions:secrets:set)
+CLOUDFLARE_ACCOUNT_ID=YOUR_CLOUDFLARE_ACCOUNT_ID
 
 # PostHog Analytics (optional)
 POSTHOG_API_KEY=phc_YOUR_API_KEY
@@ -76,7 +93,8 @@ npm test
 ```
 Make sure you authorize your google account in 30 seconds after starting the test so the tests can run.
 
-The test suite uses a mock Resend client to simulate email sending and receiving without making actual API calls.
+The test suite mocks Cloudflare outbound sending and Resend inbound processing
+without making actual API calls.
 
 To test scheduled functions (note: token refresh is currently disabled):
 ```bash

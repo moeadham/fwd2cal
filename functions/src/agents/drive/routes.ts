@@ -16,7 +16,10 @@ import {
 import {signupCallbackHandler, hasRequiredScopes, oauthCronJob} from "../../auth/authHandler";
 import {processInboundWebhook} from "../../resend/webhookUtils";
 import {getAgentCredentials, getRedirectUriIndex} from "../../auth/credentials";
-import {ENVIRONMENT_NAME} from "../../util/config";
+import {
+  CLOUDFLARE_EMAIL_API_TOKEN,
+  ENVIRONMENT_NAME,
+} from "../../util/config";
 import {AGENT_NAME, AGENT_HOSTING_URL, AGENT_EMAIL_ADDRESS, DRIVE_RESEND_SIGNING_SECRET} from "./config";
 import {TaskRequest} from "../../util/types";
 import {cleanupExpiredDriveFileData} from "../../util/firestoreHandler";
@@ -37,6 +40,12 @@ const driveDispatchConfig: TaskQueueOptions = {
   },
   memory: "2GiB",
   timeoutSeconds: 1800,
+  secrets: [CLOUDFLARE_EMAIL_API_TOKEN],
+};
+
+const emailRequestConfig: HttpsOptions = {
+  ...onRequestConfig,
+  secrets: [CLOUDFLARE_EMAIL_API_TOKEN],
 };
 
 // ============================================================================
@@ -161,7 +170,7 @@ export const v2driveOauthCallback = onRequest(
 // ============================================================================
 
 export const v2driveConfirm = onRequest(
-    onRequestConfig,
+    emailRequestConfig,
     async (req, res) => {
       await handleDriveConfirm(req, res);
     },
@@ -179,7 +188,7 @@ export const v2driveInboundDispatch = onTaskDispatched(
 );
 
 export const v2testDriveInboundDispatch = onRequest(
-    onRequestConfig,
+    emailRequestConfig,
     async (req, res) => {
       try {
         res.status(200).json(await handleDriveInboundDispatch(req.body));
@@ -199,7 +208,7 @@ export const v2driveProcessAfterAuth = onTaskDispatched(
 );
 
 export const v2testDriveProcessUpload = onRequest(
-    onRequestConfig,
+    emailRequestConfig,
     async (req, res) => {
       await handleTestProcessUpload(req, res);
     },

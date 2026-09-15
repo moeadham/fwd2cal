@@ -3,7 +3,7 @@ import {getUserFromEmail, getUserFromUID, USERS_COLLECTION} from "../../util/fir
 import {selectSkill} from "./llm";
 import {getSkills, getSkillsContext} from "./skills";
 import {fastMatchSkill} from "../../util/skills/matcher";
-import {sendEmailResend} from "../../util/resend";
+import {sendEmail} from "../../util/email";
 import {
   ENVIRONMENT_NAME,
   SKILL_CONFIDENCE_THRESHOLD,
@@ -23,7 +23,7 @@ import {
   EmailFetchError,
 } from "../../resend/emailFetcher";
 import {processAttachments} from "./attachmentHandler";
-import {getLastSentEmail} from "../../util/resendMock";
+import {getLastSentEmail} from "../../util/emailMock";
 import {TaskRequest, DispatchResult} from "../../util/types";
 import {
   TransformedEmail,
@@ -129,7 +129,7 @@ async function sendToSupport(
   logger.log(email.subject);
   logger.log(email.text);
   const content = `From: ${sender} <br><br> Subject: ${email.subject} <br><br> ${email.html}`;
-  await sendEmailResend({
+  await sendEmail({
     to: "fwd2cal@googlegroups.com",
     from: AGENT_EMAIL_ADDRESS.value(),
     subject: email.subject,

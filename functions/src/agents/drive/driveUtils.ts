@@ -2,7 +2,7 @@ import {logger} from "firebase-functions/v2";
 import {
   saveDriveFileData, getDriveFileData,
 } from "../../util/firestoreHandler";
-import {sendEmailResend} from "../../util/resend";
+import {sendEmail} from "../../util/email";
 import {getSupportEmail} from "../../util/config";
 import {AGENT_EMAIL_ADDRESS, AGENT_HOSTING_URL, ORGANIZE_PROMO_HTML} from "./config";
 import {isOrganizeDriveEnabled} from "../../util/featureFlags";
@@ -247,7 +247,7 @@ export async function sendDriveEmailResponse(
     html: string,
 ): Promise<void> {
   const threadedHtml = threadEmailHtml(originalEmail, html);
-  await sendEmailResend({
+  await sendEmail({
     to: sender,
     from: AGENT_EMAIL_ADDRESS.value(),
     subject: originalEmail.subject || "Re: Your file",
