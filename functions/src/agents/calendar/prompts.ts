@@ -35,6 +35,8 @@ If the email is a thread,  the most recent email is most relevant, but keep othe
 Relative dates are fine - like "next tuesday". Determine the date of the event based off of the relative difference from the date of the email.
 Set the "summary" and "description" to "Event" if there are not enough details in the text to complete either of these fields.
 
+If the email specifies a date but no specific time, set start_time to null and end_time to null. Do NOT guess a time like "00:00". A null start_time means an all-day event will be created.
+
 To create an event, at minimum, you need to determine a date. If you can't determine a date for any event, respond with an error:
 {
 error: "No date provided"
@@ -411,6 +413,54 @@ events_json:
 }
 
 --- EXAMPLE 5 END ---
+
+---EXAMPLE 6 START---
+available_calendars:
+[
+  {
+    "calendar_id": "jezos@gmail.com",
+    "summary": "jezos@gmail.com",
+    "description": "",
+    "is_default": true,
+    "timeZone": "America/Chicago"
+  }
+]
+
+email_text:
+Date: Fri, 6 Mar 2026 10:00:00 +0000
+Subject: Fwd: Appointment Reminder
+From: jezos@gmail.com
+---------- Forwarded message ---------
+From: Smile Dental <noreply@smiledental.com>
+Date: Mon, Mar 3, 2025 at 9:00 AM
+Subject: Appointment Reminder
+To: <jezos@gmail.com>
+
+This is a reminder that you have a dental appointment on March 15, 2025.
+
+Please arrive 10 minutes early.
+
+Smile Dental
+123 Main St, Chicago, IL 60601
+
+events_json:
+{
+  events: [
+    {
+      summary: "Dentist Appointment",
+      location: "Smile Dental, 123 Main St, Chicago, IL 60601",
+      description: "Arrive 10 minutes early",
+      conference_call: false,
+      date: "15 March 2025",
+      start_time: null,
+      end_time: null,
+      attendees: ["jezos@gmail.com"],
+      selected_calendar_id: null
+    }
+  ]
+}
+
+--- EXAMPLE 6 END ---
 
 Respond only with JSON.
 `,

@@ -1,7 +1,9 @@
 import {logger} from "firebase-functions/v2";
 import {getOauthClient} from "../../auth/authHandler";
+import {getUserFromEmail} from "../../util/firestoreHandler";
+import {AGENT_NAME, DRIVE_USER_EMAIL} from "./config";
 import {sendEvent} from "../../util/analytics";
-import {MAX_DRIVE_UPLOAD_BYTES} from "../../util/config";
+import {MAX_DRIVE_UPLOAD_BYTES} from "./config";
 import {getSenderFromRawEmail} from "../../util/emailUtils";
 import {TransformedEmail, ResendClient} from "../../util/types";
 import {
@@ -20,8 +22,10 @@ import {
   toTitleCase, getExtension, ensureDatePrefix,
   applyTemplate, sendDriveEmailResponse, getNextFolderPrefix,
   buildEmbeddedDriveData, buildFileInfos, callProposalWithFallback,
+  isDriveAuthError, extractDriveFileIds, downloadDriveLinkedFiles,
 } from "./driveUtils";
 import {Auth} from "googleapis";
+import {Readable} from "stream";
 
 /**
  * Resolve the target folder for file uploads.
@@ -92,7 +96,9 @@ async function uploadSingleFile(
     rootFolderId: string,
 ): Promise<ProcessedDriveFile> {
   try {
-    const stream = await streamFromUrl(attachment.downloadUrl);
+    const stream = attachment.content ?
+      Readable.from(attachment.content) :
+      await streamFromUrl(attachment.downloadUrl);
     const uploaded = await uploadFile(
         oauth2Client, targetFolderId, suggestedName,
         attachment.contentType, stream,
@@ -116,7 +122,9 @@ async function uploadSingleFile(
     });
     // Fallback: upload with original name to root
     try {
-      const fallbackStream = await streamFromUrl(attachment.downloadUrl);
+      const fallbackStream = attachment.content ?
+        Readable.from(attachment.content) :
+        await streamFromUrl(attachment.downloadUrl);
       const uploaded = await uploadFile(
           oauth2Client, rootFolderId, attachment.filename,
           attachment.contentType, fallbackStream,
@@ -187,13 +195,13 @@ export async function processUpload(
   // Get OAuth client
   let oauth2Client;
   try {
-    oauth2Client = await getOauthClient(uid, "drive");
+    oauth2Client = await getOauthClient(uid, AGENT_NAME);
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     logger.error("Drive: OAuth failed during upload", {uid, error: errMsg});
     const html = applyTemplate(driveMailTemplates.driveAuthFailed.html, {});
     await sendDriveEmailResponse(sender, originalEmail, html);
-    sendEvent(uid, "driveAuthFailed");
+    sendEvent(uid, "driveAuthFailed", "drive");
     return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: [], error: "OAuth failed"};
   }
 
@@ -202,14 +210,70 @@ export async function processUpload(
   const attachments = await listAttachments(resend, resendEmailId, maxUploadBytes);
 
   if (attachments.length === 0) {
+    // Check for Gmail-saved Drive attachments (links in HTML instead of MIME attachments)
+    const driveFileIds = extractDriveFileIds(originalEmail.html || "", originalEmail.text || "");
+    if (driveFileIds.length > 0) {
+      logger.info("Drive: No attachments but Drive links detected, attempting download", {
+        resendEmailId, driveFileIds,
+      });
+      try {
+        const agentUid = await getUserFromEmail(DRIVE_USER_EMAIL.value());
+        if (agentUid) {
+          const agentOauth = await getOauthClient(agentUid, AGENT_NAME);
+          const driveAttachments = await downloadDriveLinkedFiles(
+              agentOauth, driveFileIds, maxUploadBytes,
+          );
+          if (driveAttachments.length > 0) {
+            // Successfully downloaded — continue with normal upload flow using these as attachments
+            return processUploadWithAttachments(
+                oauth2Client, uid, sender, originalEmail, driveAttachments,
+            );
+          }
+        }
+      } catch (error) {
+        logger.warn("Drive: Failed to download Drive-linked files", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
     logger.warn("Drive: No attachments on re-fetch", {resendEmailId});
     const html = applyTemplate(driveMailTemplates.noAttachments.html, {});
     await sendDriveEmailResponse(sender, originalEmail, html);
     return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: [], error: "No attachments"};
   }
 
+  return processUploadWithAttachments(
+      oauth2Client, uid, sender, originalEmail, attachments, savedProposal,
+  );
+}
+
+/**
+ * Core upload logic — takes already-resolved attachments (from Resend or Drive links)
+ * and runs the LLM proposal + folder resolution + upload + confirmation flow.
+ */
+async function processUploadWithAttachments(
+    oauth2Client: Auth.OAuth2Client,
+    uid: string,
+    sender: string,
+    originalEmail: TransformedEmail,
+    attachments: DriveAttachment[],
+    savedProposal?: FileProposal,
+): Promise<DriveProcessingResult> {
   // Get agent-managed folders
-  const agentFolders = await findAgentManagedFolders(oauth2Client);
+  let agentFolders;
+  try {
+    agentFolders = await findAgentManagedFolders(oauth2Client);
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    if (isDriveAuthError(errMsg)) {
+      logger.warn("Drive: Auth error fetching agent folders", {uid, error: errMsg});
+      const html = applyTemplate(driveMailTemplates.driveAuthFailed.html, {});
+      await sendDriveEmailResponse(sender, originalEmail, html);
+      sendEvent(uid, "driveAuthFailed", "drive");
+      return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: [], error: "Auth failed"};
+    }
+    throw error;
+  }
   const agentFolderNames = agentFolders.map((f) => f.name);
   const nextPrefix = getNextFolderPrefix(agentFolderNames);
 
@@ -221,12 +285,12 @@ export async function processUpload(
     });
     proposal = savedProposal;
   } else {
-    // Extract content summaries and propose placement via LLM
-    const fileInfos = await buildFileInfos(attachments);
-    const imageUrls = collectImageUrls(attachments);
+    // Extract content summaries + document page images and propose placement via LLM
+    const {fileInfos, documentImageUrls} = await buildFileInfos(attachments);
+    const allImageUrls = [...collectImageUrls(attachments), ...documentImageUrls];
     proposal = await callProposalWithFallback(
         fileInfos, originalEmail.subject || "", originalEmail.text || "",
-        agentFolderNames, nextPrefix, uid, attachments, imageUrls,
+        agentFolderNames, nextPrefix, uid, attachments, allImageUrls,
     );
   }
 
@@ -244,16 +308,37 @@ export async function processUpload(
   try {
     rootFolderId = await getRootFolderId(oauth2Client);
   } catch (err) {
-    logger.debug("Drive: Could not get root folder ID, using 'root'", {
-      error: err instanceof Error ? err.message : String(err),
-    });
+    const errMsg = err instanceof Error ? err.message : String(err);
+    if (isDriveAuthError(errMsg)) {
+      logger.warn("Drive: Auth error fetching root folder", {uid, error: errMsg});
+      const html = applyTemplate(driveMailTemplates.driveAuthFailed.html, {});
+      await sendDriveEmailResponse(sender, originalEmail, html);
+      sendEvent(uid, "driveAuthFailed", "drive");
+      return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: [], error: "Auth failed"};
+    }
+    logger.debug("Drive: Could not get root folder ID, using 'root'", {error: errMsg});
     rootFolderId = "root";
   }
 
-  const {folderId: targetFolderId, folderPath: targetFolderPath} =
-    await resolveTargetFolder(
+  let targetFolderId: string;
+  let targetFolderPath: string;
+  try {
+    const resolved = await resolveTargetFolder(
         oauth2Client, proposal, agentFolders, nextPrefix, rootFolderId,
     );
+    targetFolderId = resolved.folderId;
+    targetFolderPath = resolved.folderPath;
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    if (isDriveAuthError(errMsg)) {
+      logger.warn("Drive: Auth error resolving target folder", {uid, error: errMsg});
+      const html = applyTemplate(driveMailTemplates.driveAuthFailed.html, {});
+      await sendDriveEmailResponse(sender, originalEmail, html);
+      sendEvent(uid, "driveAuthFailed", "drive");
+      return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: [], error: "Auth failed"};
+    }
+    throw error;
+  }
 
   // Upload all files in parallel
   const results = await uploadAttachments(
@@ -300,7 +385,7 @@ export async function processUpload(
     await sendDriveEmailResponse(sender, originalEmail, html);
   }
 
-  sendEvent(uid, "driveFileUploaded", {
+  sendEvent(uid, "driveFileUploaded", "drive", {
     filesProcessed: String(attachments.length),
     filesSucceeded: String(succeeded.length),
     filesFailed: String(failed.length),

@@ -2,15 +2,15 @@ import fs from "fs";
 import path from "path";
 import {GoogleOAuthCredentials, AgentName} from "./types";
 
-const isDevProject = process.env.GCLOUD_PROJECT === "fwd2cal-dev-2578e";
+const isDevProject = process.env.GCLOUD_PROJECT?.includes("-dev") ?? false;
 
 const credentialsFileNames: Record<AgentName, string> = {
   calendar: isDevProject ?
     "v2-google-auth-credentials-fwd2cal-dev.json" :
     "v2-google-auth-credentials-fwd2cal.json",
   drive: isDevProject ?
-    "v2-google-auth-credentials-drive2cal-dev.json" :
-    "v2-google-auth-credentials-drive2cal.json",
+    "v2-google-auth-credentials-fwd2drive-dev.json" :
+    "v2-google-auth-credentials-fwd2drive.json",
 };
 
 const credentialsCache = new Map<AgentName, GoogleOAuthCredentials>();

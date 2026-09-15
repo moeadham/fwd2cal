@@ -1,17 +1,17 @@
 import {logger} from "firebase-functions/v2";
-import {getUserFromEmail} from "../../util/firestoreHandler";
+import {getUserFromEmail, getUserFromUID, USERS_COLLECTION} from "../../util/firestoreHandler";
 import {selectSkill} from "./llm";
 import {getSkills, getSkillsContext} from "./skills";
 import {fastMatchSkill} from "../../util/skills/matcher";
 import {sendEmailResend} from "../../util/resend";
 import {
   ENVIRONMENT_NAME,
-  MAIN_EMAIL_ADDRESS,
   SKILL_CONFIDENCE_THRESHOLD,
   SKILL_BODY_EXCERPT_LENGTH,
   getSupportEmail,
   getAdminEmail,
 } from "../../util/config";
+import {AGENT_EMAIL_ADDRESS} from "./config";
 import {
   getSenderFromRawEmail,
   getRecipientsFromRawEmail,
@@ -69,8 +69,8 @@ async function handleEmail(
   // Is this a support email?
   const to = getRecipientsFromRawEmail(email);
   if (
-    to.includes(getSupportEmail()) ||
-    to.includes(getAdminEmail()) ||
+    to.includes(getSupportEmail(AGENT_EMAIL_ADDRESS.value())) ||
+    to.includes(getAdminEmail(AGENT_EMAIL_ADDRESS.value())) ||
     (email.subject &&
       email.subject.toLowerCase().startsWith("verify your email address"))
   ) {
@@ -79,7 +79,16 @@ async function handleEmail(
   }
 
   const uid = await getUserFromEmail(sender);
-  if (!uid) {
+  let isCalendarUser = false;
+  if (uid) {
+    try {
+      await getUserFromUID(uid, USERS_COLLECTION);
+      isCalendarUser = true;
+    } catch {
+      // User exists in EmailAddress (e.g. drive-only) but not in Users
+    }
+  }
+  if (!uid || !isCalendarUser) {
     logger.warn(`No User found with ${sender}`);
     const response: EmailResponseTemplate = {
       ...EMAIL_RESPONSES.noUserFound,
@@ -88,14 +97,14 @@ async function handleEmail(
       },
     };
     await sendEmailResponse(sender, email, response, true);
-    sendEvent(sender, "userInvited");
+    sendEvent(sender, "userInvited", "calendar");
     return {result: `${sender} has been invited to signup`};
   }
 
   const skillResult = await detectSkill(email.subject, email.text, uid);
   logger.log(`Request from ${sender} to ${skillResult.skillId}`);
   // Track all received emails with the skill type
-  sendEvent(uid, "emailReceived", {action: skillResult.skillId});
+  sendEvent(uid, "emailReceived", "calendar", {action: skillResult.skillId});
 
   switch (skillResult.skillId) {
     case "add-email":
@@ -122,7 +131,7 @@ async function sendToSupport(
   const content = `From: ${sender} <br><br> Subject: ${email.subject} <br><br> ${email.html}`;
   await sendEmailResend({
     to: "fwd2cal@googlegroups.com",
-    from: MAIN_EMAIL_ADDRESS.value(),
+    from: AGENT_EMAIL_ADDRESS.value(),
     subject: email.subject,
     html: content,
   });

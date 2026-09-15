@@ -24,3 +24,12 @@ for dir in src/agents/drive/skills/*/; do
     cp "${dir}SKILL.md" "lib/agents/drive/skills/${skill_name}/"
   fi
 done
+
+# Copy shared SKILL.md files
+for dir in src/skills/shared/*/; do
+  skill_name=$(basename "$dir")
+  if [ -f "${dir}SKILL.md" ]; then
+    mkdir -p "lib/skills/shared/${skill_name}"
+    cp "${dir}SKILL.md" "lib/skills/shared/${skill_name}/"
+  fi
+done

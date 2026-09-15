@@ -183,7 +183,7 @@ async function moveFile(
   const response = await drive.files.update({
     fileId,
     addParents: newParentId,
-    removeParents: oldParentId,
+    removeParents: oldParentId || undefined,
     fields: "id, webViewLink, parents",
   });
 
@@ -418,6 +418,123 @@ async function deleteFolder(
   logger.info("Drive: Folder trashed", {folderId});
 }
 
+/**
+ * Trash a file in Google Drive.
+ */
+async function trashFile(
+    oauth2Client: Auth.OAuth2Client,
+    fileId: string,
+): Promise<void> {
+  const drive = getDriveClient(oauth2Client);
+  await drive.files.update({
+    fileId: fileId,
+    requestBody: {trashed: true},
+  });
+  logger.info("Drive: File trashed", {fileId});
+}
+
+/**
+ * MIME type mapping for exporting Google Workspace files to downloadable formats.
+ */
+const GOOGLE_WORKSPACE_EXPORT_MAP: Record<string, string> = {
+  "application/vnd.google-apps.document": "application/pdf",
+  "application/vnd.google-apps.spreadsheet": "text/csv",
+  "application/vnd.google-apps.presentation": "application/pdf",
+  "application/vnd.google-apps.drawing": "application/pdf",
+  "application/vnd.google-apps.form": "application/pdf",
+  "application/vnd.google-apps.site": "application/pdf",
+  "application/vnd.google-apps.jam": "application/pdf",
+};
+
+/**
+ * Read a Drive file's content into a Buffer.
+ * Google Workspace files are exported to a standard format first.
+ * Returns null on failure (logs a warning instead of throwing).
+ */
+async function readDriveFileContent(
+    oauth2Client: Auth.OAuth2Client,
+    fileId: string,
+    mimeType: string,
+): Promise<{buffer: Buffer; parserMimeType: string} | null> {
+  const drive = getDriveClient(oauth2Client);
+  const exportMime = GOOGLE_WORKSPACE_EXPORT_MAP[mimeType];
+
+  try {
+    if (exportMime) {
+      const resp = await drive.files.export(
+          {fileId, mimeType: exportMime},
+          {responseType: "arraybuffer"},
+      );
+      return {
+        buffer: Buffer.from(resp.data as ArrayBuffer),
+        parserMimeType: exportMime,
+      };
+    } else {
+      const resp = await drive.files.get(
+          {fileId, alt: "media"},
+          {responseType: "arraybuffer"},
+      );
+      return {
+        buffer: Buffer.from(resp.data as ArrayBuffer),
+        parserMimeType: mimeType,
+      };
+    }
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    logger.warn("Drive: Failed to read file content", {fileId, mimeType, error: errMsg});
+    return null;
+  }
+}
+
+/**
+ * Find a subfolder by name within a parent folder.
+ */
+async function findSubfolderByName(
+    oauth2Client: Auth.OAuth2Client,
+    parentId: string,
+    name: string,
+): Promise<string | null> {
+  const drive = getDriveClient(oauth2Client);
+  const resp = await drive.files.list({
+    q: `mimeType = 'application/vnd.google-apps.folder' and '${parentId}' in parents ` +
+      `and name = '${name.replace(/'/g, "\\'")}' and trashed = false`,
+    fields: "files(id)",
+    pageSize: 1,
+  });
+  return resp.data.files?.[0]?.id || null;
+}
+
+/**
+ * List direct children of a folder with id, name, and mimeType.
+ * Excludes the marker file.
+ */
+async function getFolderChildren(
+    oauth2Client: Auth.OAuth2Client,
+    folderId: string,
+): Promise<Array<{id: string; name: string; mimeType: string}>> {
+  const drive = getDriveClient(oauth2Client);
+  const children: Array<{id: string; name: string; mimeType: string}> = [];
+  let pageToken: string | undefined;
+  do {
+    const response = await drive.files.list({
+      q: `'${folderId}' in parents and trashed = false` +
+        ` and name != '.sorted.by.fwd2drive.com'`,
+      fields: "nextPageToken, files(id, name, mimeType)",
+      pageSize: 100,
+      pageToken,
+    });
+    for (const file of response.data.files || []) {
+      if (file.id && file.name && file.mimeType) {
+        children.push({
+          id: file.id, name: file.name, mimeType: file.mimeType,
+        });
+      }
+    }
+    pageToken = response.data.nextPageToken || undefined;
+  } while (pageToken);
+  return children;
+}
+
 export {
   getDriveClient,
   getDriveFolderTree,
@@ -430,8 +547,12 @@ export {
   findAgentManagedFolders,
   renameFolder,
   getFolderFileCount,
+  getFolderChildren,
   getDriveFolderParent,
   listAllDriveFiles,
   renameFile,
   deleteFolder,
+  trashFile,
+  readDriveFileContent,
+  findSubfolderByName,
 };

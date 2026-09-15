@@ -3,15 +3,30 @@ import {
   saveDriveFileData, getDriveFileData,
 } from "../../util/firestoreHandler";
 import {sendEmailResend} from "../../util/resend";
-import {getSupportEmail, DRIVE_EMAIL_ADDRESS} from "../../util/config";
+import {getSupportEmail} from "../../util/config";
+import {AGENT_EMAIL_ADDRESS, AGENT_HOSTING_URL, ORGANIZE_PROMO_HTML} from "./config";
+import {isOrganizeDriveEnabled} from "../../util/featureFlags";
 import {getEmailThreadHeaders, threadEmailHtml} from "../../util/emailUtils";
 import {TransformedEmail} from "../../util/types";
 import {
   DriveEmbeddedData, DriveEmbeddedFileData, DriveAttachment,
   DriveFolder, FileProposal, FileInfo, OrganizeEmbeddedData,
 } from "./types";
-import {downloadAttachmentBuffer, extractContentSummary} from "./fileProcessor";
+import {downloadAttachmentBuffer, extractContentSummary, extractDocumentImageUrls} from "./fileProcessor";
 import {proposeFilePlacement} from "./llm";
+import {Auth} from "googleapis";
+
+/**
+ * Check if an error message indicates an OAuth/authentication failure.
+ * Matches the same error strings as the calendar agent's isAuthError check.
+ */
+export function isDriveAuthError(errMsg: string): boolean {
+  return errMsg.includes("invalid_grant") ||
+    errMsg.includes("Token has been expired") ||
+    errMsg.includes("No refresh token") ||
+    errMsg.includes("Insufficient Permission") ||
+    errMsg.includes("unauthorized_client");
+}
 
 /**
  * Convert a string to Title Case (e.g. "tax documents" → "Tax Documents").
@@ -67,11 +82,156 @@ export function ensureDatePrefix(filename: string, emailDate?: string): string {
 }
 
 /**
+ * Check if a file's immediate parent is an agent-managed folder (NNN-Category).
+ */
+export function isInManagedFolder(parentPath: string): boolean {
+  const segments = parentPath.split("/");
+  const immediateParent = segments[segments.length - 1];
+  return /^\d{2,3}-/.test(immediateParent);
+}
+
+/**
+ * Check if a file is already organized:
+ * - Name starts with a YYYY.MM.DD or YYYY-MM-DD date prefix
+ * - Immediate parent folder matches NN(N)-Category pattern
+ */
+export function isFileOrganized(
+    fileName: string, parentPath: string,
+): boolean {
+  const hasDatePrefix =
+    /^\d{4}\.\d{2}\.\d{2}\s/.test(fileName) ||
+    /^\d{4}-\d{2}-\d{2}\s/.test(fileName);
+  if (!hasDatePrefix) return false;
+
+  return isInManagedFolder(parentPath);
+}
+
+/**
+ * Extract Google Drive file IDs from email HTML.
+ * Gmail auto-saves large attachments to Drive and replaces
+ * them with links — these emails arrive with no MIME attachments.
+ * Also matches Google Workspace links (docs, sheets, slides, drawings).
+ */
+export function extractDriveFileIds(...sources: string[]): string[] {
+  const html = sources.join(" ");
+  const ids = new Set<string>();
+  const patterns = [
+    /drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/g,
+    /drive\.google\.com\/(?:open|uc)\?[^"]*id=([a-zA-Z0-9_-]+)/g,
+    /docs\.google\.com\/(?:document|spreadsheets|presentation|drawings)\/d\/([a-zA-Z0-9_-]+)/g,
+  ];
+  for (const pattern of patterns) {
+    let match;
+    while ((match = pattern.exec(html)) !== null) {
+      ids.add(match[1]);
+    }
+  }
+  return [...ids];
+}
+
+/**
+ * Download files from Google Drive using the agent's OAuth credentials.
+ * The agent account has view access because Gmail shares files with the recipient.
+ * Returns DriveAttachment objects for files that were accessible.
+ */
+export async function downloadDriveLinkedFiles(
+    agentOauthClient: Auth.OAuth2Client,
+    fileIds: string[],
+    maxBytes: number,
+): Promise<DriveAttachment[]> {
+  const {google} = await import("googleapis");
+  const drive = google.drive({version: "v3", auth: agentOauthClient});
+  const results: DriveAttachment[] = [];
+
+  // Google Workspace MIME types require export (no binary content)
+  const DOCX = "application/vnd.openxmlformats-officedocument" +
+    ".wordprocessingml.document";
+  const XLSX = "application/vnd.openxmlformats-officedocument" +
+    ".spreadsheetml.sheet";
+  const PPTX = "application/vnd.openxmlformats-officedocument" +
+    ".presentationml.presentation";
+  const WORKSPACE_EXPORT_MAP: Record<string, {
+    mimeType: string; ext: string;
+  }> = {
+    "application/vnd.google-apps.document": {mimeType: DOCX, ext: ".docx"},
+    "application/vnd.google-apps.spreadsheet": {mimeType: XLSX, ext: ".xlsx"},
+    "application/vnd.google-apps.presentation": {mimeType: PPTX, ext: ".pptx"},
+    "application/vnd.google-apps.drawing": {mimeType: "application/pdf", ext: ".pdf"},
+  };
+
+  for (const fileId of fileIds) {
+    try {
+      // Get file metadata
+      const meta = await drive.files.get({
+        fileId,
+        fields: "name,mimeType,size",
+      });
+      const name = meta.data.name || `drive-file-${fileId}`;
+      const mimeType = meta.data.mimeType || "application/octet-stream";
+      const size = parseInt(meta.data.size || "0", 10);
+
+      const exportInfo = WORKSPACE_EXPORT_MAP[mimeType];
+
+      if (!exportInfo && size > maxBytes && size > 0) {
+        logger.warn("Drive: Shared Drive file too large, skipping", {fileId, size, maxBytes});
+        continue;
+      }
+
+      let buffer: Buffer;
+      let finalName = name;
+      let finalMimeType = mimeType;
+
+      if (exportInfo) {
+        // Google Workspace files must be exported (they have no direct binary content)
+        const resp = await drive.files.export(
+            {fileId, mimeType: exportInfo.mimeType},
+            {responseType: "arraybuffer"},
+        );
+        buffer = Buffer.from(resp.data as ArrayBuffer);
+        finalMimeType = exportInfo.mimeType;
+        // Append export extension if the name doesn't already have one
+        if (!name.match(/\.\w{2,5}$/)) {
+          finalName = name + exportInfo.ext;
+        }
+
+        if (buffer.length > maxBytes) {
+          logger.warn("Drive: Exported Workspace file too large, skipping", {fileId, size: buffer.length, maxBytes});
+          continue;
+        }
+      } else {
+        // Regular file — download directly
+        const resp = await drive.files.get(
+            {fileId, alt: "media"},
+            {responseType: "arraybuffer"},
+        );
+        buffer = Buffer.from(resp.data as ArrayBuffer);
+      }
+
+      results.push({
+        filename: finalName,
+        contentType: finalMimeType,
+        size: buffer.length,
+        content: buffer,
+        downloadUrl: "",
+      });
+      logger.info("Drive: Downloaded shared Drive file", {fileId, name: finalName, size: buffer.length});
+    } catch (error) {
+      logger.debug("Drive: Could not access shared Drive file", {
+        fileId, error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return results;
+}
+
+/**
  * Replace template placeholders in an HTML string
  */
 export function applyTemplate(html: string, replacements: Record<string, string>): string {
   let result = html;
-  result = result.replace(/%SUPPORT_EMAIL%/g, getSupportEmail());
+  result = result.replace(/%HOSTING_URL%/g, AGENT_HOSTING_URL.value());
+  result = result.replace(/%SUPPORT_EMAIL%/g, getSupportEmail(AGENT_EMAIL_ADDRESS.value()));
+  result = result.replace(/%ORGANIZE_PROMO%/g, isOrganizeDriveEnabled() ? ORGANIZE_PROMO_HTML : "");
   for (const [key, value] of Object.entries(replacements)) {
     result = result.replace(new RegExp(`%${key}%`, "g"), value);
   }
@@ -89,7 +249,7 @@ export async function sendDriveEmailResponse(
   const threadedHtml = threadEmailHtml(originalEmail, html);
   await sendEmailResend({
     to: sender,
-    from: DRIVE_EMAIL_ADDRESS.value(),
+    from: AGENT_EMAIL_ADDRESS.value(),
     subject: originalEmail.subject || "Re: Your file",
     html: threadedHtml,
     headers: getEmailThreadHeaders(originalEmail.headers),
@@ -195,7 +355,7 @@ export async function parseEmbeddedDriveData(
  * Looks for the visible "View proposal" link with encoded proposalId.
  */
 export function parseOrganizeEmbeddedData(html: string): OrganizeEmbeddedData | null {
-  const linkMatch = html.match(/fwd2cal\.com\/d\?o=([A-Za-z0-9_-]+)/);
+  const linkMatch = html.match(/fwd2drive\.com\/d\?o=([A-Za-z0-9_-]+)/);
   if (linkMatch) {
     try {
       const json = Buffer.from(linkMatch[1], "base64url").toString();
@@ -227,17 +387,25 @@ export function findFolderByName(
 }
 
 /**
- * Download attachments and extract content summaries for LLM processing.
+ * Download attachments and extract content summaries + document images for LLM processing.
  */
 export async function buildFileInfos(
     attachments: DriveAttachment[],
-): Promise<FileInfo[]> {
-  return Promise.all(attachments.map(async (attachment) => {
-    const buffer = await downloadAttachmentBuffer(
+): Promise<{fileInfos: FileInfo[]; documentImageUrls: string[]}> {
+  const allDocumentImageUrls: string[] = [];
+
+  const fileInfos = await Promise.all(attachments.map(async (attachment) => {
+    const buffer = attachment.content ?? await downloadAttachmentBuffer(
         attachment.downloadUrl, attachment.filename,
     );
     const contentSummary = buffer ?
       await extractContentSummary(buffer, attachment.contentType) : "";
+
+    if (buffer) {
+      const docImages = await extractDocumentImageUrls(buffer, attachment.contentType);
+      allDocumentImageUrls.push(...docImages);
+    }
+
     return {
       fileName: attachment.filename,
       mimeType: attachment.contentType,
@@ -245,6 +413,8 @@ export async function buildFileInfos(
       contentSummary,
     };
   }));
+
+  return {fileInfos, documentImageUrls: allDocumentImageUrls};
 }
 
 /**

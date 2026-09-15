@@ -117,7 +117,7 @@ async function defaultCompletion<T>(
       if (!completion) {
         logger.error("Completion is null");
         if (uid) {
-          sendEvent(uid, "aiError", {
+          sendEvent(uid, "aiError", "system", {
             reason: "invalid_response",
           });
         }
@@ -127,7 +127,7 @@ async function defaultCompletion<T>(
         logger.error("No choices in completion");
         logger.error(JSON.stringify(completion, null, 2));
         if (uid) {
-          sendEvent(uid, "aiError", {
+          sendEvent(uid, "aiError", "system", {
             reason: "invalid_response",
           });
         }
@@ -139,7 +139,7 @@ async function defaultCompletion<T>(
         );
         logger.error(JSON.stringify(completion, null, 2));
         if (uid) {
-          sendEvent(uid, "aiError", {
+          sendEvent(uid, "aiError", "system", {
             reason: "invalid_response",
           });
         }

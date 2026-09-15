@@ -9,8 +9,13 @@ let _skillsContext: string | null = null;
 
 export function getSkills(): Skill[] {
   if (_skills === null) {
-    _skills = loadSkillsFromDir(path.join(__dirname));
-    logger.info(`Loaded ${_skills.length} calendar skills`);
+    const agentSkills = loadSkillsFromDir(path.join(__dirname));
+    const sharedSkills = loadSkillsFromDir(
+        path.join(__dirname, "..", "..", "..", "skills", "shared"),
+    );
+    _skills = [...agentSkills, ...sharedSkills];
+    logger.info(`Loaded ${_skills.length} calendar skills` +
+        ` (${agentSkills.length} agent + ${sharedSkills.length} shared)`);
   }
   return _skills;
 }

@@ -1,7 +1,7 @@
 import {PostHog} from "posthog-node";
 import {POSTHOG_API_KEY, ENVIRONMENT_NAME} from "./config";
 import {logger} from "firebase-functions/v2";
-import {AnalyticsEventParams} from "./types";
+import {AnalyticsAgent, AnalyticsEventParams} from "./types";
 
 // Initialize PostHog client with serverless-optimized settings
 // flushAt: 1 and flushInterval: 0 ensure immediate flushing for Firebase Functions
@@ -21,10 +21,14 @@ function getPostHogClient(): PostHog {
 async function sendEvent(
     uid: string,
     eventName: string,
+    agent: AnalyticsAgent,
     eventParams: AnalyticsEventParams = {},
 ): Promise<void> {
   try {
     const client = getPostHogClient();
+
+    // Tag the originating agent
+    eventParams.agent = agent;
 
     // Mark non-production traffic (same as GA implementation)
     if (ENVIRONMENT_NAME.value() !== "production") {

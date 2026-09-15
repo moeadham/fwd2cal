@@ -29,7 +29,7 @@ if [ -f .env.local ]; then
 fi
 
 echo "Starting firebase emulator (using dev project)"
-firebase emulators:start --project fwd2cal-dev-2578e > /dev/stdout &
+firebase emulators:start --config ../firebase.drive.json --project fwd2cal-dev-2578e > /dev/stdout &
 LOGS_PID=$!
 sleep 30
 

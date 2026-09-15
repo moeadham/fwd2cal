@@ -47,6 +47,7 @@ async function processEmail(
   const text = `${calendarText}Date: ${headers.date}
   Subject: ${headers.subject}
   From: ${headers.from}
+  ${headers.subject || ""}
   ${email.text}${documentText}`;
 
   // Build user message content - text + images
@@ -134,7 +135,9 @@ async function processEmail(
     eventResult.events.forEach((event) => {
       event.timeZone = timezoneResult.timezone || undefined;
       // Clean up undefined values in each event
+      // Preserve null for start_time/end_time (null = all-day event)
       Object.keys(event).forEach((key) => {
+        if (key === "start_time" || key === "end_time") return;
         const value = (event as Record<string, unknown>)[key];
         if (value === "undefined" || value === null) {
           (event as Record<string, unknown>)[key] = undefined;
@@ -149,7 +152,7 @@ async function processEmail(
       description: (eventResult as unknown as Record<string, string | null>).description,
       conference_call: (eventResult as unknown as Record<string, boolean>).conference_call || false,
       date: (eventResult as unknown as Record<string, string>).date || "",
-      start_time: (eventResult as unknown as Record<string, string>).start_time || "",
+      start_time: (eventResult as unknown as Record<string, string | null>).start_time ?? null,
       end_time: (eventResult as unknown as Record<string, string | null>).end_time,
       attendees: (eventResult as unknown as Record<string, string[]>).attendees || [],
       timeZone: timezoneResult.timezone || undefined,

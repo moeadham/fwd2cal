@@ -1,5 +1,6 @@
 import {logger} from "firebase-functions/v2";
 import {getOauthClient} from "../../auth/authHandler";
+import {AGENT_NAME} from "./config";
 import {processEmail} from "./llm";
 import {
   addEvent,
@@ -11,9 +12,9 @@ import {sendEmailResend} from "../../util/resend";
 import {getApiUrl} from "../../auth/credentials";
 import {
   ENVIRONMENT_NAME,
-  MAIN_EMAIL_ADDRESS,
   getSupportEmail,
 } from "../../util/config";
+import {AGENT_EMAIL_ADDRESS} from "./config";
 import handleAsync from "../../util/handleAsync";
 import {
   isValidEmail,
@@ -47,11 +48,11 @@ export async function eventHandler(
     documents: ParsedDocument[] = [],
 ): Promise<GoogleCalendarEvent | GoogleCalendarEvent[] | undefined> {
   // Can we authenticate with their calendar?
-  const [oauthErr, oauth2Client] = await handleAsync(() => getOauthClient(uid, "calendar"));
+  const [oauthErr, oauth2Client] = await handleAsync(() => getOauthClient(uid, AGENT_NAME));
   if (oauthErr || !oauth2Client) {
     logger.warn("Error getting OAuth client: ", oauthErr);
     await sendEmailResponse(sender, email, EMAIL_RESPONSES.oauthFailed, true);
-    sendEvent(uid, "calendarError", {reason: "oauth_failed"});
+    sendEvent(uid, "calendarError", "calendar", {reason: "oauth_failed"});
     return;
   }
 
@@ -73,7 +74,7 @@ export async function eventHandler(
     if (isAuthError) {
       logger.warn("OAuth error fetching calendars: ", calendarErr);
       await sendEmailResponse(sender, email, EMAIL_RESPONSES.oauthFailed, true);
-      sendEvent(uid, "calendarError", {reason: "oauth_failed"});
+      sendEvent(uid, "calendarError", "calendar", {reason: "oauth_failed"});
       return;
     }
     logger.warn(
@@ -95,7 +96,7 @@ export async function eventHandler(
       const [icsErr, icsEvent] = await handleAsync(() => eventFromICS(icsFile));
       if (icsErr) {
         logger.warn("ICS error: ", icsErr);
-        sendEvent(uid, "icsProcessingFailed", {reason: "parse_failed"});
+        sendEvent(uid, "icsProcessingFailed", "calendar", {reason: "parse_failed"});
       } else if (icsEvent) {
         event = {
           summary: icsEvent.summary,
@@ -138,14 +139,14 @@ export async function eventHandler(
     if (processEmailErr) {
       logger.warn("OpenAI error: ", processEmailErr);
       await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true);
-      sendEvent(uid, "dataQualityIssue", {reason: "ai_api_error"});
+      sendEvent(uid, "dataQualityIssue", "calendar", {reason: "ai_api_error"});
       return;
     }
 
     if (!aiEvent) {
       logger.warn("No event data returned from AI");
       await sendEmailResponse(sender, email, EMAIL_RESPONSES.unableToParse, true);
-      sendEvent(uid, "dataQualityIssue", {reason: "no_ai_response"});
+      sendEvent(uid, "dataQualityIssue", "calendar", {reason: "no_ai_response"});
       return;
     }
 
@@ -159,7 +160,7 @@ export async function eventHandler(
       };
       logger.warn("Error in email contents: ", aiEvent);
       await sendEmailResponse(sender, email, response, true);
-      sendEvent(uid, "dataQualityIssue", {reason: "ai_returned_error"});
+      sendEvent(uid, "dataQualityIssue", "calendar", {reason: "ai_returned_error"});
       return;
     } else {
       // Handle new array format
@@ -172,7 +173,7 @@ export async function eventHandler(
               EMAIL_RESPONSES.unableToParse,
               true,
           );
-          sendEvent(uid, "dataQualityIssue", {reason: "no_events_found"});
+          sendEvent(uid, "dataQualityIssue", "calendar", {reason: "no_events_found"});
           return;
         }
 
@@ -198,7 +199,7 @@ export async function eventHandler(
 
         if (aiEvent.events.length === 0) {
           logger.warn("All events had invalid times");
-          sendEvent(uid, "dataQualityIssue", {
+          sendEvent(uid, "dataQualityIssue", "calendar", {
             reason: "missing_required_fields",
           });
           await sendEmailResponse(
@@ -226,7 +227,7 @@ export async function eventHandler(
         const timeValidation = validateEventTimes(singleEvent);
         if (!timeValidation.isValid) {
           logger.warn(`Invalid event times from AI: ${timeValidation.error}`);
-          sendEvent(uid, "dataQualityIssue", {
+          sendEvent(uid, "dataQualityIssue", "calendar", {
             reason: "missing_required_fields",
           });
           await sendEmailResponse(
@@ -255,8 +256,17 @@ export async function eventHandler(
 }
 
 function validateEventTimes(event: Event): EventValidationResult {
-  if (!event.date || !event.start_time) {
-    return {isValid: false, error: "Missing required date or start_time"};
+  if (!event.date) {
+    return {isValid: false, error: "Missing required date"};
+  }
+
+  // All-day event (no start_time) - just validate the date parses
+  if (!event.start_time) {
+    const dateOnly = moment(event.date, "DD MMMM YYYY");
+    if (!dateOnly.isValid()) {
+      return {isValid: false, error: `Invalid date: ${event.date}`};
+    }
+    return {isValid: true};
   }
 
   // Try to parse the start time
@@ -366,10 +376,10 @@ async function addEventsAndSendResponse(
           f.error.includes("unauthorized_client"),
     );
     if (isAuthError) {
-      sendEvent(uid, "calendarError", {reason: "oauth_failed"});
+      sendEvent(uid, "calendarError", "calendar", {reason: "oauth_failed"});
       await sendEmailResponse(sender, email, EMAIL_RESPONSES.oauthFailed, true);
     } else {
-      sendEvent(uid, "calendarError", {reason: "event_creation_failed"});
+      sendEvent(uid, "calendarError", "calendar", {reason: "event_creation_failed"});
       const errorDetails = failedEvents
           .map((f) => `${f.event.summary}: ${f.error}`).join("; ");
       const response: EmailResponseTemplate = {
@@ -388,9 +398,11 @@ async function addEventsAndSendResponse(
   let responseHtml = "";
 
   for (const eventObject of successfulEvents) {
-    const eventDate = moment(eventObject.start.dateTime)
-        .tz(eventObject.start.timeZone)
-        .format("dddd, MMMM Do [at] h:mm A z");
+    const eventDate = eventObject.start.date ?
+        moment(eventObject.start.date).format("dddd, MMMM Do, YYYY") :
+        moment(eventObject.start.dateTime)
+            .tz(eventObject.start.timeZone!)
+            .format("dddd, MMMM Do [at] h:mm A z");
 
     responseHtml += `<p><strong>${eventObject.summary}</strong><br>`;
     responseHtml += `Date: ${eventDate}<br>`;
@@ -437,7 +449,7 @@ async function addEventsAndSendResponse(
 
   // Add failed events info if any
   if (failedEvents.length > 0) {
-    sendEvent(uid, "addEventPartialFailure");
+    sendEvent(uid, "addEventPartialFailure", "calendar");
     responseHtml += `<p><strong>Failed to add ${failedEvents.length} event(s):</strong><br>`;
     for (const failed of failedEvents) {
       responseHtml += `- ${failed.event.summary}: ${failed.error}<br>`;
@@ -466,9 +478,11 @@ async function addEventsAndSendResponse(
         ...EMAIL_RESPONSES.eventAddedAttendees,
         replace: {
           EVENT_LINK: eventObject.htmlLink,
-          EVENT_DATE: moment(eventObject.start.dateTime)
-              .tz(eventObject.start.timeZone)
-              .format("dddd, MMMM Do, YYYY [at] h:mm A z"),
+          EVENT_DATE: eventObject.start.date ?
+              moment(eventObject.start.date).format("dddd, MMMM Do, YYYY") :
+              moment(eventObject.start.dateTime)
+                  .tz(eventObject.start.timeZone!)
+                  .format("dddd, MMMM Do, YYYY [at] h:mm A z"),
           INVITE_LINK: eventObject.inviteOthersLink,
           EVENT_ATTENDEES: inviteesWithoutHost.join(", "),
           CALENDAR_NAME: calendarNameText,
@@ -479,9 +493,11 @@ async function addEventsAndSendResponse(
         ...EMAIL_RESPONSES.eventAdded,
         replace: {
           EVENT_LINK: eventObject.htmlLink,
-          EVENT_DATE: moment(eventObject.start.dateTime)
-              .tz(eventObject.start.timeZone)
-              .format("dddd, MMMM Do, YYYY [at] h:mm A z"),
+          EVENT_DATE: eventObject.start.date ?
+              moment(eventObject.start.date).format("dddd, MMMM Do, YYYY") :
+              moment(eventObject.start.dateTime)
+                  .tz(eventObject.start.timeZone!)
+                  .format("dddd, MMMM Do, YYYY [at] h:mm A z"),
           EVENT_ATTENDEES: eventObject.attendees ?
             eventObject.attendees.map((attendee) => attendee.email).join(", ") :
             "",
@@ -493,7 +509,7 @@ async function addEventsAndSendResponse(
     await sendEmailResponse(sender, email, response, true);
   } else {
     // Multiple events - send custom HTML email
-    const supportEmail = getSupportEmail();
+    const supportEmail = getSupportEmail(AGENT_EMAIL_ADDRESS.value());
     const customHtml = `
 ${successfulEvents.length} events added to your calendar.
 ${responseHtml}
@@ -502,7 +518,7 @@ ${responseHtml}
 
     await sendEmailResend({
       to: sender,
-      from: MAIN_EMAIL_ADDRESS.value(),
+      from: AGENT_EMAIL_ADDRESS.value(),
       subject: `Re: ${email.subject}`,
       html: threadEmailHtml(email, customHtml),
       headers: getEmailThreadHeaders(email.headers),

@@ -158,7 +158,7 @@ async function sendEmailResend({
       from,
       subject,
     });
-    sendEvent("email_service", "emailSendFailed", {
+    sendEvent("email_service", "emailSendFailed", "system", {
       reason: "resend_api_error",
     });
     throw lastError || new Error("Resend API failed after retries");
@@ -173,7 +173,7 @@ async function sendEmailResend({
       from,
       subject,
     });
-    sendEvent("email_service", "emailSendFailed", {reason: "exception"});
+    sendEvent("email_service", "emailSendFailed", "system", {reason: "exception"});
     throw new Error(`Failed to send email: ${errorMessage}`);
   }
 }

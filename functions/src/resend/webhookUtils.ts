@@ -6,6 +6,8 @@ import {Request, Response} from "express";
 import {
   ENVIRONMENT_NAME,
   RESEND_API_KEY,
+  getSupportEmail,
+  getAdminEmail,
 } from "../util/config";
 import {
   ResendWebhookData,
@@ -13,6 +15,33 @@ import {
   ResendClient,
 } from "../util/types";
 import {getMockResendClient, setMockData} from "../util/resendMock";
+
+const BLOCKED_SENDER_PREFIXES = ["noreply@", "no-reply@", "mailer-daemon@", "info@"];
+const BLOCKED_SENDERS = new Set([
+  "calendar-notification@google.com",
+  "calendar-noreply@google.com",
+]);
+const BLOCKED_SUBJECT_PATTERNS = [
+  /^out of office/i,
+  /^automatic reply/i,
+  /^auto[- ]?reply/i,
+  /^away from (the )?office/i,
+  /\bauto[- ]?response\b/i,
+  /^undeliverable:/i,
+  /^mail delivery failed/i,
+  /^delivery status notification/i,
+  /^returned mail/i,
+];
+
+function isAutomatedSender(from: string): boolean {
+  const sender = from.toLowerCase();
+  if (BLOCKED_SENDERS.has(sender)) return true;
+  return BLOCKED_SENDER_PREFIXES.some((prefix) => sender.startsWith(prefix));
+}
+
+function isAutomatedSubject(subject: string): boolean {
+  return BLOCKED_SUBJECT_PATTERNS.some((pattern) => pattern.test(subject));
+}
 
 /**
  * Shared helper: verifies a Resend inbound webhook request (signature, event
@@ -89,10 +118,15 @@ export async function processInboundWebhook(
       return;
     }
 
-    // Verify the email is addressed to the expected recipient
+    // Verify the email is addressed to the expected recipient (or support/admin)
     const recipients = webhookData.data.to || [];
+    const validRecipients = new Set([
+      expectedRecipient.toLowerCase(),
+      getSupportEmail(expectedRecipient).toLowerCase(),
+      getAdminEmail(expectedRecipient).toLowerCase(),
+    ]);
     const isForUs = recipients.some(
-        (addr) => addr.toLowerCase() === expectedRecipient.toLowerCase(),
+        (addr) => validRecipients.has(addr.toLowerCase()),
     );
     if (!isForUs) {
       logger.log(
@@ -102,6 +136,24 @@ export async function processInboundWebhook(
       );
       res.status(200).json({
         message: "Email not for this environment, skipping",
+      });
+      return;
+    }
+
+    const sender = webhookData.data.from;
+    if (isAutomatedSender(sender)) {
+      logger.log(`Ignoring automated sender: ${sender}`);
+      res.status(200).json({
+        message: "Automated sender, skipping",
+      });
+      return;
+    }
+
+    const subject = webhookData.data.subject || "";
+    if (isAutomatedSubject(subject)) {
+      logger.log(`Ignoring automated subject: ${subject}`);
+      res.status(200).json({
+        message: "Automated reply, skipping",
       });
       return;
     }

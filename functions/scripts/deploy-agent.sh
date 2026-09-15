@@ -33,9 +33,16 @@ if [ -z "$PROJECT" ]; then
   PROJECT=$(firebase use 2>/dev/null)
 fi
 
+# Resolve Firebase alias to actual project ID (e.g. "dev" → "fwd2cal-dev-2578e")
+RESOLVED_PROJECT=$(node -e "
+  const rc = JSON.parse(require('fs').readFileSync('../.firebaserc', 'utf-8'));
+  const p = rc.projects['${PROJECT}'] || '${PROJECT}';
+  console.log(p);
+")
+
 # Verify OAuth credentials for the target project exist before building
 CREDS_DIR="src/agents/${AGENT}/auth"
-if [ "$PROJECT" = "fwd2cal-dev-2578e" ]; then
+if [[ "$RESOLVED_PROJECT" == *-dev* ]]; then
   SUFFIX="-dev"
 else
   SUFFIX=""
@@ -43,7 +50,7 @@ fi
 
 case "$AGENT" in
   calendar) CREDS_FILE="v2-google-auth-credentials-fwd2cal${SUFFIX}.json" ;;
-  drive)    CREDS_FILE="v2-google-auth-credentials-drive2cal${SUFFIX}.json" ;;
+  drive)    CREDS_FILE="v2-google-auth-credentials-fwd2drive${SUFFIX}.json" ;;
 esac
 
 if [ ! -f "${CREDS_DIR}/${CREDS_FILE}" ]; then

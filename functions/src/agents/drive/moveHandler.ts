@@ -3,6 +3,7 @@ import {
   getUserFromEmail, updateDriveFileData,
 } from "../../util/firestoreHandler";
 import {getOauthClient} from "../../auth/authHandler";
+import {AGENT_NAME} from "./config";
 import {sendEvent} from "../../util/analytics";
 import {TransformedEmail} from "../../util/types";
 import {
@@ -14,12 +15,13 @@ import {
   getDriveFolderTree, findFolderInTree, getRootFolderId,
   moveFile, createFolder, placeMarkerFile,
   findAgentManagedFolders, renameFolder, getFolderFileCount,
+  findSubfolderByName, trashFile,
 } from "./driveHelper";
 import {interpretMoveInstructions} from "./llm";
 import {
   toTitleCase, applyTemplate, sendDriveEmailResponse,
   getNextFolderPrefix, buildEmbeddedDriveHtml,
-  buildEmbeddedDriveData, findFolderByName,
+  buildEmbeddedDriveData, findFolderByName, isDriveAuthError,
 } from "./driveUtils";
 
 /**
@@ -40,7 +42,7 @@ export async function handleMoveReply(
 
   let oauth2Client;
   try {
-    oauth2Client = await getOauthClient(uid, "drive");
+    oauth2Client = await getOauthClient(uid, AGENT_NAME);
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     logger.error("Drive: OAuth failed for move", {uid, error: errMsg});
@@ -54,13 +56,32 @@ export async function handleMoveReply(
   try {
     folderTree = await getDriveFolderTree(oauth2Client);
   } catch (err) {
-    logger.debug("Drive: Could not fetch folder tree", {
-      error: err instanceof Error ? err.message : String(err),
-    });
+    const errMsg = err instanceof Error ? err.message : String(err);
+    if (isDriveAuthError(errMsg)) {
+      logger.warn("Drive: Auth error fetching folder tree", {uid, error: errMsg});
+      const html = applyTemplate(driveMailTemplates.driveAuthFailed.html, {});
+      await sendDriveEmailResponse(sender, email, html);
+      sendEvent(uid, "driveAuthFailed", "drive");
+      return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: [], error: "Auth failed"};
+    }
+    logger.debug("Drive: Could not fetch folder tree", {error: errMsg});
     folderTree = [];
   }
 
-  const agentFolders = await findAgentManagedFolders(oauth2Client);
+  let agentFolders;
+  try {
+    agentFolders = await findAgentManagedFolders(oauth2Client);
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    if (isDriveAuthError(errMsg)) {
+      logger.warn("Drive: Auth error fetching agent folders", {uid, error: errMsg});
+      const html = applyTemplate(driveMailTemplates.driveAuthFailed.html, {});
+      await sendDriveEmailResponse(sender, email, html);
+      sendEvent(uid, "driveAuthFailed", "drive");
+      return {filesProcessed: 0, filesSucceeded: 0, filesFailed: 0, results: [], error: "Auth failed"};
+    }
+    throw err;
+  }
 
   // LLM: interpret move instructions (only agent-managed folders)
   const replyText = email.text || "";
@@ -108,31 +129,73 @@ export async function handleMoveReply(
   const fileFolderIds = new Map<string, string>(); // filename → folderId
 
   const results: ProcessedDriveFile[] = [];
+  const trashedFiles: string[] = []; // filenames of trashed files
   for (const move of moveResult.moves) {
     const file = files[move.file_index];
     if (!file) continue;
+
+    // Handle trash action — delete the file instead of moving it
+    if (move.action === "trash") {
+      try {
+        await trashFile(oauth2Client, file.id);
+        trashedFiles.push(file.filename);
+        results.push({
+          filename: file.filename,
+          folderPath: "Trash",
+          suggestedName: file.filename,
+          driveFileId: file.id,
+        });
+      } catch (error) {
+        const errMsg = error instanceof Error ? error.message : String(error);
+        if (isDriveAuthError(errMsg)) {
+          logger.warn("Drive: Auth error during trash", {uid, fileId: file.id, error: errMsg});
+          const html = applyTemplate(driveMailTemplates.driveAuthFailed.html, {});
+          await sendDriveEmailResponse(sender, email, html);
+          sendEvent(uid, "driveAuthFailed", "drive");
+          return {
+            filesProcessed: files.length, filesSucceeded: 0,
+            filesFailed: files.length, results: [], error: "Auth failed",
+          };
+        }
+        logger.error("Drive: Failed to trash file", {fileId: file.id, error: errMsg});
+        results.push({
+          filename: file.filename,
+          folderPath: file.folderPath,
+          suggestedName: file.filename,
+          error: `Trash failed: ${errMsg}`,
+        });
+      }
+      continue;
+    }
 
     let newFolderId: string;
     let newFolderPath: string;
     let skipMove = false;
 
-    // Normalize target category for dedup
-    const rawCategory = toTitleCase(move.folder_path || move.folder_id);
-    const categoryKey = rawCategory.replace(/^\d{2,3}-/, "").toLowerCase();
+    // Split path into root folder and subdirectories
+    const rawPath = move.folder_path || move.folder_id;
+    const pathSegments = rawPath.split("/").filter((s) => s.trim());
+    const rootSegment = pathSegments[0] || rawPath;
+    const subSegments = pathSegments.slice(1).map((s) => toTitleCase(s));
 
-    // Check if we already resolved this category in a previous iteration
-    const alreadyResolved = resolvedCategories.get(categoryKey);
+    // Normalize target category for dedup (use full path for uniqueness)
+    const rawCategory = toTitleCase(rootSegment);
+    const fullPathKey = [rawCategory, ...subSegments].join("/")
+        .replace(/^\d{2,3}-/, "").toLowerCase();
+
+    // Check if we already resolved this full path in a previous iteration
+    const alreadyResolved = resolvedCategories.get(fullPathKey);
     if (alreadyResolved) {
       newFolderId = alreadyResolved.folderId;
       newFolderPath = alreadyResolved.folderPath;
       // Skip move if the file is already in this folder (e.g., folder was renamed)
       skipMove = file.folderId === newFolderId;
     } else {
-      // Resolve target folder
+      // Resolve target root folder
       const needsNewFolder =
         (move.folder_id === "root" && move.folder_path) ||
         (!findFolderInTree(folderTree, move.folder_id) &&
-         !findFolderByName(folderTree, move.folder_path || move.folder_id));
+         !findFolderByName(folderTree, rootSegment));
 
       if (needsNewFolder) {
         const targetCategory = rawCategory;
@@ -146,7 +209,9 @@ export async function handleMoveReply(
         );
 
         // If source is agent-managed and will be empty, rename instead
-        if (sourceAgent && !renamedFolders.has(file.folderId)) {
+        // (only when no subdirectories — rename doesn't make sense with subdirs)
+        if (sourceAgent && !renamedFolders.has(file.folderId) &&
+            subSegments.length === 0) {
           const fileCount = await getFolderFileCount(
               oauth2Client, file.folderId,
           );
@@ -171,17 +236,30 @@ export async function handleMoveReply(
             newFolderPath = targetName;
             await placeMarkerFile(oauth2Client, newFolderId);
           }
-        } else if (renamedFolders.has(file.folderId)) {
+        } else if (renamedFolders.has(file.folderId) &&
+            subSegments.length === 0) {
           // Folder already renamed for a previous file in this batch
           newFolderId = file.folderId;
           newFolderPath = renamedFolders.get(file.folderId)!;
           skipMove = true;
         } else {
-          newFolderId = await createFolder(
-              oauth2Client, targetName, rootFolderId,
-          );
-          newFolderPath = targetName;
-          await placeMarkerFile(oauth2Client, newFolderId);
+          // Check if the target root folder already exists as an agent-managed folder
+          // (e.g. moving to "03-Finance/Invoices" when "03-Finance" already exists)
+          const existingAgent = agentFolders.find((f) => {
+            const fBase = f.name.replace(/^\d{2,3}-\s*/, "").toLowerCase();
+            const tBase = targetCategory.replace(/^\d{2,3}-\s*/, "").toLowerCase();
+            return f.name === targetName || fBase === tBase;
+          });
+          if (existingAgent) {
+            newFolderId = existingAgent.id;
+            newFolderPath = existingAgent.name;
+          } else {
+            newFolderId = await createFolder(
+                oauth2Client, targetName, rootFolderId,
+            );
+            newFolderPath = targetName;
+            await placeMarkerFile(oauth2Client, newFolderId);
+          }
         }
       } else {
         // Target folder exists — only use it if it's agent-managed
@@ -196,7 +274,7 @@ export async function handleMoveReply(
           newFolderPath = agentFolder.name;
         } else {
           // LLM picked a non-agent folder — create agent-managed one
-          const targetName = toTitleCase(move.folder_path || move.folder_id);
+          const targetName = toTitleCase(rootSegment);
           const nextPfx = getNextFolderPrefix(
               agentFolders.map((f) => f.name),
           );
@@ -209,8 +287,27 @@ export async function handleMoveReply(
         }
       }
 
-      // Cache the resolved category for subsequent files
-      resolvedCategories.set(categoryKey, {folderId: newFolderId, folderPath: newFolderPath});
+      // Resolve subdirectories within the root folder
+      const rootFolderIdForMarker = newFolderId;
+      for (const subName of subSegments) {
+        const existingSubId = await findSubfolderByName(
+            oauth2Client, newFolderId, subName,
+        );
+        if (existingSubId) {
+          newFolderId = existingSubId;
+        } else {
+          newFolderId = await createFolder(oauth2Client, subName, newFolderId);
+        }
+        newFolderPath = `${newFolderPath}/${subName}`;
+      }
+
+      // Place marker in root agent folder (if subdirs were created)
+      if (subSegments.length > 0) {
+        await placeMarkerFile(oauth2Client, rootFolderIdForMarker);
+      }
+
+      // Cache the resolved path for subsequent files
+      resolvedCategories.set(fullPathKey, {folderId: newFolderId, folderPath: newFolderPath});
     }
 
     // Safety net: ensure folder name has NNN- prefix — only rename managed folders
@@ -253,6 +350,16 @@ export async function handleMoveReply(
       }
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
+      if (isDriveAuthError(errMsg)) {
+        logger.warn("Drive: Auth error during move", {uid, fileId: file.id, error: errMsg});
+        const html = applyTemplate(driveMailTemplates.driveAuthFailed.html, {});
+        await sendDriveEmailResponse(sender, email, html);
+        sendEvent(uid, "driveAuthFailed", "drive");
+        return {
+          filesProcessed: files.length, filesSucceeded: 0,
+          filesFailed: files.length, results: [], error: "Auth failed",
+        };
+      }
       logger.error("Drive: Failed to move file", {
         fileId: file.id, error: errMsg,
       });
@@ -266,12 +373,28 @@ export async function handleMoveReply(
   }
 
   const succeeded = results.filter((r) => !r.error);
+  const movedFiles = succeeded.filter((r) => !trashedFiles.includes(r.filename));
 
   if (succeeded.length === 0) {
     const html = applyTemplate(driveMailTemplates.moveFailed.html, {});
     await sendDriveEmailResponse(sender, email, html);
+  } else if (trashedFiles.length > 0 && movedFiles.length === 0) {
+    // All files were trashed
+    if (trashedFiles.length === 1) {
+      const html = applyTemplate(driveMailTemplates.fileTrashed.html, {
+        FILE_NAME: trashedFiles[0],
+      });
+      await sendDriveEmailResponse(sender, email, html);
+    } else {
+      const fileListHtml = trashedFiles.map((f) => `<b>${f}</b>`).join("<br>");
+      const html = applyTemplate(driveMailTemplates.multipleFilesTrashed.html, {
+        FILE_LIST: fileListHtml,
+      });
+      await sendDriveEmailResponse(sender, email, html);
+    }
   } else {
-    const updatedFiles: DriveEmbeddedFileData[] = succeeded.map((r) => ({
+    // Some or all files were moved (not trashed)
+    const updatedFiles: DriveEmbeddedFileData[] = movedFiles.map((r) => ({
       id: r.driveFileId || "",
       folderId: fileFolderIds.get(r.filename) || "",
       folderPath: r.folderPath,
@@ -287,8 +410,8 @@ export async function handleMoveReply(
       embeddedHtml = await buildEmbeddedDriveData(uid, updatedFiles);
     }
 
-    if (succeeded.length === 1) {
-      const file = succeeded[0];
+    if (movedFiles.length === 1) {
+      const file = movedFiles[0];
       const html = applyTemplate(driveMailTemplates.fileMoved.html, {
         FILE_NAME: file.filename,
         NEW_PATH: file.folderPath,
@@ -297,7 +420,7 @@ export async function handleMoveReply(
       });
       await sendDriveEmailResponse(sender, email, html);
     } else {
-      const fileListHtml = succeeded.map((file) =>
+      const fileListHtml = movedFiles.map((file) =>
         `<b>${file.filename}</b> → ${file.folderPath}` +
         (file.driveWebLink ? ` (<a href="${file.driveWebLink}">view</a>)` : ""),
       ).join("<br>");
@@ -309,8 +432,9 @@ export async function handleMoveReply(
     }
   }
 
-  sendEvent(uid, "driveFileMoved", {
-    filesMoved: String(succeeded.length),
+  sendEvent(uid, trashedFiles.length > 0 ? "driveFileTrashed" : "driveFileMoved", "drive", {
+    filesMoved: String(movedFiles.length),
+    filesTrashed: String(trashedFiles.length),
   });
 
   return {

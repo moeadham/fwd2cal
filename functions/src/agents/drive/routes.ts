@@ -16,10 +16,11 @@ import {
 import {signupCallbackHandler, hasRequiredScopes, oauthCronJob} from "../../auth/authHandler";
 import {processInboundWebhook} from "../../resend/webhookUtils";
 import {getAgentCredentials, getRedirectUriIndex} from "../../auth/credentials";
-import {ENVIRONMENT_NAME, DRIVE_EMAIL_ADDRESS, DRIVE_RESEND_SIGNING_SECRET, getHostingBaseUrl} from "../../util/config";
+import {ENVIRONMENT_NAME} from "../../util/config";
+import {AGENT_NAME, AGENT_HOSTING_URL, AGENT_EMAIL_ADDRESS, DRIVE_RESEND_SIGNING_SECRET} from "./config";
 import {TaskRequest} from "../../util/types";
 import {cleanupExpiredDriveFileData} from "../../util/firestoreHandler";
-import {sendEvent} from "../../util/analytics";
+
 import {PostAuthTaskData, OrganizeActionTaskData} from "./types";
 
 // Global configuration for onRequest functions
@@ -34,7 +35,7 @@ const driveDispatchConfig: TaskQueueOptions = {
     maxAttempts: 1,
     minBackoffSeconds: 1,
   },
-  memory: "1GiB",
+  memory: "2GiB",
   timeoutSeconds: 1800,
 };
 
@@ -45,13 +46,12 @@ const driveDispatchConfig: TaskQueueOptions = {
 export const v2driveSignup = onRequest(
     onRequestConfig,
     async (req, res) => {
-      const credentials = getAgentCredentials("drive");
+      const credentials = getAgentCredentials(AGENT_NAME);
       const redirectUriIndex = getRedirectUriIndex(ENVIRONMENT_NAME.value());
       const scopes = [
         "https://www.googleapis.com/auth/userinfo.email",
         "https://www.googleapis.com/auth/userinfo.profile",
         "openid",
-        "https://www.googleapis.com/auth/drive.metadata",
         "https://www.googleapis.com/auth/drive.file",
       ].join("+");
       // Pass state (resendEmailId) through OAuth so callback can trigger upload
@@ -73,7 +73,7 @@ export const v2driveSignup = onRequest(
 export const v2driveFullScopeSignup = onRequest(
     onRequestConfig,
     async (req, res) => {
-      const credentials = getAgentCredentials("drive");
+      const credentials = getAgentCredentials(AGENT_NAME);
       const redirectUriIndex = getRedirectUriIndex(ENVIRONMENT_NAME.value());
       const scopes = [
         "https://www.googleapis.com/auth/userinfo.email",
@@ -104,11 +104,10 @@ export const v2driveOauthCallback = onRequest(
       try {
         const result = await signupCallbackHandler(
             req.query as Record<string, string>,
-            "drive",
+            AGENT_NAME,
         );
         uid = result.user.uid;
         grantedScope = result.grantedScope;
-        sendEvent(uid, "drive_sign_up");
       } catch (err) {
         const error = err as { code?: number; message: string };
         logger.warn("Error in driveOauthCallback", err);
@@ -131,14 +130,13 @@ export const v2driveOauthCallback = onRequest(
         ["https://www.googleapis.com/auth/drive"] :
         [
           "https://www.googleapis.com/auth/drive.file",
-          "https://www.googleapis.com/auth/drive.metadata",
         ];
 
       if (!hasRequiredScopes(grantedScope, requiredScopes)) {
         logger.warn("Drive signup: insufficient scopes", {
           uid, grantedScope, requiredScopes,
         });
-        res.redirect(302, `${getHostingBaseUrl()}/drive-insufficient-permissions`);
+        res.redirect(302, `${AGENT_HOSTING_URL.value()}/insufficient-permissions`);
         return;
       }
 
@@ -154,7 +152,7 @@ export const v2driveOauthCallback = onRequest(
         }
       }
 
-      res.redirect(302, "https://www.fwd2cal.com/drive-thanks");
+      res.redirect(302, "https://www.fwd2drive.com/thanks");
     },
 );
 
@@ -250,7 +248,7 @@ export const v2driveInboundCallback = onRequest(
     async (req, res) => {
       await processInboundWebhook(
           req, res, "v2driveInboundDispatch",
-          DRIVE_EMAIL_ADDRESS.value(), DRIVE_RESEND_SIGNING_SECRET.value(),
+          AGENT_EMAIL_ADDRESS.value(), DRIVE_RESEND_SIGNING_SECRET.value(),
       );
     },
 );
@@ -262,6 +260,6 @@ export const v2driveRefreshTokensScheduled = onSchedule(
       memory: "512MiB",
     },
     async () => {
-      await oauthCronJob("drive");
+      await oauthCronJob(AGENT_NAME);
     },
 );

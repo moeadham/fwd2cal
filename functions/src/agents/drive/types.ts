@@ -29,11 +29,14 @@ export type FileProposal = z.infer<typeof FileProposalSchema>;
 // Move instruction result (reply handler)
 export const MoveInstructionItemSchema = z.object({
   file_index: z.number().describe("The 0-based index of the file to move"),
+  action: z.enum(["move", "trash"]).describe(
+      "Whether to move the file to a folder or trash it",
+  ),
   folder_id: z.string().describe(
-      "The Google Drive folder ID to move to, or 'root' for a new folder",
+      "The Google Drive folder ID to move to, or 'root' for a new folder (ignored when action is 'trash')",
   ),
   folder_path: z.string().describe(
-      "The folder path to move to (new folder name if folder_id is 'root')",
+      "The folder path to move to (new folder name if folder_id is 'root') (ignored when action is 'trash')",
   ),
   reason: z.string().describe("Brief reasoning for the move"),
 });
@@ -105,7 +108,7 @@ export interface DriveFileEntry {
 // Proposed folder in the new structure
 export const OrganizeFolderSchema = z.object({
   folder_name: z.string().describe(
-      "Folder name with NN - Category format (e.g., '01 - Personal', '02 - Work')",
+      "Folder name with NN-Category format (e.g., '01-Personal', '02-Work')",
   ),
   description: z.string().describe("Brief description of what this folder contains"),
   subfolders: z.array(z.object({
@@ -123,7 +126,7 @@ export const OrganizeFileActionSchema = z.object({
       "Proposed new filename in YYYY.MM.DD - description.ext format",
   ),
   new_folder: z.string().describe(
-      "Target folder name (NN - Category or NN - Category/Subfolder)",
+      "Target folder name (NN-Category or NN-Category/Subfolder)",
   ),
   action: z.enum(["move", "rename", "move_and_rename", "keep"]).describe(
       "What action to take on this file",
@@ -162,11 +165,14 @@ export interface OrganizeCostBreakdown {
   filesToMove: number;
   filesToRename: number;
   filesToKeep: number;
-  costPerFile: number;
+  textFiles: number;
+  imageFiles: number;
+  costPerTextFile: number;
+  costPerImageFile: number;
   totalCost: number;
 }
 
-// Organize proposal stored in Firestore
+// Organize proposal stored in Firestore (bulk data in GCS)
 export interface OrganizeProposalDoc {
   uid: string;
   senderEmail: string;
@@ -174,6 +180,7 @@ export interface OrganizeProposalDoc {
   status: "pending" | "approved" | "executing" | "completed" | "undone";
   createdAt: string;
   expiresAt: string;
+  storagePath: string;
   proposal: DriveOrganizeProposal;
   cost: OrganizeCostBreakdown;
   snapshot?: OrganizeSnapshotAction[];
@@ -234,8 +241,11 @@ export interface DriveMailTemplates {
   multipleFileProposal: DriveMailTemplate;
   fileMoved: DriveMailTemplate;
   multipleFilesMoved: DriveMailTemplate;
+  fileTrashed: DriveMailTemplate;
+  multipleFilesTrashed: DriveMailTemplate;
   driveAuthFailed: DriveMailTemplate;
   noAttachments: DriveMailTemplate;
+  noUserFound: DriveMailTemplate;
   uploadFailed: DriveMailTemplate;
   moveFailed: DriveMailTemplate;
   organizeAuthRequired: DriveMailTemplate;
@@ -244,6 +254,9 @@ export interface DriveMailTemplates {
   organizeNoFiles: DriveMailTemplate;
   organizeComplete: DriveMailTemplate;
   organizeUndone: DriveMailTemplate;
+  userDeleted: DriveMailTemplate;
+  emailRemoved: DriveMailTemplate;
+  emailNotOwned: DriveMailTemplate;
 }
 
 // ============================================================================

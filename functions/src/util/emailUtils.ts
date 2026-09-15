@@ -162,7 +162,7 @@ function verifyEmail(email: TransformedEmail): boolean {
       SPF: email.SPF,
       expected: "pass",
     });
-    sendEvent(email.from, "emailRejected", {reason: "spf_failed"});
+    sendEvent(email.from, "emailRejected", "system", {reason: "spf_failed"});
     return false;
   }
 
@@ -172,7 +172,7 @@ function verifyEmail(email: TransformedEmail): boolean {
       dkim: email.dkim,
       containsPass: email.dkim.indexOf("pass") !== -1,
     });
-    sendEvent(email.from, "emailRejected", {reason: "dkim_failed"});
+    sendEvent(email.from, "emailRejected", "system", {reason: "dkim_failed"});
     return false;
   }
 

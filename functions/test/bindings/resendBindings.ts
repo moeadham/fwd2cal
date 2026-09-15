@@ -803,9 +803,94 @@ Sarah`,
   },
 );
 
+// Test: All-day event (email with date but no time)
+const allDayEvent: ResendTestData = createResendTestData(
+  {
+    type: "email.received",
+    created_at: new Date().toISOString(),
+    data: {
+      email_id: "test-allday",
+      message_id: `<test-allday-${Date.now()}@mail.gmail.com>`,
+      from: TESTER_PRIMARY_GOOGLE_ACCT,
+      to: [MAIN_EMAIL_ADDRESS],
+      cc: [],
+      bcc: [],
+      subject: "Fwd: Appointment Reminder",
+      created_at: new Date().toISOString(),
+      attachments: [],
+    },
+  },
+  {
+    id: "test-allday",
+    subject: "Fwd: Appointment Reminder",
+    from: TESTER_PRIMARY_GOOGLE_ACCT,
+    to: [MAIN_EMAIL_ADDRESS],
+    html: `<div dir="ltr"><br><div class="gmail_quote"><div dir="ltr" class="gmail_attr">---------- Forwarded message ---------<br>From: <strong class="gmail_sendername" dir="auto">Smile Dental</strong> <span dir="auto">&lt;<a href="mailto:noreply@smiledental.com">noreply@smiledental.com</a>&gt;</span><br>Date: Mon, Mar 3, 2025 at 9:00 AM<br>Subject: Appointment Reminder<br>To: &lt;<a href="mailto:${TESTER_PRIMARY_GOOGLE_ACCT}">${TESTER_PRIMARY_GOOGLE_ACCT}</a>&gt;<br></div><br><p>This is a reminder that you have a dental appointment on March 15, 2026.</p><p>Please arrive 10 minutes early.</p><p>Smile Dental<br>123 Main St, Chicago, IL 60601</p></div></div>`,
+    text: `---------- Forwarded message ---------
+From: Smile Dental <noreply@smiledental.com>
+Date: Mon, Mar 3, 2025 at 9:00 AM
+Subject: Appointment Reminder
+To: ${TESTER_PRIMARY_GOOGLE_ACCT}
+
+This is a reminder that you have a dental appointment on March 15, 2026.
+
+Please arrive 10 minutes early.
+
+Smile Dental
+123 Main St, Chicago, IL 60601`,
+    headers: {
+      "authentication-results": generateAuthHeader(TESTER_PRIMARY_GOOGLE_ACCT),
+      "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
+      "to": MAIN_EMAIL_ADDRESS,
+      "subject": "Fwd: Appointment Reminder",
+      "date": "Mon, 3 Mar 2025 10:00:00 +0000",
+      "message-id": `<test-allday-${Date.now()}@mail.gmail.com>`,
+      "in-reply-to": "<original-message-allday>",
+      "references": "<original-message-allday>",
+    },
+  },
+);
+
 // ============================================================================
 // DRIVE AGENT TEST DATA
 // ============================================================================
+
+// Drive Test: Delete account (addressed to drive agent)
+const driveDeleteAccount: ResendTestData = createResendTestData(
+  {
+    type: "email.received",
+    created_at: new Date().toISOString(),
+    data: {
+      email_id: "test-drive-delete",
+      message_id: `<test-drive-delete-${Date.now()}@mail.gmail.com>`,
+      from: TESTER_PRIMARY_GOOGLE_ACCT,
+      to: [DRIVE_EMAIL_ADDRESS],
+      cc: [],
+      bcc: [],
+      subject: "delete account",
+      created_at: new Date().toISOString(),
+      attachments: [],
+    },
+  },
+  {
+    id: "test-drive-delete",
+    subject: "delete account",
+    from: TESTER_PRIMARY_GOOGLE_ACCT,
+    to: [DRIVE_EMAIL_ADDRESS],
+    html: "",
+    text: "",
+    headers: {
+      "authentication-results": generateAuthHeader(TESTER_PRIMARY_GOOGLE_ACCT),
+      "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
+      "to": DRIVE_EMAIL_ADDRESS,
+      "subject": "delete account",
+      "date": "Fri, 30 May 2025 12:00:00 +0000",
+      "message-id": `<test-drive-delete-${Date.now()}@mail.gmail.com>`,
+      "in-reply-to": "<original-message-drive-delete>",
+      "references": "<original-message-drive-delete>",
+    },
+  },
+);
 
 // Drive Test 1: Single PDF attachment
 const driveEmailWithPDF: ResendTestData = createResendTestData(
@@ -900,6 +985,43 @@ const driveEmailNoAttachments: ResendTestData = createResendTestData(
   },
 );
 
+// Drive Test: Signup via email (no attachments, unknown user)
+const driveSignup: ResendTestData = createResendTestData(
+  {
+    type: "email.received",
+    created_at: new Date().toISOString(),
+    data: {
+      email_id: "test-drive-signup",
+      message_id: `<test-drive-signup-${Date.now()}@mail.gmail.com>`,
+      from: TESTER_PRIMARY_GOOGLE_ACCT,
+      to: [DRIVE_EMAIL_ADDRESS],
+      cc: [],
+      bcc: [],
+      subject: "Hi",
+      created_at: new Date().toISOString(),
+      attachments: [],
+    },
+  },
+  {
+    id: "test-drive-signup",
+    subject: "Hi",
+    from: TESTER_PRIMARY_GOOGLE_ACCT,
+    to: [DRIVE_EMAIL_ADDRESS],
+    html: "<p>I want to sign up</p>",
+    text: "I want to sign up",
+    headers: {
+      "authentication-results": generateAuthHeader(TESTER_PRIMARY_GOOGLE_ACCT),
+      "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
+      "to": DRIVE_EMAIL_ADDRESS,
+      "subject": "Hi",
+      "date": "Mon, 1 Jul 2025 08:00:00 +0000",
+      "message-id": `<test-drive-signup-${Date.now()}@mail.gmail.com>`,
+      "in-reply-to": "<original-message-drive-signup>",
+      "references": "<original-message-drive-signup>",
+    },
+  },
+);
+
 // Drive Test 3: Multiple attachments
 const driveEmailMultipleAttachments: ResendTestData = createResendTestData(
   {
@@ -972,6 +1094,137 @@ driveEmailMultipleAttachments.attachmentsList = [
   },
 ];
 
+// Drive Test: PDF + email artifact attachments (artifacts should be filtered out)
+const driveEmailWithArtifacts: ResendTestData = createResendTestData(
+  {
+    type: "email.received",
+    created_at: new Date().toISOString(),
+    data: {
+      email_id: "test-drive-artifacts",
+      message_id: `<test-drive-artifacts-${Date.now()}@mail.gmail.com>`,
+      from: TESTER_PRIMARY_GOOGLE_ACCT,
+      to: [DRIVE_EMAIL_ADDRESS],
+      cc: [],
+      bcc: [],
+      subject: "Fwd: Meeting Notes with Attachments",
+      created_at: new Date().toISOString(),
+      attachments: [
+        {id: "art-pdf", filename: "conference_registration.pdf", content_type: "application/pdf", content_disposition: "attachment", size: 15000},
+        {id: "art-eml", filename: "original_message.eml", content_type: "message/rfc822", content_disposition: "attachment", size: 25000},
+        {id: "art-ics", filename: "invite.ics", content_type: "text/calendar", content_disposition: "attachment", size: 1200},
+        {id: "art-vcf", filename: "contact.vcf", content_type: "text/vcard", content_disposition: "attachment", size: 800},
+        {id: "art-p7s", filename: "smime.p7s", content_type: "application/pkcs7-signature", content_disposition: "attachment", size: 3500},
+      ],
+    },
+  },
+  {
+    id: "test-drive-artifacts",
+    subject: "Fwd: Meeting Notes with Attachments",
+    from: TESTER_PRIMARY_GOOGLE_ACCT,
+    to: [DRIVE_EMAIL_ADDRESS],
+    html: "<p>Here are the meeting notes, please save to Drive.</p>",
+    text: "Here are the meeting notes, please save to Drive.",
+    headers: {
+      "authentication-results": generateAuthHeader(TESTER_PRIMARY_GOOGLE_ACCT),
+      "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
+      "to": DRIVE_EMAIL_ADDRESS,
+      "subject": "Fwd: Meeting Notes with Attachments",
+      "date": "Mon, 1 Jul 2025 14:00:00 +0000",
+      "message-id": `<test-drive-artifacts-${Date.now()}@mail.gmail.com>`,
+      "in-reply-to": "<original-message-drive-artifacts>",
+      "references": "<original-message-drive-artifacts>",
+    },
+  },
+);
+driveEmailWithArtifacts.attachmentsList = [
+  {
+    id: "art-pdf",
+    filename: "conference_registration.pdf",
+    content_type: "application/pdf",
+    content_disposition: "attachment",
+    size: 1500,
+    download_url: `file://${PDF_FILE_PATH}`,
+    expires_at: new Date(Date.now() + 3600000).toISOString(),
+  },
+  {
+    id: "art-eml",
+    filename: "original_message.eml",
+    content_type: "message/rfc822",
+    content_disposition: "attachment",
+    size: 25000,
+    download_url: `file://${PDF_FILE_PATH}`, // dummy URL, should be filtered
+    expires_at: new Date(Date.now() + 3600000).toISOString(),
+  },
+  {
+    id: "art-ics",
+    filename: "invite.ics",
+    content_type: "text/calendar",
+    content_disposition: "attachment",
+    size: 1200,
+    download_url: `file://${PDF_FILE_PATH}`,
+    expires_at: new Date(Date.now() + 3600000).toISOString(),
+  },
+  {
+    id: "art-vcf",
+    filename: "contact.vcf",
+    content_type: "text/vcard",
+    content_disposition: "attachment",
+    size: 800,
+    download_url: `file://${PDF_FILE_PATH}`,
+    expires_at: new Date(Date.now() + 3600000).toISOString(),
+  },
+  {
+    id: "art-p7s",
+    filename: "smime.p7s",
+    content_type: "application/pkcs7-signature",
+    content_disposition: "attachment",
+    size: 3500,
+    download_url: `file://${PDF_FILE_PATH}`,
+    expires_at: new Date(Date.now() + 3600000).toISOString(),
+  },
+];
+
+// Test: Automated reply subject (should be blocked by webhook filter)
+function createAutomatedReplyEmail(recipient: string): ResendTestData {
+  return createResendTestData(
+    {
+      type: "email.received",
+      created_at: new Date().toISOString(),
+      data: {
+        email_id: `test-auto-reply-${recipient.split("@")[0]}`,
+        message_id: `<test-auto-reply-${recipient.split("@")[0]}-${Date.now()}@company.com>`,
+        from: TESTER_PRIMARY_GOOGLE_ACCT,
+        to: [recipient],
+        cc: [],
+        bcc: [],
+        subject: "Automatic reply: Automatic reply: Out of office",
+        created_at: new Date().toISOString(),
+        attachments: [],
+      },
+    },
+    {
+      id: `test-auto-reply-${recipient.split("@")[0]}`,
+      subject: "Automatic reply: Automatic reply: Out of office",
+      from: TESTER_PRIMARY_GOOGLE_ACCT,
+      to: [recipient],
+      html: "<p>I am currently out of the office.</p>",
+      text: "I am currently out of the office.",
+      headers: {
+        "authentication-results": generateAuthHeader(TESTER_PRIMARY_GOOGLE_ACCT),
+        "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
+        "to": recipient,
+        "subject": "Automatic reply: Automatic reply: Out of office",
+        "date": "Mon, 1 Jul 2025 08:00:00 +0000",
+        "message-id": `<test-auto-reply-${recipient.split("@")[0]}-${Date.now()}@mail.gmail.com>`,
+        "in-reply-to": "<original-message-auto-reply>",
+        "references": "<original-message-auto-reply>",
+      },
+    },
+  );
+}
+const automatedReplyEmail = createAutomatedReplyEmail(DRIVE_EMAIL_ADDRESS);
+const automatedReplyCalendarEmail = createAutomatedReplyEmail(MAIN_EMAIL_ADDRESS);
+
 export {
   ResendTestData,
   AttachmentWithUrl,
@@ -989,7 +1242,13 @@ export {
   emailWithImageAttachment,
   familyEvent,
   workEventVisibl,
+  allDayEvent,
+  driveDeleteAccount,
+  driveSignup,
   driveEmailWithPDF,
   driveEmailNoAttachments,
   driveEmailMultipleAttachments,
+  driveEmailWithArtifacts,
+  automatedReplyEmail,
+  automatedReplyCalendarEmail,
 };

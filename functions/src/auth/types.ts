@@ -72,7 +72,6 @@ export interface UserWithExpiringTokens {
   access_token: string;
   refresh_token: string;
   expiry_date: number;
-  agentName: AgentName;
 }
 
 // Email item for adding to user

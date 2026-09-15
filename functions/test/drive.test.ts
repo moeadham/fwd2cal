@@ -2,6 +2,8 @@
 import chai from "chai";
 import chaiHttp from "chai-http";
 import {exec} from "child_process";
+import * as fs from "fs";
+import * as path from "path";
 import type {Response} from "superagent";
 
 const chaiWithHttp = chai as typeof chai & {
@@ -12,15 +14,19 @@ import {
   ResendTestData,
   AttachmentWithUrl,
   driveEmailWithPDF,
-  deleteAccount,
+  driveDeleteAccount,
+  driveSignup,
+  driveEmailWithArtifacts,
+  automatedReplyEmail,
 } from "./bindings/resendBindings";
+import {extractDocumentImages} from "../src/util/documentParser";
 
 chai.use(chaiHttp);
 const expect = chai.expect;
 const apiURL = "http://127.0.0.1:5002";
-const CALLBACK_ENDPOINT = "/v2/resendInboundCallback";
+const DRIVE_CALLBACK_ENDPOINT = "/drive/v2/inboundCallback";
 const TESTER_PRIMARY_GOOGLE_ACCT = process.env.TESTER_PRIMARY_GOOGLE_ACCT || "";
-const DRIVE_EMAIL_ADDRESS = process.env.DRIVE_EMAIL_ADDRESS || "drive@fwd2cal.com";
+const DRIVE_EMAIL_ADDRESS = process.env.DRIVE_EMAIL_ADDRESS || "drive@fwd2drive.com";
 const DISPATCH_URL = "http://127.0.0.1:5001";
 const DISPATCH_REGION = "us-central1";
 const APP_ID = process.env.GCLOUD_PROJECT || "fwd2cal-dev-2578e";
@@ -83,9 +89,9 @@ async function sendDriveWebhook(testData: ResendTestData, attachmentsList: Attac
     },
   };
 
-  // Step 1: Send to callback endpoint (sets up mock data)
+  // Step 1: Send to drive callback endpoint (sets up mock data)
   const callbackResponse = await chaiWithHttp.request(apiURL)
-    .post(CALLBACK_ENDPOINT)
+    .post(DRIVE_CALLBACK_ENDPOINT)
     .set("Content-Type", "application/json")
     .set("svix-id", "msg_test_" + Date.now())
     .set("svix-timestamp", Math.floor(Date.now() / 1000).toString())
@@ -118,33 +124,47 @@ async function sendDriveProcessUpload(testData: ResendTestData): Promise<DriveDi
   return response as unknown as DriveDispatchResponse;
 }
 
-// Helper: send calendar webhook (for delete account)
-async function sendResendWebhook(testData: ResendTestData): Promise<{body: {data: {result?: string}}; status: number}> {
-  const webhookWithMock: WebhookWithMock = {
-    ...testData.webhook,
-    mockData: {
-      emailContent: testData.emailContent,
-      attachmentsList: [],
-    },
-  };
-  const callbackResponse = await chaiWithHttp.request(apiURL)
-    .post(CALLBACK_ENDPOINT)
-    .set("Content-Type", "application/json")
-    .set("svix-id", "msg_test_" + Date.now())
-    .set("svix-timestamp", Math.floor(Date.now() / 1000).toString())
-    .set("svix-signature", "v1,dummy_signature_for_testing")
-    .send(webhookWithMock);
-  const webhookData = callbackResponse.body.webhookData;
-  const response = await chaiWithHttp
-    .request(`${DISPATCH_URL}/${APP_ID}/${DISPATCH_REGION}`)
-    .post("/v2testResendInboundDispatch")
-    .set("Content-Type", "application/json")
-    .send({data: webhookData});
-  return response as unknown as {body: {data: {result?: string}}; status: number};
-}
-
 // Shared state: upload confirmation HTML is saved in DT03 and used by DT04
 let uploadConfirmationHtml = "";
+// Shared state: move confirmation HTML is saved in DT04 and used by DT04b
+let moveConfirmationHtml = "";
+
+describe("extractDocumentImages", function() {
+  it("DT00 extract page screenshots from a PDF", async function() {
+    const pdfBuffer = fs.readFileSync(path.join(__dirname, "bindings", "conference_registration.pdf"));
+    const images = await extractDocumentImages(pdfBuffer, "pdf");
+
+    expect(images).to.be.an("array").with.length.greaterThan(0);
+    expect(images.length).to.be.at.most(2);
+    for (const dataUrl of images) {
+      expect(dataUrl).to.match(/^data:image\/(png|jpeg);base64,/);
+    }
+    console.log(`Extracted ${images.length} page screenshot(s), first image size: ${images[0].length} chars`);
+  });
+});
+
+describe("Webhook filtering", function() {
+  it("DT00b reject emails with automated reply subjects", async function() {
+    const webhookWithMock = {
+      ...automatedReplyEmail.webhook,
+      mockData: {
+        emailContent: automatedReplyEmail.emailContent,
+        attachmentsList: [] as AttachmentWithUrl[],
+      },
+    };
+
+    const res = await chaiWithHttp.request(apiURL)
+      .post(DRIVE_CALLBACK_ENDPOINT)
+      .set("Content-Type", "application/json")
+      .set("svix-id", "msg_test_" + Date.now())
+      .set("svix-timestamp", Math.floor(Date.now() / 1000).toString())
+      .set("svix-signature", "v1,dummy_signature_for_testing")
+      .send(webhookWithMock);
+
+    expect(res).to.have.status(200);
+    expect(res.body.message).to.equal("Automated reply, skipping");
+  });
+});
 
 describe("fwd2cal Drive Agent", function() {
   it("DT01 propose folder and filename for a single PDF attachment", async function() {
@@ -168,8 +188,8 @@ describe("fwd2cal Drive Agent", function() {
     expect(res.body.sentEmail.html).to.include("organize your file");
 
     // Verify auth signup link is present
-    expect(res.body.sentEmail.html).to.include("Grant Drive Access");
-    expect(res.body.sentEmail.html).to.include("driveSignup");
+    expect(res.body.sentEmail.html).to.include("Sign Up with Google");
+    expect(res.body.sentEmail.html).to.include("/drive/v2/signup");
 
     // Verify threading headers
     expect(res.body.sentEmail.headers).to.be.an("object");
@@ -180,7 +200,7 @@ describe("fwd2cal Drive Agent", function() {
 
   it("DT02 get Drive login URL and wait for tester to authorize Drive scope", function(done) {
     chaiWithHttp.request(apiURL)
-      .get("/v2/driveSignup")
+      .get("/drive/v2/signup")
       .redirects(0)
       .end((err: Error | null, res: Response) => {
         expect(res).to.have.status(302);
@@ -299,9 +319,9 @@ describe("fwd2cal Drive Agent", function() {
       },
     };
 
-    // Step 1: Send to callback endpoint (sets up mock data)
+    // Step 1: Send to drive callback endpoint (sets up mock data)
     const callbackResponse = await chaiWithHttp.request(apiURL)
-      .post(CALLBACK_ENDPOINT)
+      .post(DRIVE_CALLBACK_ENDPOINT)
       .set("Content-Type", "application/json")
       .set("svix-id", "msg_test_" + Date.now())
       .set("svix-timestamp", Math.floor(Date.now() / 1000).toString())
@@ -332,14 +352,147 @@ describe("fwd2cal Drive Agent", function() {
 
     // Verify embedded data still present (for further moves)
     expect(res.body.sentEmail.html).to.include("fwd2drive.com/d?r=");
+
+    // Save the move confirmation HTML for the trash test (DT04b)
+    moveConfirmationHtml = res.body.sentEmail.html;
   });
 
-  it("DT05 delete account", async function() {
-    const testMessage = deleteAccount;
-    const res = await sendResendWebhook(testMessage);
+  it("DT04b reply to trash file instead of moving it", async function() {
+    // Use embedded data from DT04's move confirmation
+    expect(moveConfirmationHtml).to.not.be.empty;
+
+    const gmailSanitizedHtml = moveConfirmationHtml;
+
+    const replyEmailId = "test-drive-reply-trash";
+    const replyMessageId = `<test-drive-reply-trash-${Date.now()}@mail.gmail.com>`;
+    const trashInstructions = "Move to trash";
+    const domain = TESTER_PRIMARY_GOOGLE_ACCT.split("@")[1] || "gmail.com";
+
+    const replyWebhook = {
+      type: "email.received",
+      created_at: new Date().toISOString(),
+      data: {
+        email_id: replyEmailId,
+        message_id: replyMessageId,
+        from: TESTER_PRIMARY_GOOGLE_ACCT,
+        to: [DRIVE_EMAIL_ADDRESS],
+        cc: [] as string[],
+        bcc: [] as string[],
+        subject: "Re: Fwd: Conference Registration",
+        created_at: new Date().toISOString(),
+        attachments: [] as unknown[],
+      },
+    };
+
+    const replyEmailContent = {
+      id: replyEmailId,
+      subject: "Re: Fwd: Conference Registration",
+      from: TESTER_PRIMARY_GOOGLE_ACCT,
+      to: [DRIVE_EMAIL_ADDRESS],
+      html: `<p>${trashInstructions}</p><blockquote>${gmailSanitizedHtml}</blockquote>`,
+      text: trashInstructions,
+      headers: {
+        "authentication-results": `amazonses.com; spf=pass (spfCheck: domain of _spf.${domain} designates 209.85.214.171 as permitted sender) client-ip=209.85.214.171; envelope-from=${TESTER_PRIMARY_GOOGLE_ACCT}; helo=mail.${domain}; dkim=pass header.i=@${domain}; dmarc=pass header.from=${domain};`,
+        "from": `Jon Doe <${TESTER_PRIMARY_GOOGLE_ACCT}>`,
+        "to": DRIVE_EMAIL_ADDRESS,
+        "subject": "Re: Fwd: Conference Registration",
+        "date": new Date().toUTCString(),
+        "message-id": replyMessageId,
+        "in-reply-to": driveEmailWithPDF.emailContent.headers["message-id"],
+        "references": driveEmailWithPDF.emailContent.headers["message-id"],
+      },
+    };
+
+    const webhookWithMock = {
+      ...replyWebhook,
+      mockData: {
+        emailContent: replyEmailContent,
+        attachmentsList: [] as AttachmentWithUrl[],
+      },
+    };
+
+    // Step 1: Send to drive callback endpoint
+    const callbackResponse = await chaiWithHttp.request(apiURL)
+      .post(DRIVE_CALLBACK_ENDPOINT)
+      .set("Content-Type", "application/json")
+      .set("svix-id", "msg_test_" + Date.now())
+      .set("svix-timestamp", Math.floor(Date.now() / 1000).toString())
+      .set("svix-signature", "v1,dummy_signature_for_testing")
+      .send(webhookWithMock);
+    const webhookData = callbackResponse.body.webhookData;
+
+    // Step 2: Dispatch to drive handler
+    const res = await chaiWithHttp
+      .request(`${DISPATCH_URL}/${APP_ID}/${DISPATCH_REGION}`)
+      .post("/v2testDriveInboundDispatch")
+      .set("Content-Type", "application/json")
+      .send({data: webhookData}) as unknown as DriveDispatchResponse;
+
     expect(res).to.have.status(200);
-    console.log(res.body);
+    console.log("DRIVE TRASH RESPONSE:", res.body);
+
     expect(res.body).to.be.an("object");
-    expect(res.body.data.result).to.include("deleted");
+    expect(res.body.data).to.be.an("object");
+
+    // Verify file was trashed (not moved to a folder)
+    expect(res.body.data.filesSucceeded).to.be.greaterThanOrEqual(1);
+
+    // Verify trash confirmation email (not a move confirmation)
+    expect(res.body.sentEmail).to.be.an("object");
+    expect(res.body.sentEmail.html).to.be.a("string");
+    expect(res.body.sentEmail.html).to.include("moved to trash");
+  });
+
+  it("DT05 delete account via drive agent", async function() {
+    const testMessage = driveDeleteAccount;
+    const res = await sendDriveWebhook(testMessage);
+    expect(res).to.have.status(200);
+    console.log("DRIVE DELETE RESPONSE:", res.body);
+    expect(res.body).to.be.an("object");
+    expect(res.body.data).to.be.an("object");
+    expect(res.body.data).to.not.have.property("error");
+
+    // Verify deletion confirmation email was sent
+    expect(res.body.sentEmail).to.be.an("object");
+    expect(res.body.sentEmail.html).to.be.a("string");
+    expect(res.body.sentEmail.html).to.include("account has been deleted");
+  });
+
+  it("DT05b email artifact attachments (.eml, .ics, .vcf, .p7s) are filtered out", async function() {
+    const testMessage = driveEmailWithArtifacts;
+    const res = await sendDriveWebhook(testMessage, testMessage.attachmentsList || []);
+    expect(res).to.have.status(200);
+    console.log("DRIVE ARTIFACTS RESPONSE:", res.body);
+
+    expect(res.body).to.be.an("object");
+    expect(res.body.data).to.be.an("object");
+    expect(res.body.data).to.not.have.property("error");
+
+    // Only the PDF should be processed — .eml, .ics, .vcf, .p7s should all be filtered
+    expect(res.body.data.filesProcessed).to.equal(1);
+  });
+
+  it("DT06 signup via email — unknown user with no attachments gets signup invitation", async function() {
+    const testMessage = driveSignup;
+    const res = await sendDriveWebhook(testMessage);
+    expect(res).to.have.status(200);
+    console.log("DRIVE SIGNUP RESPONSE:", res.body);
+
+    expect(res.body).to.be.an("object");
+    expect(res.body.data).to.be.an("object");
+    expect(res.body.data).to.not.have.property("error");
+
+    // No files processed
+    expect(res.body.data.filesProcessed).to.equal(0);
+
+    // Verify welcome/signup email was sent
+    expect(res.body.sentEmail).to.be.an("object");
+    expect(res.body.sentEmail.html).to.be.a("string");
+    expect(res.body.sentEmail.html).to.include("Welcome to fwd2drive");
+    expect(res.body.sentEmail.html).to.include("Sign Up with Google");
+    expect(res.body.sentEmail.html).to.include("/drive/v2/signup");
+
+    // Verify it does NOT contain the old "no attachments" error
+    expect(res.body.sentEmail.html).to.not.include("didn't have any attachments");
   });
 });

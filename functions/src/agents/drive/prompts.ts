@@ -57,12 +57,14 @@ Determine the new target folder for each file based on the user's instructions.
 
 Rules:
 - Parse the user's natural language instructions to determine the desired destination
-- ONLY use agent-managed folders (NN-CategoryName format). NEVER place files in arbitrary user folders.
-- The folder_id MUST be either "root" (to create a new agent-managed folder) or an exact agent-managed folder ID from the list
-- If the user mentions a category that matches an existing agent-managed folder, use that folder's ID
-- If no agent-managed folder matches, set folder_id to "root" and folder_path to the desired category name (WITHOUT the NN- prefix — the system will add it)
+- If the user wants to DELETE, TRASH, or REMOVE the file(s), set action to "trash". folder_id and folder_path can be empty strings.
+- For move instructions, set action to "move":
+  - ONLY use agent-managed folders (NN-CategoryName format). NEVER place files in arbitrary user folders.
+  - The folder_id MUST be either "root" (to create a new agent-managed folder) or an exact agent-managed folder ID from the list
+  - If the user mentions a category that matches an existing agent-managed folder, use that folder's ID
+  - If no agent-managed folder matches, set folder_id to "root" and folder_path to the desired category name (WITHOUT the NN- prefix — the system will add it)
 - If the user's instructions are ambiguous, make a reasonable best guess
-- ALL files should move to the SAME new location unless the user specifies otherwise`,
+- ALL files should have the SAME action unless the user specifies otherwise`,
   },
 
   proposeOrganization: {
@@ -75,11 +77,11 @@ You will receive:
 3. A batch of files with: ID, name, type, folder path, creation date, and size
 
 ## Folder naming rules:
-- Top-level folders use "NN - CategoryName" format (e.g., "01 - Personal", "02 - Work", "03 - Finance")
+- Top-level folders use "NN-CategoryName" format (e.g., "01-Personal", "02-Work", "03-Finance")
 - Use broad, intuitive categories: Personal, Work, Finance, Medical, Legal, Education, Photos, Projects, Archive
-- Subfolders are allowed ONE level deep (e.g., "02 - Work/Clients", "03 - Finance/Tax Returns")
+- Subfolders are allowed ONE level deep (e.g., "02-Work/Clients", "03-Finance/Tax Returns")
 - REUSE existing proposed folders when possible. Only add new folders if no existing category fits.
-- NEVER create a folder whose category overlaps with an existing proposed folder. For example, if "03 - Invoices" exists, do NOT create "07 - Invoices" or "07 - Bills". Use the exact existing folder name.
+- NEVER create a folder whose category overlaps with an existing proposed folder. For example, if "03-Invoices" exists, do NOT create "07-Invoices" or "07-Bills". Use the exact existing folder name.
 - If adding a new folder, use the next available NN prefix number.
 
 ## Filename rules:

@@ -22,7 +22,8 @@ export const EventSchema = z.object({
   description: z.string().max(1000).nullable().describe("A description of the event if one has been given"),
   conference_call: z.boolean().describe("True or false, if the event is a conference call or virtual"),
   date: z.string().max(20).describe("DD MMMM YYYY - the date of the event"),
-  start_time: z.string().max(5).describe("HH:mm - the start time of the event in 24 hour format"),
+  start_time: z.string().max(5).nullable()
+      .describe("HH:mm - start time in 24h format, or null for all-day events"),
   end_time: z.string().max(5).nullable().describe("HH:mm - the end time of the event in 24 hour format"),
   attendees: z.array(z.string().max(320))
       .describe("A list of attendees email addresses. ONLY INCLUDE VALID EMAIL ADDRESSES, NOT NAMES."),
@@ -272,8 +273,8 @@ export interface GoogleCalendarEvent {
   htmlLink: string;
   summary: string;
   description?: string;
-  start: { dateTime: string; timeZone: string };
-  end: { dateTime: string; timeZone: string };
+  start: { dateTime?: string; timeZone?: string; date?: string };
+  end: { dateTime?: string; timeZone?: string; date?: string };
   attendees?: Array<{ email: string; responseStatus?: string }>;
   organizer?: { email: string; displayName?: string };
   location?: string;
@@ -288,12 +289,14 @@ export interface GoogleCalendarEvent {
 // Time object for calendar events
 export interface TimeObject {
   start: {
-    dateTime: string;
-    timeZone: string;
+    dateTime?: string;
+    timeZone?: string;
+    date?: string;
   };
   end: {
-    dateTime: string;
-    timeZone: string;
+    dateTime?: string;
+    timeZone?: string;
+    date?: string;
   };
 }
 
@@ -310,7 +313,7 @@ export interface ParsedICSEvent {
   description: string | undefined;
   conference_call: string;
   date: string;
-  start_time: string;
+  start_time: string | null;
   end_time: string;
   attendees: string[];
   timezone?: string;
@@ -322,8 +325,8 @@ export interface CalendarEventRequestBody {
   status: string;
   description: string;
   attendees: Array<{ email: string; responseStatus?: string }>;
-  start: { dateTime: string; timeZone: string };
-  end: { dateTime: string; timeZone: string };
+  start: { dateTime?: string; timeZone?: string; date?: string };
+  end: { dateTime?: string; timeZone?: string; date?: string };
   guestsCanInviteOthers: boolean;
   guestsCanModify: boolean;
   guestsCanSeeOtherGuests: boolean;

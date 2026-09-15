@@ -3,21 +3,25 @@ import {logger} from "firebase-functions/v2";
 import {
   getUserFromEmail,
   getUserFromUID,
+  DRIVE_USERS_COLLECTION,
   saveOrganizeProposal,
   getOrganizeProposal,
   updateOrganizeProposalStatus,
 } from "../../util/firestoreHandler";
 import {getOauthClient} from "../../auth/authHandler";
+import {AGENT_NAME} from "./config";
 import {sendEvent} from "../../util/analytics";
+import {getSupportEmail} from "../../util/config";
 import {
-  getSupportEmail,
-  DRIVE_EMAIL_ADDRESS,
+  AGENT_EMAIL_ADDRESS,
   DRIVE_ACTION_SIGNING_KEY,
-  ORGANIZE_DRIVE_COST_PER_FILE,
   ORGANIZE_DRIVE_MAX_FILES,
-  ORGANIZE_DRIVE_MAX_PREVIEW_ROWS,
   ORGANIZE_DRIVE_CHUNK_SIZE,
-} from "../../util/config";
+  ORGANIZE_DRIVE_TEXT_MAX_TOKENS,
+  ORGANIZE_DRIVE_IMAGE_MAX_TOKENS,
+  ORGANIZE_DRIVE_COST_PER_M_INPUT_TOKENS,
+  MAX_DRIVE_UPLOAD_BYTES,
+} from "./config";
 import {
   getSenderFromRawEmail,
   verifyEmail,
@@ -25,8 +29,8 @@ import {
   threadEmailHtml,
 } from "../../util/emailUtils";
 import {sendEmailResend} from "../../util/resend";
-import {TransformedEmail, ResendOutboundAttachment} from "../../util/types";
-import {applyTemplate} from "./driveUtils";
+import {TransformedEmail} from "../../util/types";
+import {applyTemplate, isDriveAuthError, isFileOrganized} from "./driveUtils";
 import {
   DriveFileEntry,
   DriveOrganizeProposal,
@@ -35,6 +39,7 @@ import {
   OrganizeEmbeddedData,
   OrganizeProposalDoc,
   OrganizeSnapshotAction,
+  FileInfo,
 } from "./types";
 import {Auth} from "googleapis";
 import {driveMailTemplates, driveFullScopeSignupUrl, driveOrganizeActionUrl} from "./mailTemplates";
@@ -49,9 +54,14 @@ import {
   getDriveClient,
   findAgentManagedFolders,
   getFolderFileCount,
+  getFolderChildren,
   deleteFolder,
+  readDriveFileContent,
+  findSubfolderByName,
 } from "./driveHelper";
-import {proposeOrganization} from "./llm";
+import {proposeOrganization, proposeFilePlacement} from "./llm";
+import {extractContentSummary, extractDocumentImageUrls} from "./fileProcessor";
+import {getNextFolderPrefix, toTitleCase} from "./driveUtils";
 
 // ============================================================================
 // HELPERS
@@ -75,22 +85,20 @@ async function sendOrganizeEmailResponse(
     sender: string,
     originalEmail: TransformedEmail,
     html: string,
-    attachments?: ResendOutboundAttachment[],
 ): Promise<void> {
   const threadedHtml = threadEmailHtml(originalEmail, html);
   await sendEmailResend({
     to: sender,
-    from: DRIVE_EMAIL_ADDRESS.value(),
+    from: AGENT_EMAIL_ADDRESS.value(),
     subject: originalEmail.subject || "Re: Organize your Drive",
     html: threadedHtml,
     headers: getEmailThreadHeaders(originalEmail.headers),
-    attachments,
   });
 }
 
 /**
  * Check if the user's stored OAuth scope includes full `drive` access
- * (as opposed to just `drive.file` + `drive.metadata`).
+ * (as opposed to just `drive.file`).
  */
 function hasFullDriveScope(tokenScope: string): boolean {
   if (!tokenScope) return false;
@@ -214,12 +222,33 @@ function buildDriveStructureSummary(
 }
 
 /**
- * Calculate the cost of the proposed reorganization.
+ * Check if a MIME type represents an image file.
+ */
+function isImageMimeType(mimeType: string): boolean {
+  return mimeType.startsWith("image/");
+}
+
+/**
+ * Calculate the cost of the proposed reorganization based on file type.
+ * Text documents are costed by max tokens in 2 pages; images by max OCR tokens.
  */
 function calculateOrganizeCost(
     proposal: DriveOrganizeProposal,
+    fileEntries: DriveFileEntry[],
 ): OrganizeCostBreakdown {
-  const costPerFile = parseFloat(ORGANIZE_DRIVE_COST_PER_FILE.value());
+  const textMaxTokens = ORGANIZE_DRIVE_TEXT_MAX_TOKENS.value();
+  const imageMaxTokens = ORGANIZE_DRIVE_IMAGE_MAX_TOKENS.value();
+  const costPerMTokens = parseFloat(ORGANIZE_DRIVE_COST_PER_M_INPUT_TOKENS.value());
+
+  const costPerTextFile = (textMaxTokens * costPerMTokens) / 1_000_000;
+  const costPerImageFile = (imageMaxTokens * costPerMTokens) / 1_000_000;
+
+  // Build file_id → mimeType lookup
+  const mimeMap = new Map<string, string>();
+  for (const entry of fileEntries) {
+    mimeMap.set(entry.id, entry.mimeType);
+  }
+
   const actions = proposal.file_actions;
   const filesToMove = actions.filter(
       (a) => a.action === "move" || a.action === "move_and_rename",
@@ -228,15 +257,32 @@ function calculateOrganizeCost(
       (a) => a.action === "rename" || a.action === "move_and_rename",
   ).length;
   const filesToKeep = actions.filter((a) => a.action === "keep").length;
-  const filesToChange = actions.filter((a) => a.action !== "keep").length;
+  const changedActions = actions.filter((a) => a.action !== "keep");
+
+  let textFiles = 0;
+  let imageFiles = 0;
+  for (const action of changedActions) {
+    const mime = mimeMap.get(action.file_id) || "";
+    if (isImageMimeType(mime)) {
+      imageFiles++;
+    } else {
+      textFiles++;
+    }
+  }
+
+  const totalCost =
+    textFiles * costPerTextFile + imageFiles * costPerImageFile;
 
   return {
     totalFiles: actions.length,
     filesToMove,
     filesToRename,
     filesToKeep,
-    costPerFile,
-    totalCost: filesToChange * costPerFile,
+    textFiles,
+    imageFiles,
+    costPerTextFile,
+    costPerImageFile,
+    totalCost,
   };
 }
 
@@ -264,71 +310,12 @@ function renderFolderTree(proposal: DriveOrganizeProposal): string {
 }
 
 /**
- * Render file changes preview as HTML table.
- */
-function renderFileChangesPreview(
-    proposal: DriveOrganizeProposal,
-): string {
-  const maxPreviewRows = ORGANIZE_DRIVE_MAX_PREVIEW_ROWS.value();
-  const changes = proposal.file_actions.filter((a) => a.action !== "keep");
-  const shown = changes.slice(0, maxPreviewRows);
-
-  let html = "<table style=\"width:100%;border-collapse:collapse;font-size:13px;\">";
-  html += "<tr style=\"border-bottom:1px solid #eee;\">" +
-    "<th style=\"text-align:left;padding:4px 8px;\">Current</th>" +
-    "<th style=\"text-align:left;padding:4px 8px;\">Proposed</th></tr>";
-
-  for (const change of shown) {
-    html += "<tr style=\"border-bottom:1px solid #f5f5f5;\">";
-    html += `<td style="padding:4px 8px;color:#999;">${change.current_path}/${change.current_name}</td>`;
-    html += `<td style="padding:4px 8px;"><b>${change.new_folder}/${change.new_name}</b></td>`;
-    html += "</tr>";
-  }
-
-  html += "</table>";
-
-  if (changes.length > maxPreviewRows) {
-    html += `<br><em>...and ${changes.length - maxPreviewRows} more files</em>`;
-  }
-
-  return html;
-}
-
-/**
- * Escape a value for CSV (double-quote if it contains commas, quotes, or newlines).
- */
-function csvEscape(value: string): string {
-  if (value.includes(",") || value.includes("\"") || value.includes("\n")) {
-    return `"${value.replace(/"/g, "\"\"")}"`;
-  }
-  return value;
-}
-
-/**
- * Generate a CSV string from the full proposal (all file actions).
- */
-function buildProposalCsv(proposal: DriveOrganizeProposal): string {
-  const header = "Action,Current Path,Current Name,New Folder,New Name,Reason";
-  const rows = proposal.file_actions.map((a) =>
-    [
-      csvEscape(a.action),
-      csvEscape(a.current_path),
-      csvEscape(a.current_name),
-      csvEscape(a.new_folder),
-      csvEscape(a.new_name),
-      csvEscape(a.reason),
-    ].join(","),
-  );
-  return header + "\n" + rows.join("\n");
-}
-
-/**
  * Build embedded organize data for proposal tracking.
  */
 function buildOrganizeEmbeddedData(data: OrganizeEmbeddedData): string {
   const json = JSON.stringify(data);
   const encoded = Buffer.from(json).toString("base64url");
-  const link = `<br><a href="https://www.fwd2cal.com/d?o=${encoded}"` +
+  const link = `<br><a href="https://www.fwd2drive.com/d?o=${encoded}"` +
     ` style="color:#999;font-size:11px;">View proposal</a>`;
   return link;
 }
@@ -381,7 +368,7 @@ function seedFoldersFromDrive(
 
     const prefix = String(nextPrefix).padStart(2, "0");
     nextPrefix++;
-    const newName = `${prefix} - ${baseName}`;
+    const newName = `${prefix}-${baseName}`;
 
     seenNames.set(normalizedName, newName);
 
@@ -455,7 +442,7 @@ async function handleOrganizeDrive(
 
   let userData;
   try {
-    userData = await getUserFromUID(uid, "drive");
+    userData = await getUserFromUID(uid, DRIVE_USERS_COLLECTION);
   } catch (err) {
     logger.debug("Drive organize: User lookup failed", {
       uid, error: err instanceof Error ? err.message : String(err),
@@ -486,7 +473,7 @@ async function sendOrganizeAuthRequiredEmail(
 ): Promise<OrganizeProcessingResult> {
   const statePayload = JSON.stringify({emailId, organize: true});
   const encodedState = Buffer.from(statePayload).toString("base64url");
-  const signupLink = `${driveFullScopeSignupUrl}?state=${encodeURIComponent(encodedState)}`;
+  const signupLink = `${driveFullScopeSignupUrl()}?state=${encodeURIComponent(encodedState)}`;
 
   const html = applyTemplate(driveMailTemplates.organizeAuthRequired.html, {
     FULL_SCOPE_SIGNUP_LINK: signupLink,
@@ -507,7 +494,7 @@ async function sendOrganizeScopeUpgradeEmail(
 ): Promise<OrganizeProcessingResult> {
   const statePayload = JSON.stringify({emailId, organize: true});
   const encodedState = Buffer.from(statePayload).toString("base64url");
-  const signupLink = `${driveFullScopeSignupUrl}?state=${encodeURIComponent(encodedState)}`;
+  const signupLink = `${driveFullScopeSignupUrl()}?state=${encodeURIComponent(encodedState)}`;
 
   const html = applyTemplate(driveMailTemplates.organizeAuthRequired.html, {
     FULL_SCOPE_SIGNUP_LINK: signupLink,
@@ -531,10 +518,13 @@ async function scanAndPropose(
 
   let oauth2Client;
   try {
-    oauth2Client = await getOauthClient(uid, "drive");
+    oauth2Client = await getOauthClient(uid, AGENT_NAME);
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     logger.error("Drive organize: OAuth failed", {uid, error: errMsg});
+    if (isDriveAuthError(errMsg)) {
+      return sendOrganizeAuthRequiredEmail(email, sender, emailId);
+    }
     const html = applyTemplate(driveMailTemplates.organizeError.html, {});
     await sendOrganizeEmailResponse(sender, email, html);
     return emptyResult("OAuth failed");
@@ -550,6 +540,9 @@ async function scanAndPropose(
     logger.error("Drive organize: Failed to list files", {
       uid, error: errMsg,
     });
+    if (isDriveAuthError(errMsg)) {
+      return sendOrganizeAuthRequiredEmail(email, sender, emailId);
+    }
     const html = applyTemplate(driveMailTemplates.organizeError.html, {});
     await sendOrganizeEmailResponse(sender, email, html);
     return emptyResult("Drive scan failed");
@@ -576,12 +569,14 @@ async function scanAndPropose(
   }
 
   // Check for drives that are too large
+  const supportEmail = getSupportEmail(AGENT_EMAIL_ADDRESS.value());
   if (nonFolderFiles.length > maxFiles) {
     await sendOrganizeEmailResponse(sender, email,
         `Your Google Drive has over ${maxFiles.toLocaleString()} files. ` +
         `We currently support drives with up to ${maxFiles.toLocaleString()} files. ` +
         `We're working on expanding this limit!<br><br>` +
-        `You can always ask for help: <a href="mailto:${getSupportEmail()}">${getSupportEmail()}</a>`);
+        `You can always ask for help: ` +
+        `<a href="mailto:${supportEmail}">${supportEmail}</a>`);
     return {
       totalFiles: nonFolderFiles.length, filesToMove: 0, filesToRename: 0,
       totalCost: 0, proposalSent: false, error: "Drive too large",
@@ -598,31 +593,65 @@ async function scanAndPropose(
     folderRenames: folderRenameActions.filter((a) => a.action === "rename").length,
   });
 
+  // Deterministic skip: files already matching naming conventions
+  const alreadyOrganized: typeof nonFolderFiles = [];
+  const needsLlm: typeof nonFolderFiles = [];
+  for (const f of nonFolderFiles) {
+    if (isFileOrganized(f.name, f.parentPath)) {
+      alreadyOrganized.push(f);
+    } else {
+      needsLlm.push(f);
+    }
+  }
+  const preSkipActions: DriveOrganizeProposal["file_actions"] = alreadyOrganized
+      .map((f) => ({
+        file_id: f.id,
+        current_name: f.name,
+        current_path: f.parentPath,
+        new_name: f.name,
+        new_folder: f.parentPath,
+        action: "keep" as const,
+        reason: "Already organized",
+      }));
+
   // Call LLM for reorganization proposal (chunked)
   logger.info("Drive organize: Calling LLM", {
     uid, fileCount: nonFolderFiles.length,
+    alreadyOrganized: alreadyOrganized.length,
+    needsLlm: needsLlm.length,
   });
+
   let proposal: DriveOrganizeProposal;
-  try {
-    const chunkSize = ORGANIZE_DRIVE_CHUNK_SIZE.value();
-    proposal = await proposeOrganization(
-        treeSummary, fileEntries, chunkSize, uid, seedFolders,
-    );
-  } catch (error) {
-    const errMsg = error instanceof Error ? error.message : String(error);
-    logger.error("Drive organize: LLM proposal failed", {
-      uid, error: errMsg,
-    });
-    const html = applyTemplate(driveMailTemplates.organizeError.html, {});
-    await sendOrganizeEmailResponse(sender, email, html);
-    return emptyResult("LLM failed", nonFolderFiles.length);
+  if (needsLlm.length === 0) {
+    proposal = {
+      proposed_folders: seedFolders,
+      file_actions: [],
+      summary: "All files are already well-organized.",
+    };
+  } else {
+    try {
+      const chunkSize = ORGANIZE_DRIVE_CHUNK_SIZE.value();
+      const llmFileEntries = [...folderFiles, ...needsLlm];
+      proposal = await proposeOrganization(
+          treeSummary, llmFileEntries, chunkSize, uid, seedFolders,
+      );
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      logger.error("Drive organize: LLM proposal failed", {
+        uid, error: errMsg,
+      });
+      const html = applyTemplate(driveMailTemplates.organizeError.html, {});
+      await sendOrganizeEmailResponse(sender, email, html);
+      return emptyResult("LLM failed", nonFolderFiles.length);
+    }
   }
 
-  // Merge folder rename actions into the proposal
+  // Merge folder rename actions and pre-skip keeps into the proposal
   proposal.file_actions.push(...folderRenameActions);
+  proposal.file_actions.push(...preSkipActions);
 
   // Calculate cost
-  const cost = calculateOrganizeCost(proposal);
+  const cost = calculateOrganizeCost(proposal, nonFolderFiles);
 
   // Save proposal to Firestore
   let proposalId: string;
@@ -655,10 +684,9 @@ async function scanAndPropose(
 
   // Render proposal email
   const folderTreeHtml = renderFolderTree(proposal);
-  const fileChangesHtml = renderFileChangesPreview(proposal);
 
   const approveToken = signActionToken(proposalId, "approve");
-  const approveLink = `${driveOrganizeActionUrl}?proposalId=${proposalId}&action=approve&token=${approveToken}`;
+  const approveLink = `${driveOrganizeActionUrl()}?proposalId=${proposalId}&action=approve&token=${approveToken}`;
 
   const html = applyTemplate(driveMailTemplates.organizeProposal.html, {
     SUMMARY: proposal.summary,
@@ -666,24 +694,18 @@ async function scanAndPropose(
     FILES_TO_CHANGE: String(cost.totalFiles - cost.filesToKeep),
     FILES_TO_KEEP: String(cost.filesToKeep),
     FOLDER_TREE: folderTreeHtml,
-    FILE_CHANGES_PREVIEW: fileChangesHtml,
     TOTAL_COST: `$${cost.totalCost.toFixed(2)}`,
-    COST_PER_FILE: `$${cost.costPerFile.toFixed(2)}`,
+    TEXT_FILES: String(cost.textFiles),
+    TEXT_COST: `$${(cost.textFiles * cost.costPerTextFile).toFixed(2)}`,
+    IMAGE_FILES: String(cost.imageFiles),
+    IMAGE_COST: `$${(cost.imageFiles * cost.costPerImageFile).toFixed(2)}`,
     EMBEDDED_DATA: embeddedHtml,
     APPROVE_LINK: approveLink,
   });
 
-  // Build CSV attachment with the full proposal
-  const csvContent = buildProposalCsv(proposal);
-  const csvAttachment: ResendOutboundAttachment = {
-    content: Buffer.from(csvContent, "utf-8"),
-    filename: "drive-reorganization-proposal.csv",
-    content_type: "text/csv",
-  };
+  await sendOrganizeEmailResponse(sender, email, html);
 
-  await sendOrganizeEmailResponse(sender, email, html, [csvAttachment]);
-
-  sendEvent(uid, "driveOrganizeProposed", {
+  sendEvent(uid, "driveOrganizeProposed", "drive", {
     totalFiles: String(cost.totalFiles),
     filesToChange: String(cost.totalFiles - cost.filesToKeep),
     totalCost: cost.totalCost.toFixed(2),
@@ -766,13 +788,16 @@ async function handleOrganizeApproval(
     return handleOrganizeUndo(email, sender, uid, proposalId, proposalDoc);
   }
 
+  const supportEmail = getSupportEmail(AGENT_EMAIL_ADDRESS.value());
+  const helpLink = `<a href="mailto:${supportEmail}">${supportEmail}</a>`;
+
   if (proposalDoc.status !== "pending" && proposalDoc.status !== "executing") {
     logger.warn("Drive organize: Proposal not pending", {
       proposalId, status: proposalDoc.status,
     });
     const html = `This proposal has already been ${proposalDoc.status}. ` +
       `Send a new &quot;organize my drive&quot; email to create a fresh proposal.` +
-      `<br><br>You can always ask for help: <a href="mailto:${getSupportEmail()}">${getSupportEmail()}</a><br>`;
+      `<br><br>You can always ask for help: ${helpLink}<br>`;
     await sendOrganizeEmailResponse(sender, email, html);
     return emptyResult(`Proposal already ${proposalDoc.status}`);
   }
@@ -782,7 +807,7 @@ async function handleOrganizeApproval(
     logger.warn("Drive organize: Proposal expired", {proposalId});
     const html = `This proposal has expired. ` +
       `Send a new &quot;organize my drive&quot; email to create a fresh proposal.` +
-      `<br><br>You can always ask for help: <a href="mailto:${getSupportEmail()}">${getSupportEmail()}</a><br>`;
+      `<br><br>You can always ask for help: ${helpLink}<br>`;
     await sendOrganizeEmailResponse(sender, email, html);
     return emptyResult("Proposal expired");
   }
@@ -793,11 +818,14 @@ async function handleOrganizeApproval(
   // Get OAuth client
   let oauth2Client;
   try {
-    oauth2Client = await getOauthClient(uid, "drive");
+    oauth2Client = await getOauthClient(uid, AGENT_NAME);
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     logger.error("Drive organize approval: OAuth failed", {uid, error: errMsg});
     await updateOrganizeProposalStatus(proposalId, "pending");
+    if (isDriveAuthError(errMsg)) {
+      return sendOrganizeAuthRequiredEmail(email, sender, proposalDoc.emailId);
+    }
     const html = applyTemplate(driveMailTemplates.organizeError.html, {});
     await sendOrganizeEmailResponse(sender, email, html);
     return emptyResult("OAuth failed");
@@ -807,13 +835,16 @@ async function handleOrganizeApproval(
   const proposal = proposalDoc.proposal;
   let execResult;
   try {
-    execResult = await executeOrganizeProposal(oauth2Client, proposal);
+    execResult = await executeOrganizeProposal(oauth2Client, proposal, uid);
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     logger.error("Drive organize approval: Execution failed", {
       proposalId, error: errMsg,
     });
     await updateOrganizeProposalStatus(proposalId, "pending");
+    if (isDriveAuthError(errMsg)) {
+      return sendOrganizeAuthRequiredEmail(email, sender, proposalDoc.emailId);
+    }
     const html = applyTemplate(driveMailTemplates.organizeError.html, {});
     await sendOrganizeEmailResponse(sender, email, html);
     return emptyResult("Execution failed");
@@ -821,7 +852,7 @@ async function handleOrganizeApproval(
 
   // Integrity check — undo everything if mismatches found
   const mismatches = await verifyOrganizeResults(
-      oauth2Client, proposal, execResult.folderMap,
+      oauth2Client, proposal, execResult.folderMap, execResult.snapshot,
   );
 
   if (mismatches.length > 0) {
@@ -836,10 +867,10 @@ async function handleOrganizeApproval(
     const html = `We ran into some issues while organizing your Drive and ` +
       `have reverted all changes. Your files are back where they were.` +
       `<br><br>Please try again by sending a new &quot;organize my drive&quot; email.` +
-      `<br><br>You can always ask for help: <a href="mailto:${getSupportEmail()}">${getSupportEmail()}</a><br>`;
+      `<br><br>You can always ask for help: ${helpLink}<br>`;
     await sendOrganizeEmailResponse(sender, email, html);
 
-    sendEvent(uid, "driveOrganizeFailed", {
+    sendEvent(uid, "driveOrganizeFailed", "drive", {
       proposalId,
       mismatches: String(mismatches.length),
     });
@@ -863,7 +894,7 @@ async function handleOrganizeApproval(
   const embeddedHtml = buildOrganizeEmbeddedData(embeddedData);
 
   const undoToken = signActionToken(proposalId, "undo");
-  const undoLink = `${driveOrganizeActionUrl}?proposalId=${proposalId}&action=undo&token=${undoToken}`;
+  const undoLink = `${driveOrganizeActionUrl()}?proposalId=${proposalId}&action=undo&token=${undoToken}`;
 
   const html = applyTemplate(driveMailTemplates.organizeComplete.html, {
     SUMMARY: proposal.summary,
@@ -874,7 +905,7 @@ async function handleOrganizeApproval(
   });
   await sendOrganizeEmailResponse(sender, email, html);
 
-  sendEvent(uid, "driveOrganizeCompleted", {
+  sendEvent(uid, "driveOrganizeCompleted", "drive", {
     filesChanged: String(filesChanged),
     failed: String(execResult.stats.failed),
   });
@@ -906,6 +937,7 @@ async function handleOrganizeApproval(
 async function executeOrganizeProposal(
     oauth2Client: Auth.OAuth2Client,
     proposal: DriveOrganizeProposal,
+    uid: string | null = null,
 ): Promise<{
   folderMap: Map<string, string>;
   snapshot: OrganizeSnapshotAction[];
@@ -990,18 +1022,22 @@ async function executeOrganizeProposal(
       .filter((a) => a.action !== "keep")
       .map((a) => a.file_id);
 
-  const fileParents = new Map<string, string>(); // file_id → current parent_id
+  // file_id → {parentId, mimeType, size}
+  const fileMeta = new Map<string, {parentId: string; mimeType: string; size: number}>();
   for (let i = 0; i < fileIds.length; i += 100) {
     const batch = fileIds.slice(i, i + 100);
     const fetches = batch.map(async (fileId) => {
       try {
         const resp = await drive.files.get({
-          fileId, fields: "id, parents",
+          fileId, fields: "id, parents, mimeType, size",
         });
-        const parentId = resp.data.parents?.[0];
-        if (parentId) fileParents.set(fileId, parentId);
+        fileMeta.set(fileId, {
+          parentId: resp.data.parents?.[0] || "",
+          mimeType: resp.data.mimeType || "",
+          size: parseInt(resp.data.size || "0", 10),
+        });
       } catch {
-        logger.warn("Drive organize: Could not fetch file parent", {fileId});
+        logger.warn("Drive organize: Could not fetch file metadata", {fileId});
       }
     });
     await Promise.all(fetches);
@@ -1013,14 +1049,15 @@ async function executeOrganizeProposal(
       continue;
     }
 
-    const currentParentId = fileParents.get(action.file_id);
-    if (!currentParentId) {
-      logger.warn("Drive organize: No parent found for file, skipping", {
+    const meta = fileMeta.get(action.file_id);
+    if (!meta) {
+      logger.warn("Drive organize: No metadata found for file, skipping", {
         fileId: action.file_id, name: action.current_name,
       });
       stats.failed++;
       continue;
     }
+    const currentParentId = meta.parentId;
 
     // Record snapshot entry for undo
     const snapshotEntry: OrganizeSnapshotAction = {
@@ -1032,7 +1069,41 @@ async function executeOrganizeProposal(
 
     try {
       if (action.action === "move" || action.action === "move_and_rename") {
-        const targetFolderId = folderMap.get(action.new_folder);
+        let targetFolderId = folderMap.get(action.new_folder);
+
+        // If the full path isn't in the map, resolve by walking/creating
+        // subdirectories (e.g. "02-Mld/Invoices/2026")
+        if (!targetFolderId && action.new_folder.includes("/")) {
+          const segments = action.new_folder.split("/");
+          // First segment should already be in folderMap (root agent folder)
+          let parentId = folderMap.get(segments[0]);
+          if (parentId) {
+            let resolvedPath = segments[0];
+            for (let si = 1; si < segments.length; si++) {
+              const subName = toTitleCase(segments[si]);
+              const cachedId = folderMap.get(`${resolvedPath}/${subName}`);
+              if (cachedId) {
+                parentId = cachedId;
+                resolvedPath = `${resolvedPath}/${subName}`;
+                continue;
+              }
+              const existingId = await findSubfolderByName(
+                  oauth2Client, parentId, subName,
+              );
+              if (existingId) {
+                parentId = existingId;
+              } else {
+                parentId = await createFolder(oauth2Client, subName, parentId);
+              }
+              resolvedPath = `${resolvedPath}/${subName}`;
+              folderMap.set(resolvedPath, parentId);
+            }
+            targetFolderId = parentId;
+            folderMap.set(action.new_folder, targetFolderId);
+            await placeMarkerFile(oauth2Client, folderMap.get(segments[0])!);
+          }
+        }
+
         if (!targetFolderId) {
           logger.warn("Drive organize: Target folder not found", {
             folder: action.new_folder, fileId: action.file_id,
@@ -1054,10 +1125,70 @@ async function executeOrganizeProposal(
           proposal.proposed_folders.some((f) => f.folder_name === action.new_name);
         if (isFolder) {
           await renameFolder(oauth2Client, action.file_id, action.new_name);
+          snapshotEntry.newName = action.new_name;
         } else {
-          await renameFile(oauth2Client, action.file_id, action.new_name);
+          // Content-aware naming: read file, extract content, get LLM-suggested name
+          // Skip files exceeding the upload size limit (same as file proposal flow)
+          let finalName = action.new_name;
+          try {
+            let fileContent = meta.size <= MAX_DRIVE_UPLOAD_BYTES.value() ?
+              await readDriveFileContent(oauth2Client, action.file_id, meta.mimeType) :
+              null;
+            if (fileContent) {
+              const contentSummary = await extractContentSummary(
+                  fileContent.buffer, fileContent.parserMimeType,
+              );
+              // Mirror file-proposal image extraction (buildFileInfos + collectImageUrls)
+              // 1. Document page images (same as buildFileInfos → extractDocumentImageUrls)
+              const docImageUrls = await extractDocumentImageUrls(
+                  fileContent.buffer, fileContent.parserMimeType,
+              );
+              // 2. Image files directly as base64 (equivalent to collectImageUrls, but
+              //    we already have the buffer instead of a download URL)
+              const imageExtensions = [".png", ".jpg", ".jpeg", ".webp"];
+              const isImage = imageExtensions.some((ext) =>
+                action.current_name.toLowerCase().endsWith(ext));
+              const directImageUrls: string[] = [];
+              if (isImage && fileContent.buffer.length <= 50 * 1024 * 1024) {
+                const base64 = fileContent.buffer.toString("base64");
+                directImageUrls.push(`data:${meta.mimeType};base64,${base64}`);
+              }
+              const imageUrls = [...docImageUrls, ...directImageUrls];
+              // Release buffer before LLM call to avoid holding both buffer + base64 in memory
+              fileContent = null;
+
+              // Proceed if we have text content OR image data for the LLM
+              if (contentSummary || imageUrls.length > 0) {
+                const fileInfo: FileInfo = {
+                  fileName: action.current_name,
+                  mimeType: meta.mimeType,
+                  fileSize: meta.size,
+                  contentSummary,
+                };
+                const agentFolderNames = [...folderMap.keys()];
+                const nextPrefix = getNextFolderPrefix(agentFolderNames);
+                const placement = await proposeFilePlacement(
+                    [fileInfo], "", "", agentFolderNames, nextPrefix, uid, imageUrls,
+                );
+                if (placement.proposals[0]?.suggested_name) {
+                  finalName = placement.proposals[0].suggested_name;
+                  logger.info("Drive organize: Content-aware rename", {
+                    fileId: action.file_id,
+                    metadataName: action.new_name,
+                    contentName: finalName,
+                  });
+                }
+              }
+            }
+          } catch (contentErr) {
+            const msg = contentErr instanceof Error ? contentErr.message : String(contentErr);
+            logger.warn("Drive organize: Content-aware naming failed, using metadata name", {
+              fileId: action.file_id, error: msg,
+            });
+          }
+          await renameFile(oauth2Client, action.file_id, finalName);
+          snapshotEntry.newName = finalName;
         }
-        snapshotEntry.newName = action.new_name;
         stats.renamed++;
       }
 
@@ -1102,54 +1233,57 @@ async function findSubfolder(
  */
 async function verifyOrganizeResults(
     oauth2Client: Auth.OAuth2Client,
-    proposal: DriveOrganizeProposal,
-    folderMap: Map<string, string>,
+    _proposal: DriveOrganizeProposal,
+    _folderMap: Map<string, string>,
+    snapshot: OrganizeSnapshotAction[],
 ): Promise<Array<{fileId: string; expected: string; actual: string}>> {
   const drive = getDriveClient(oauth2Client);
   const mismatches: Array<{fileId: string; expected: string; actual: string}> = [];
 
-  const actionsToVerify = proposal.file_actions.filter(
-      (a) => a.action !== "keep",
-  );
+  // Only verify actions that actually succeeded (present in snapshot).
+  // Failed actions are already counted in stats.failed and should not trigger
+  // a full rollback of successful actions.
+  const actionsToVerify = snapshot.filter((s) => s.newParentId || s.newName);
 
   // Verify in batches of 50
   for (let i = 0; i < actionsToVerify.length; i += 50) {
     const batch = actionsToVerify.slice(i, i + 50);
-    const checks = batch.map(async (action) => {
+    const checks = batch.map(async (entry) => {
       try {
         const resp = await drive.files.get({
-          fileId: action.file_id,
+          fileId: entry.fileId,
           fields: "id, name, parents",
         });
 
         const actualName = resp.data.name || "";
         const actualParentId = resp.data.parents?.[0] || "";
 
-        // Check name
-        if (action.action === "rename" || action.action === "move_and_rename") {
-          if (actualName !== action.new_name) {
+        // Check name — compare base names without extension because
+        // Google Drive auto-corrects extensions on Workspace files
+        // (e.g. renaming a Google Doc to .doc will become .docx)
+        if (entry.newName && actualName !== entry.newName) {
+          const expectedBase = entry.newName.replace(/\.[^.]+$/, "");
+          const actualBase = actualName.replace(/\.[^.]+$/, "");
+          if (expectedBase !== actualBase) {
             mismatches.push({
-              fileId: action.file_id,
-              expected: `name="${action.new_name}"`,
+              fileId: entry.fileId,
+              expected: `name="${entry.newName}"`,
               actual: `name="${actualName}"`,
             });
           }
         }
 
         // Check parent
-        if (action.action === "move" || action.action === "move_and_rename") {
-          const expectedParentId = folderMap.get(action.new_folder);
-          if (expectedParentId && actualParentId !== expectedParentId) {
-            mismatches.push({
-              fileId: action.file_id,
-              expected: `parent="${action.new_folder}"`,
-              actual: `parent="${actualParentId}"`,
-            });
-          }
+        if (entry.newParentId && actualParentId !== entry.newParentId) {
+          mismatches.push({
+            fileId: entry.fileId,
+            expected: `parent="${entry.newParentId}"`,
+            actual: `parent="${actualParentId}"`,
+          });
         }
       } catch {
         mismatches.push({
-          fileId: action.file_id,
+          fileId: entry.fileId,
           expected: "accessible",
           actual: "not found or inaccessible",
         });
@@ -1177,10 +1311,13 @@ async function handleOrganizeUndo(
 ): Promise<OrganizeProcessingResult> {
   const snapshot = proposalDoc.snapshot;
 
+  const supportEmail = getSupportEmail(AGENT_EMAIL_ADDRESS.value());
+  const helpLink = `<a href="mailto:${supportEmail}">${supportEmail}</a>`;
+
   if (!snapshot || snapshot.length === 0) {
     logger.warn("Drive organize undo: No snapshot found", {proposalId});
     const html = `Unable to undo &mdash; no snapshot was saved for this proposal.` +
-      `<br><br>You can always ask for help: <a href="mailto:${getSupportEmail()}">${getSupportEmail()}</a><br>`;
+      `<br><br>You can always ask for help: ${helpLink}<br>`;
     await sendOrganizeEmailResponse(sender, email, html);
     return emptyResult("No snapshot");
   }
@@ -1191,7 +1328,7 @@ async function handleOrganizeUndo(
     const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
     if (new Date().getTime() - new Date(completedAt).getTime() > thirtyDaysMs) {
       const html = `The 30-day undo window has expired for this proposal.` +
-        `<br><br>You can always ask for help: <a href="mailto:${getSupportEmail()}">${getSupportEmail()}</a><br>`;
+        `<br><br>You can always ask for help: ${helpLink}<br>`;
       await sendOrganizeEmailResponse(sender, email, html);
       return emptyResult("Undo window expired");
     }
@@ -1199,10 +1336,13 @@ async function handleOrganizeUndo(
 
   let oauth2Client;
   try {
-    oauth2Client = await getOauthClient(uid, "drive");
+    oauth2Client = await getOauthClient(uid, AGENT_NAME);
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     logger.error("Drive organize undo: OAuth failed", {uid, error: errMsg});
+    if (isDriveAuthError(errMsg)) {
+      return sendOrganizeAuthRequiredEmail(email, sender, proposalDoc.emailId);
+    }
     const html = applyTemplate(driveMailTemplates.organizeError.html, {});
     await sendOrganizeEmailResponse(sender, email, html);
     return emptyResult("OAuth failed");
@@ -1215,7 +1355,7 @@ async function handleOrganizeUndo(
   const html = applyTemplate(driveMailTemplates.organizeUndone.html, {});
   await sendOrganizeEmailResponse(sender, email, html);
 
-  sendEvent(uid, "driveOrganizeUndone", {
+  sendEvent(uid, "driveOrganizeUndone", "drive", {
     proposalId,
     filesReverted: String(snapshot.length),
   });
@@ -1233,12 +1373,34 @@ async function handleOrganizeUndo(
 async function cleanupEmptyManagedFolders(
     oauth2Client: Auth.OAuth2Client,
 ): Promise<void> {
+  const FOLDER_MIME = "application/vnd.google-apps.folder";
   try {
     const managedFolders = await findAgentManagedFolders(oauth2Client);
     let deleted = 0;
     for (const folder of managedFolders) {
-      const fileCount = await getFolderFileCount(oauth2Client, folder.id);
-      if (fileCount === 0) {
+      const children = await getFolderChildren(oauth2Client, folder.id);
+      if (children.length === 0) {
+        await deleteFolder(oauth2Client, folder.id);
+        deleted++;
+        continue;
+      }
+
+      // Check if all children are empty folders — if so, delete them all
+      const allEmptyFolders = children.every((c) => c.mimeType === FOLDER_MIME);
+      if (!allEmptyFolders) continue;
+
+      let allEmpty = true;
+      for (const child of children) {
+        const count = await getFolderFileCount(oauth2Client, child.id);
+        if (count > 0) {
+          allEmpty = false;
+          break;
+        }
+      }
+      if (allEmpty) {
+        for (const child of children) {
+          await deleteFolder(oauth2Client, child.id);
+        }
         await deleteFolder(oauth2Client, folder.id);
         deleted++;
       }
@@ -1272,7 +1434,8 @@ async function undoOrganizeActions(
       }
 
       // Undo move (restore original parent)
-      if (entry.newParentId && entry.newParentId !== entry.originalParentId) {
+      if (entry.newParentId && entry.originalParentId &&
+          entry.newParentId !== entry.originalParentId) {
         await moveFile(
             oauth2Client, entry.fileId,
             entry.originalParentId, entry.newParentId,

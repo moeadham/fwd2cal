@@ -1,27 +1,35 @@
 import {logger} from "firebase-functions/v2";
 import {getFirestore} from "firebase-admin/firestore";
+import {getStorage} from "firebase-admin/storage";
 import {ENVIRONMENT_NAME} from "./config";
 import {v4 as uuidv4} from "uuid";
 import {sendEvent} from "./analytics";
 import {
-  AgentName,
   UserDocument,
   OAuthTokens,
   FirebaseUserRecord,
   PendingEmailAddressDocument,
   UserWithExpiringTokens,
   EmailItem,
+  AgentName,
 } from "../auth/types";
 
-function getAgentCollection(agentName: AgentName): string {
-  return agentName === "drive" ? "DriveUsers" : "Users";
+const USERS_COLLECTION = "Users";
+const DRIVE_USERS_COLLECTION = "DriveUsers";
+
+const AGENT_COLLECTIONS: Record<AgentName, string> = {
+  calendar: USERS_COLLECTION,
+  drive: DRIVE_USERS_COLLECTION,
+};
+
+function getCollectionForAgent(agentName: AgentName): string {
+  return AGENT_COLLECTIONS[agentName];
 }
 
 async function getUserFromUID(
     uid: string,
-    agentName: AgentName,
+    collection: string,
 ): Promise<UserDocument> {
-  const collection = getAgentCollection(agentName);
   const userDoc = await getFirestore().collection(collection).doc(uid).get();
   if (!userDoc.exists) {
     throw new Error("User document does not exist");
@@ -39,33 +47,27 @@ async function getUserFromEmail(email: string): Promise<string | null> {
 }
 
 async function findUsersWithExpiringTokens(
-    filterAgent?: AgentName,
+    collection: string,
 ): Promise<UserWithExpiringTokens[]> {
   const now = new Date();
   const twoHoursLater = new Date(now.getTime() + 2 * 60 * 60 * 1000);
   const users: UserWithExpiringTokens[] = [];
 
-  const agents: AgentName[] = filterAgent ?
-    [filterAgent] :
-    ["calendar", "drive"];
-  for (const agentName of agents) {
-    const collection = getAgentCollection(agentName);
-    const usersRef = getFirestore().collection(collection);
-    let querySnapshot;
-    if (ENVIRONMENT_NAME.value() === "production") {
-      querySnapshot = await usersRef
-          .where("expiry_date", "<=", twoHoursLater)
-          .get();
-    } else {
-      querySnapshot = await usersRef.get(); // For Local testing.
-    }
-    querySnapshot.forEach((doc) => {
-      console.log(`User ${doc.id} (${agentName}) has a token expiring soon.`);
-      users.push({
-        id: doc.id, ...doc.data(), agentName,
-      } as UserWithExpiringTokens);
-    });
+  const usersRef = getFirestore().collection(collection);
+  let querySnapshot;
+  if (ENVIRONMENT_NAME.value() === "production") {
+    querySnapshot = await usersRef
+        .where("expiry_date", "<=", twoHoursLater)
+        .get();
+  } else {
+    querySnapshot = await usersRef.get(); // For Local testing.
   }
+  querySnapshot.forEach((doc) => {
+    console.log(`User ${doc.id} has a token expiring soon.`);
+    users.push({
+      id: doc.id, ...doc.data(),
+    } as UserWithExpiringTokens);
+  });
 
   if (users.length === 0) {
     console.log("No users with tokens expiring in the next hour found.");
@@ -76,10 +78,9 @@ async function findUsersWithExpiringTokens(
 async function storeUser(
     tokens: OAuthTokens,
     user: FirebaseUserRecord,
-    agentName: AgentName,
+    collection: string,
 ): Promise<void> {
   try {
-    const collection = getAgentCollection(agentName);
     await getFirestore().collection(collection).doc(user.uid).set({
       email: user.email,
       access_token: tokens.access_token,
@@ -89,7 +90,7 @@ async function storeUser(
     });
   } catch (error) {
     logger.error(`Database error in storeUser for uid ${user.uid}:`, error);
-    sendEvent(user.uid, "databaseError", {operation: "storeUser"});
+    sendEvent(user.uid, "databaseError", "system", {operation: "storeUser"});
     throw error;
   }
 }
@@ -97,10 +98,9 @@ async function storeUser(
 async function updateUserTokens(
     tokens: OAuthTokens,
     uid: string,
-    agentName: AgentName,
+    collection: string,
 ): Promise<void> {
   try {
-    const collection = getAgentCollection(agentName);
     await getFirestore().collection(collection).doc(uid).update({
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,
@@ -108,7 +108,7 @@ async function updateUserTokens(
     });
   } catch (error) {
     logger.error(`Database error in updateUserTokens for uid ${uid}:`, error);
-    sendEvent(uid, "databaseError", {operation: "updateUserTokens"});
+    sendEvent(uid, "databaseError", "system", {operation: "updateUserTokens"});
     throw error;
   }
 }
@@ -130,7 +130,7 @@ async function addUserEmailAddress(
         `Database error in addUserEmailAddress for uid ${user.uid}:`,
         error,
     );
-    sendEvent(user.uid, "databaseError", {operation: "addUserEmailAddress"});
+    sendEvent(user.uid, "databaseError", "system", {operation: "addUserEmailAddress"});
     throw error;
   }
 }
@@ -151,7 +151,7 @@ async function removeEmailAddress(email: string): Promise<void> {
     // Try to get uid for analytics, but don't fail if we can't
     const uid = await getUserFromEmail(email).catch((): null => null);
     if (uid) {
-      sendEvent(uid, "databaseError", {operation: "removeEmailAddress"});
+      sendEvent(uid, "databaseError", "system", {operation: "removeEmailAddress"});
     }
     throw error;
   }
@@ -178,7 +178,7 @@ async function addPendingEmailAddress(
         `Database error in addPendingEmailAddress for uid ${uid}:`,
         error,
     );
-    sendEvent(uid, "databaseError", {operation: "addPendingEmailAddress"});
+    sendEvent(uid, "databaseError", "system", {operation: "addPendingEmailAddress"});
     throw error;
   }
 }
@@ -200,7 +200,7 @@ async function getPendingEmailAddressByCode(
   } as PendingEmailAddressDocument;
 }
 
-async function deleteUser(uid: string, agentName: AgentName): Promise<void> {
+async function deleteUser(uid: string): Promise<void> {
   // Delete all email addresses associated to the uid.
   const batch = getFirestore().batch();
   const emailSnapshot = await getFirestore()
@@ -220,23 +220,34 @@ async function deleteUser(uid: string, agentName: AgentName): Promise<void> {
   });
 
   await batch.commit();
-  // Delete the agent-specific user document.
-  const collection = getAgentCollection(agentName);
-  await getFirestore().collection(collection).doc(uid).delete();
-  // You still need to delete the user from firebase.
+  // Delete the user document from both agent collections.
+  await getFirestore().collection(USERS_COLLECTION).doc(uid).delete();
+  await getFirestore().collection(DRIVE_USERS_COLLECTION).doc(uid).delete();
 }
 
 // ============================================================================
-// ORGANIZE PROPOSAL PERSISTENCE
+// ORGANIZE PROPOSAL PERSISTENCE (bulk data in GCS)
 // ============================================================================
+
+const getProposalPath = (id: string) => `organize-proposals/${id}.json`;
 
 async function saveOrganizeProposal(
     data: Record<string, unknown>,
 ): Promise<string> {
   try {
-    const docRef = await getFirestore()
-        .collection("OrganizeProposals")
-        .add(data);
+    const {proposal, cost, ...metadata} = data;
+    const docRef = getFirestore().collection("OrganizeProposals").doc();
+    const storagePath = getProposalPath(docRef.id);
+
+    // Upload bulk data to GCS
+    const bucket = getStorage().bucket();
+    const file = bucket.file(storagePath);
+    await file.save(JSON.stringify({proposal, cost}), {
+      contentType: "application/json",
+    });
+
+    // Save lightweight metadata to Firestore
+    await docRef.set({...metadata, storagePath});
     logger.info("Saved organize proposal", {proposalId: docRef.id});
     return docRef.id;
   } catch (error) {
@@ -254,7 +265,14 @@ async function getOrganizeProposal(
         .doc(proposalId)
         .get();
     if (!doc.exists) return null;
-    return {id: doc.id, ...doc.data()} as Record<string, unknown>;
+    const data = doc.data()!;
+
+    // Fetch bulk data from GCS
+    const bucket = getStorage().bucket();
+    const [contents] = await bucket.file(data.storagePath as string).download();
+    const bulkData = JSON.parse(contents.toString());
+
+    return {id: doc.id, ...data, ...bulkData} as Record<string, unknown>;
   } catch (error) {
     logger.error("Database error in getOrganizeProposal:", error);
     throw error;
@@ -267,10 +285,30 @@ async function updateOrganizeProposalStatus(
     extra?: Record<string, unknown>,
 ): Promise<void> {
   try {
+    const firestoreExtra = extra ? {...extra} : undefined;
+
+    // If snapshot provided, append to GCS object instead of Firestore
+    if (firestoreExtra?.snapshot) {
+      const doc = await getFirestore()
+          .collection("OrganizeProposals")
+          .doc(proposalId)
+          .get();
+      const storagePath = doc.data()?.storagePath as string;
+      const bucket = getStorage().bucket();
+      const file = bucket.file(storagePath);
+      const [contents] = await file.download();
+      const bulkData = JSON.parse(contents.toString());
+      bulkData.snapshot = firestoreExtra.snapshot;
+      await file.save(JSON.stringify(bulkData), {
+        contentType: "application/json",
+      });
+      delete firestoreExtra.snapshot;
+    }
+
     await getFirestore()
         .collection("OrganizeProposals")
         .doc(proposalId)
-        .update({status, ...extra});
+        .update({status, ...firestoreExtra});
   } catch (error) {
     logger.error("Database error in updateOrganizeProposalStatus:", error);
     throw error;
@@ -343,6 +381,9 @@ async function cleanupExpiredDriveFileData(): Promise<number> {
 }
 
 export {
+  USERS_COLLECTION,
+  DRIVE_USERS_COLLECTION,
+  getCollectionForAgent,
   getUserFromUID,
   getUserFromEmail,
   findUsersWithExpiringTokens,

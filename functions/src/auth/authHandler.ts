@@ -5,9 +5,11 @@ import {
   addUserEmailAddress,
   updateUserTokens,
   getPendingEmailAddressByCode,
+  getCollectionForAgent,
 } from "../util/firestoreHandler";
 import {google, Auth} from "googleapis";
 import {getAgentCredentials, getRedirectUriIndex} from "./credentials";
+import {AgentName} from "./types";
 import {
   ENVIRONMENT_NAME,
   RESEND_REGISTERED_USERS_SEGMENT_ID,
@@ -17,7 +19,7 @@ import {logger} from "firebase-functions/v2";
 import {isUUID} from "validator";
 import {sendEvent} from "../util/analytics";
 import {addContactToResend, addContactToSegment} from "../util/resend";
-import {OAuthTokens, FirebaseUserRecord, AgentName, SignupCallbackResult} from "./types";
+import {OAuthTokens, FirebaseUserRecord, SignupCallbackResult} from "./types";
 import {RequestWithQuery} from "../util/types";
 import {Response} from "express";
 
@@ -26,10 +28,11 @@ async function refreshOAuthTokens(
     agentName: AgentName,
 ): Promise<void> {
   const oauth2Client = await getOauthClient(uid, agentName);
+  const collection = getCollectionForAgent(agentName);
   let tokens: OAuthTokens;
   try {
     tokens = await refreshAccessToken(oauth2Client);
-    await updateUserTokens(tokens, uid, agentName);
+    await updateUserTokens(tokens, uid, collection);
     logger.log(`uid ${uid} access token refreshed to ${tokens.expiry_date}`);
   } catch (error) {
     logger.warn("Failed to refresh access token:", uid, error);
@@ -57,7 +60,8 @@ async function getOauthClient(
     agentName: AgentName,
 ): Promise<Auth.OAuth2Client> {
   const credentials = getAgentCredentials(agentName);
-  const userData = await getUserFromUID(uid, agentName);
+  const collection = getCollectionForAgent(agentName);
+  const userData = await getUserFromUID(uid, collection);
   const redirectUriIndex = getRedirectUriIndex(ENVIRONMENT_NAME.value());
   const oauth2Client = new google.auth.OAuth2(
       credentials.web.client_id,
@@ -71,19 +75,20 @@ async function getOauthClient(
   return oauth2Client;
 }
 
-async function oauthCronJob(agentName?: AgentName): Promise<void> {
+async function oauthCronJob(agentName: AgentName): Promise<void> {
+  const collection = getCollectionForAgent(agentName);
   try {
-    const users = await findUsersWithExpiringTokens(agentName);
+    const users = await findUsersWithExpiringTokens(collection);
     logger.log(
         "Refreshing tokens for Users with expiring tokens ",
         users.length,
     );
     for (const user of users) {
       try {
-        await refreshOAuthTokens(user.id, user.agentName);
+        await refreshOAuthTokens(user.id, agentName);
       } catch (error) {
         logger.warn(`Failed to refresh tokens for user ${user.id}:`, error);
-        sendEvent(user.id, "tokenRefreshFailed");
+        sendEvent(user.id, "tokenRefreshFailed", agentName);
       }
     }
   } catch (error) {
@@ -170,11 +175,12 @@ async function signupCallbackHandler(
       }
     }
 
-    await storeUser(tokens as OAuthTokens, userRecord, agentName);
+    const collection = getCollectionForAgent(agentName);
+    await storeUser(tokens as OAuthTokens, userRecord, collection);
     await addUserEmailAddress(userRecord, [{email: userEmail, default: true}]);
 
-    sendEvent(userRecord.uid, "sign_up");
-    sendEvent(userEmail, "signupConversion");
+    sendEvent(userRecord.uid, "sign_up", agentName);
+    sendEvent(userEmail, "signupConversion", agentName);
 
     // Add user to Resend contacts and registered users (fire-and-forget)
     addContactToResend(userEmail);
@@ -216,7 +222,7 @@ async function verifyAdditionalEmail(
       ],
   );
   logger.log(`added ${pendingEmail.id} to user account ${pendingEmail.ownerUid}`);
-  sendEvent(pendingEmail.ownerUid, "addUserConfirmed");
+  sendEvent(pendingEmail.ownerUid, "addUserConfirmed", "system");
   return res.send({data: pendingEmail.ownerEmail});
 }
 

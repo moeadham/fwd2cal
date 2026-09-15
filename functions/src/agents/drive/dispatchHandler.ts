@@ -8,6 +8,7 @@ import {processUpload} from "./uploadHandler";
 import {handleOrganizeDrive, handleOrganizeApproval, signActionToken} from "./organizeHandler";
 import {driveSignupUrl} from "./mailTemplates";
 import {ENVIRONMENT_NAME, RESEND_API_KEY} from "../../util/config";
+import {sendEvent} from "../../util/analytics";
 import {
   TaskRequest,
   DispatchResult,
@@ -18,6 +19,7 @@ import {getLastSentEmail, getMockResendClient, setMockData} from "../../util/res
 import {
   getUserFromEmail,
   getUserFromUID,
+  DRIVE_USERS_COLLECTION,
   getOrganizeProposal,
   updateOrganizeProposalStatus,
 } from "../../util/firestoreHandler";
@@ -171,6 +173,9 @@ export async function handleDriveInboundDispatch(
 }
 
 export async function dispatchPostAuthTask(data: PostAuthTaskData): Promise<void> {
+  if (!data.organize) {
+    sendEvent(data.uid, "driveFileConfirmed", "drive");
+  }
   const isLocal = ENVIRONMENT_NAME.value() === "local" ||
     ENVIRONMENT_NAME.value() === "test";
   if (isLocal) {
@@ -259,11 +264,12 @@ export async function handleDriveConfirm(
   const uid = await getUserFromEmail(sender);
   if (uid) {
     try {
-      const userData = await getUserFromUID(uid, "drive");
+      const userData = await getUserFromUID(uid, DRIVE_USERS_COLLECTION);
       if (userData.access_token) {
         // User has OAuth — process upload directly
+        sendEvent(uid, "driveFileConfirmed", "drive");
         await processUpload(emailId, uid, resend, transformedEmail);
-        res.redirect(302, "https://www.fwd2cal.com/drive-upload-success");
+        res.redirect(302, "https://www.fwd2drive.com/upload-success");
         return;
       }
     } catch (err) {
@@ -276,7 +282,7 @@ export async function handleDriveConfirm(
 
   // No OAuth — redirect to signup with emailId as state
   const encodedState = Buffer.from(JSON.stringify({emailId})).toString("base64url");
-  res.redirect(302, `${driveSignupUrl}?state=${encodeURIComponent(encodedState)}`);
+  res.redirect(302, `${driveSignupUrl()}?state=${encodeURIComponent(encodedState)}`);
 }
 
 export async function handleOrganizeAction(

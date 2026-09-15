@@ -5,7 +5,7 @@ import {ReadableStream as WebReadableStream} from "stream/web";
 import {DriveAttachment} from "./types";
 import {ResendClient} from "../../util/types";
 import {AttachmentInfo} from "../../util/types";
-import {DOCUMENT_MIME_TYPES, parseDocument} from "../../util/documentParser";
+import {DOCUMENT_MIME_TYPES, parseDocument, extractDocumentImages} from "../../util/documentParser";
 import {
   MAX_CHARS_PER_DOCUMENT,
   MAX_CHARS_PER_SHEET,
@@ -52,6 +52,23 @@ async function fetchUrl(url: string): Promise<FetchResponse> {
 // Inline images below this size are likely logos or tracking pixels
 const MIN_INLINE_IMAGE_BYTES = 10 * 1024; // 10KB
 
+// Email artifact file types that get attached when forwarding — not useful to upload
+const EMAIL_ARTIFACT_EXTENSIONS = new Set([
+  ".eml", ".msg", // email messages
+  ".ics", // calendar invites
+  ".vcf", // vCards
+  ".p7s", ".p7m", // digital signatures / S/MIME
+]);
+const EMAIL_ARTIFACT_MIME_TYPES = new Set([
+  "message/rfc822", // .eml
+  "application/vnd.ms-outlook", // .msg
+  "application/ms-tnef", // winmail.dat
+  "text/calendar", "application/ics", // .ics
+  "text/vcard", "text/x-vcard", // .vcf
+  "application/pkcs7-signature", "application/x-pkcs7-signature", // .p7s
+  "application/pkcs7-mime", // .p7m
+]);
+
 /**
  * List attachment metadata from a Resend email (no downloading).
  * Includes significant inline images (>10KB) — skips small logos/tracking pixels.
@@ -94,6 +111,15 @@ async function listAttachments(
 
   const attachments: DriveAttachment[] = [];
   for (const info of attachmentsList) {
+    // Skip email artifact attachments (messages, calendar invites, vCards, signatures)
+    const ext = (info.filename || "").toLowerCase().match(/\.[^.]+$/)?.[0] || "";
+    if (
+      EMAIL_ARTIFACT_EXTENSIONS.has(ext) ||
+      EMAIL_ARTIFACT_MIME_TYPES.has(info.content_type || "")
+    ) {
+      logger.info("Skipping email artifact attachment", {filename: info.filename});
+      continue;
+    }
     // Skip inline images (email header/footer/signature images)
     if (isInlineImage(info)) {
       // If there are real file attachments, skip ALL inline images (they're email chrome)
@@ -199,4 +225,27 @@ async function streamFromUrl(url: string): Promise<Readable> {
   return Readable.fromWeb(response.body as WebReadableStream);
 }
 
-export {listAttachments, downloadAttachmentBuffer, extractContentSummary, streamFromUrl};
+/**
+ * Extract images from a document buffer as base64 data URLs for LLM vision.
+ */
+async function extractDocumentImageUrls(
+    buffer: Buffer,
+    contentType: string,
+): Promise<string[]> {
+  const docType = DOCUMENT_MIME_TYPES[contentType.toLowerCase()];
+  if (!docType) return [];
+
+  try {
+    return await extractDocumentImages(buffer, docType);
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : String(error);
+    logger.warn("Failed to extract document images", {
+      contentType,
+      error: errorMessage,
+    });
+    return [];
+  }
+}
+
+export {listAttachments, downloadAttachmentBuffer, extractContentSummary, extractDocumentImageUrls, streamFromUrl};
